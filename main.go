@@ -9,15 +9,20 @@ import (
 	"time"
 	"net/http"
 	"sync"
+	//"github.com/spf13/cobra/cobra/cmd"
 )
 
-func sendPing(endpoint str, group *sync.WaitGroup) {
+func sendPing(endpoint string, uniqueIdentifier string, verbose bool, group *sync.WaitGroup) {
+	if verbose {
+		fmt.Printf("Sending %s ping", endpoint)
+	}
+
 	Client := &http.Client{
 		Timeout: time.Second * 3,
 	}
 
 	for i:=1; i<=5; i++  {
-		_, err = Client.Get( fmt.Sprintf("https://cronitor.link/%s/%s?try=%d", c.Args().Get(0), endpoint, i))
+		_, err := Client.Get( fmt.Sprintf("https://cronitor.link/%s/%s?try=%d", uniqueIdentifier, endpoint, i))
 		if err == nil {
 			break
 		}
@@ -46,36 +51,32 @@ func main() {
 		cli.BoolTFlag{
 			Name:        "verbose",
 			Usage:       "Verbose output",
-			Destination: &verbose,
 		},
 	}
-	app.Action = func(c *cli.Context) error {
 
+	app.Action = func(c *cli.Context) error {
 		var wg sync.WaitGroup
+		wg.Add(1)
 
 		if verbose {
-			fmt.Println("Sending run ping")
+			fmt.Println("is verbose")
+		} else {
+			fmt.Println("is verbose")
 		}
 
-		wg.Add(1)
-		go sendPing("run", &wg)
+		go sendPing("run", c.Args().Get(0), verbose, &wg)
 
-		cmd := exec.Command("sh", "-c", c.Args().Get(1))
-		err := cmd.Run()
-		if err == nil {
-			if verbose {
-				fmt.Println("Sending complete ping")
+		if len(c.Args()) > 1 {
+			cmd := exec.Command("sh", "-c", c.Args().Get(1))
+			err := cmd.Run()
+			if err == nil {
+				wg.Add(1)
+				go sendPing("complete", c.Args().Get(0), verbose, &wg)
+			} else {
+				fmt.Println(err)
+				wg.Add(1)
+				go sendPing("fail", c.Args().Get(0), verbose, &wg)
 			}
-			wg.Add(1)
-			go sendPing("complete", &wg)
-
-		} else {
-			fmt.Println(err)
-			if verbose {
-				fmt.Println("Sending fail ping")
-			}
-			wg.Add(1)
-			go sendPing("fail", &wg)
 		}
 
 		wg.Wait()
@@ -84,3 +85,27 @@ func main() {
 
 	app.Run(os.Args)
 }
+
+
+$ cronitor ping {unique code} [--start|--complete|--fail]
+
+$ cronitor exec {unique code} {command}
+
+$ cronitor config {API KEY}
+ 	- API Key
+
+$ cronitor discover [crontab] [--rewrite] [--exclude-from-name] [--grace-seconds]
+	- Only on linux
+	- Read crontab, split using same ruby logic
+	- Build internal struct
+		- For each line, create a unique key
+			- Combine the hostname of the machine plus a hash of the current line
+			- Build name by stripping common things like `2&> /dev/null` and strip other strings supplied
+			- No notifications or other settings
+			- Create auto-tag for the hostname ?
+
+	- Use put endpoint
+	- Result from PUT and re-build the crontab lines
+	- If rewrite flag is set, write the crontab and say "sucessful". Otherwise write to stdout
+
+
