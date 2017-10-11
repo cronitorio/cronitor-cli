@@ -1,17 +1,3 @@
-// Copyright © 2017 NAME HERE <EMAIL ADDRESS>
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package cmd
 
 import (
@@ -26,9 +12,10 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"errors"
 )
 
-type ParsedLine struct {
+type Line struct {
 	Name  string
 	FullLine string
 	CronExpression string
@@ -37,7 +24,9 @@ type ParsedLine struct {
 
 type Rule struct {
 	RuleType string `json:"rule_type"`
-	Value string	`json:"value"`
+	Value string `json:"value"`
+	TimeUnit string `json:"time_unit,omitempty"`
+	GraceSeconds uint `json:"grace_seconds,omitempty"`
 }
 
 type Monitor struct {
@@ -47,13 +36,6 @@ type Monitor struct {
 	Tags []string `json:"tags"`
 }
 
-
-
-func check(e error) {
-	if e != nil {
-			panic(e)
-	}
-}
 
 // discoverCmd represents the discover command
 var discoverCmd = &cobra.Command{
@@ -74,38 +56,54 @@ to quickly create a Cobra application.`,
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		cronPath := "/etc/crontab"
-		if len(args[0]) > 0 {
+		if len(args) > 0 {
 			cronPath = args[0]
 		}
 		if runtime.GOOS == "windows" {
-			// TODO bail out here
+			panic(errors.New("sorry, job discovery is not available on Windows"))
 		}
-		dat, err := ioutil.ReadFile(cronPath)
-		check(err)
-		lines := strings.Split(string(dat), "\n")
 
-		// parse each line
-		var parsedLines []ParsedLine
+		bytes, err := ioutil.ReadFile(cronPath)
+		if err != nil {
+			panic(err)
+		}
+		lines := strings.Split(string(bytes), "\n")
+
+		var parsedLines []Line
 		for _, line := range lines {
-			// # Skip the current line if it's a comment, empty, or MAILTO
+			var cronExpression, command string
+
+			// Skip the current line if it's a comment
 			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "#") || strings.HasPrefix(line, "MAILTO") || line == "" {
+			if strings.HasPrefix(line, "#") {
+				// todo verbose message this
 				continue
 			}
 
-			// # Split line by whitespace
+			// Split line by whitespace
 			splitLine := strings.Fields(line)
-			cronExpression := strings.Join(splitLine[0:5], " ")
-			command := strings.Join(splitLine[5:], " ")
-			fmt.Println(cronExpression, command)
-			
-			// # If we have an @ cron expression - eg @hourly, cronitor doesn't support those, so skip this line
-			if strings.HasPrefix(cronExpression, "@") {
-				fmt.Println("Non standard '@' format cron expression detected, cannot create cronitor job. Skpping...")
+
+			// Parse the line, handling schedules like @daily and standard cron expression
+			if len(splitLine) ==  0 {
+				// todo verbose message this -- empty line
+				continue
+			} else if strings.HasPrefix(splitLine[0], "@reboot") {
+				// todo verbose message -- @reboot aren't scheduled monitors
+				continue
+			} else if strings.HasPrefix(splitLine[0], "@") {
+				cronExpression = splitLine[0]
+				command = strings.Join(splitLine[1:], " ")
+			} else if len(splitLine) >= 6 {
+				cronExpression = strings.Join(splitLine[0:5], " ")
+				command = strings.Join(splitLine[5:], " ")
+			} else {
+				// todo verbose message this -- could be an environment variable or anything else
 				continue
 			}
-			
-			monitor := ParsedLine{}
+
+			fmt.Println(cronExpression, command)
+
+			monitor := Line{}
 			monitor.CronExpression = cronExpression
 			monitor.CommandToRun = command
 			monitor.FullLine = line
@@ -114,11 +112,11 @@ to quickly create a Cobra application.`,
 
 		// construct JSON payload
 		var monitors []Monitor
-		for _, pline := range parsedLines {
-			var rules []Rule
-			rule := Rule{"not_on_schedule", pline.CronExpression}
-			rules = append(rules, rule)
-			monitor := Monitor{pline.Name, "some_key", rules, []string{"tags", "are", "cool"}}
+		for _, line := range parsedLines {
+			rules := []Rule{createRule(line.CronExpression)}
+			name := createName(line.CommandToRun)
+			key := createKey(line.CommandToRun, line.CronExpression)
+			monitor := Monitor{name, key, rules, []string{"tags", "are", "cool"}}
 			monitors = append(monitors, monitor)			
 		}
 
@@ -126,6 +124,33 @@ to quickly create a Cobra application.`,
 		fmt.Println(string(b))
 					  
 	},
+}
+
+func createName(CommandToRun string) string {
+	return CommandToRun
+}
+
+func createKey(CommandToRun string, CronExpression string) string {
+	return "keykey"
+}
+
+func createRule(cronExpression string) Rule {
+	var rule Rule
+	if strings.HasPrefix(cronExpression, "@yearly") {
+		rule = Rule{"complete_ping_not_received", "365", "days", 86400}
+	} else if strings.HasPrefix(cronExpression, "@monthly") {
+		rule =  Rule{"complete_ping_not_received", "31", "days", 86400}
+	} else if strings.HasPrefix(cronExpression, "@weekly") {
+		rule =  Rule{"complete_ping_not_received", "7", "days", 86400}
+	} else if strings.HasPrefix(cronExpression, "@daily") {
+		rule =  Rule{"complete_ping_not_received", "24", "hours", 3600}
+	} else if strings.HasPrefix(cronExpression, "@hourly") {
+		rule =  Rule{"complete_ping_not_received", "1", "hours", 600}
+	} else {
+		rule =  Rule{"not_on_schedule", cronExpression, "", 0}
+	}
+
+	return rule
 }
 
 func init() {

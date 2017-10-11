@@ -14,7 +14,7 @@
 
 package main
 
-import "./cmd"
+import "cronitor/cmd"
 
 func main() {
 	cmd.Execute()
