@@ -4,23 +4,22 @@ import (
 	"runtime"
 	"fmt"
 	"encoding/json"
-	// "errors"
-	// "os/exec"
-	// "sync"
-	// "io"
 	"io/ioutil"
 	"strings"
-
 	"github.com/spf13/cobra"
 	"errors"
 )
 
 type Line struct {
-	Name  string
-	FullLine string
+	Name           string
+	FullLine       string
+	LineNumber     int
 	CronExpression string
-	CommandToRun string
+	CommandToRun   string
+	Code           string
+	IsMonitorable  bool
 }
+
 
 type Rule struct {
 	RuleType string `json:"rule_type"`
@@ -37,16 +36,10 @@ type Monitor struct {
 }
 
 
-// discoverCmd represents the discover command
 var discoverCmd = &cobra.Command{
 	Use:   "discover",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short: "Automatically find cron jobs and attach Cronitor monitoring",
+	Long: ``,
 	Args: func(cmd *cobra.Command, args []string) error {
 		// if len(args) < 2 {
 		// 	return errors.New("A unique monitor code and cli command are required")
@@ -55,75 +48,129 @@ to quickly create a Cobra application.`,
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		cronPath := "/etc/crontab"
-		if len(args) > 0 {
-			cronPath = args[0]
-		}
 		if runtime.GOOS == "windows" {
 			panic(errors.New("sorry, job discovery is not available on Windows"))
 		}
 
-		bytes, err := ioutil.ReadFile(cronPath)
-		if err != nil {
-			panic(err)
+		cronPath := "/etc/crontab"
+		if len(args) > 0 {
+			cronPath = args[0]
 		}
-		lines := strings.Split(string(bytes), "\n")
-
-		var parsedLines []Line
-		for _, line := range lines {
-			var cronExpression, command string
-
-			// Skip the current line if it's a comment
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "#") {
-				// todo verbose message this
-				continue
-			}
-
-			// Split line by whitespace
-			splitLine := strings.Fields(line)
-
-			// Parse the line, handling schedules like @daily and standard cron expression
-			if len(splitLine) ==  0 {
-				// todo verbose message this -- empty line
-				continue
-			} else if strings.HasPrefix(splitLine[0], "@reboot") {
-				// todo verbose message -- @reboot aren't scheduled monitors
-				continue
-			} else if strings.HasPrefix(splitLine[0], "@") {
-				cronExpression = splitLine[0]
-				command = strings.Join(splitLine[1:], " ")
-			} else if len(splitLine) >= 6 {
-				cronExpression = strings.Join(splitLine[0:5], " ")
-				command = strings.Join(splitLine[5:], " ")
-			} else {
-				// todo verbose message this -- could be an environment variable or anything else
-				continue
-			}
-
-			fmt.Println(cronExpression, command)
-
-			monitor := Line{}
-			monitor.CronExpression = cronExpression
-			monitor.CommandToRun = command
-			monitor.FullLine = line
-			parsedLines = append(parsedLines, monitor)
-		}
+		crontabLines := parseCrontabFile(cronPath)
 
 		// construct JSON payload
 		var monitors []Monitor
-		for _, line := range parsedLines {
+		for _, line := range crontabLines {
+			if !line.isMonitorable {
+				continue
+			}
+
 			rules := []Rule{createRule(line.CronExpression)}
 			name := createName(line.CommandToRun)
 			key := createKey(line.CommandToRun, line.CronExpression)
-			monitor := Monitor{name, key, rules, []string{"tags", "are", "cool"}}
-			monitors = append(monitors, monitor)			
+			monitors = append(monitors, Monitor{name, key, rules, []string{"tags", "are", "cool"}})
 		}
 
-		b, _ := json.Marshal(monitors)
-		fmt.Println(string(b))
-					  
+		monitors = putMonitors(monitors)
+
+		// Re-write crontab lines with new/updated monitoring
+		var crontabOutput []string
+		for idx, line := range crontabLines {
+			crontabOutput[idx] = createCrontabLine(line)
+		}
+
+		crontabFile := strings.Join(crontabOutput, "\n")
+		
+		// Compose internal state back into a crontab file, adding/updating Cronitor wrapping
+		fmt.Print(crontabFile)
 	},
+}
+
+func putMonitors(monitors []Monitor) []Monitor {
+	bytes, _ := json.Marshal(monitors)
+	return monitors
+}
+
+func createCrontabLine(line Line) string {
+	if !line.IsMonitorable {
+		return line.FullLine
+	}
+
+	var lineParts []string
+	lineParts = append(lineParts, line.CronExpression)
+
+	if len(line.Code) > 0 {
+		lineParts = append(lineParts, "cronitor exec")
+		lineParts = append(lineParts, line.Code)
+	}
+
+	if len(line.CommandToRun) > 0 {
+		lineParts = append(lineParts, line.CommandToRun)
+	}
+
+	return strings.Join(lineParts, " ")
+}
+
+func parseCrontabFile(cronPath string) []Line {
+	bytes, err := ioutil.ReadFile(cronPath)
+	if err != nil {
+		panic(err)
+	}
+	lines := strings.Split(string(bytes), "\n")
+
+	var crontabLines []Line
+	for lineNumber, line := range lines {
+		var cronExpression string
+		var command []string
+
+		// Skip the current line if it's a comment
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			// todo verbose message this
+			continue
+		}
+
+		// If a manual integration was previously done, skip
+		if strings.Contains(line, "cronitor.io") || strings.Contains(line, "cronitor.link") {
+			// todo verbose message this -- previous integration on line number lineNo
+			continue
+		}
+
+		// Split line by whitespace
+		splitLine := strings.Fields(line)
+		if strings.HasPrefix(splitLine[0], "@") {
+			if strings.HasPrefix(splitLine[0], "@reboot") {
+				// todo verbose message -- @reboot aren't scheduled jobs
+			} else {
+				cronExpression = splitLine[0]
+				command = splitLine[1:]
+			}
+		} else if len(splitLine) >= 6 {
+			cronExpression = strings.Join(splitLine[0:5], " ")
+			command = splitLine[5:]
+		}
+
+		// Create an Line struct with details for this line (even if it does not have a parsed command
+		entry := Line{}
+		entry.CronExpression = cronExpression
+		entry.FullLine = line
+		entry.LineNumber = lineNumber
+
+		// If this job is already being wrapped by the Cronitor client, read current code
+		// Expects a wrapped command to look like: cronitor exec d3x0 /path/to/cmd.sh
+		if len(command) > 0 && command[1] == "cronitor" && command[2] == "exec" {
+			entry.Code = command[3]
+			command = command[3:]
+		}
+
+		entry.CommandToRun = strings.Join(command, " ")
+		entry.IsMonitorable = len(entry.CommandToRun) > 0 && len(entry.CronExpression) > 0
+
+		fmt.Println(cronExpression, command)
+		crontabLines = append(crontabLines, entry)
+	}
+
+	return crontabLines
 }
 
 func createName(CommandToRun string) string {
