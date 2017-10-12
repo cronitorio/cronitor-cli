@@ -67,8 +67,16 @@ func sendPing(endpoint string, uniqueIdentifier string, verbose bool, group *syn
 		Timeout: time.Second * 3,
 	}
 
-	for i:=1; i<=5; i++  {
-		_, err := Client.Get( fmt.Sprintf("https://cronitor.link/%s/%s?try=%d", uniqueIdentifier, endpoint, i))
+	for i:=1; i<=6; i++  {
+		// Determine the ping API host. After a few failed attempts, try using cronitor.io instead
+		var host string
+		if i > 3 && host == "cronitor.link" {
+			host = "cronitor.io"
+		} else {
+			host = "cronitor.link"
+		}
+
+		_, err := Client.Get( fmt.Sprintf("https://%s/%s/%s?try=%d", host, uniqueIdentifier, endpoint, i))
 		if err == nil {
 			break
 		}
