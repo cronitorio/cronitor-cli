@@ -8,6 +8,9 @@ import (
 	"strings"
 	"github.com/spf13/cobra"
 	"errors"
+	"net/http"
+	"time"
+	"log"
 )
 
 type Line struct {
@@ -87,7 +90,12 @@ var discoverCmd = &cobra.Command{
 }
 
 func putMonitors(monitors []Monitor) []Monitor {
-	bytes, _ := json.Marshal(monitors)
+	response := doPut("https://cronitor.link/v3/monitors", string(json.Marshal(monitors)))
+	var responseMonitors []Monitor
+	json.Unmarshal(response, &responseMonitors)
+
+	// todo, make monitors a map so we can iterate response and update the map easily
+
 	return monitors
 }
 
@@ -198,6 +206,25 @@ func createRule(cronExpression string) Rule {
 	}
 
 	return rule
+}
+
+func doPut(url string, body string) []byte {
+	client := &http.Client{}
+	request, err := http.NewRequest("PUT", url, strings.NewReader(body))
+	request.ContentLength = int64(len(body))
+	response, err := client.Do(request)
+	if err != nil {
+		log.Fatal(err)
+		return make([]byte, 0)
+	}
+
+	defer response.Body.Close()
+	contents, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return contents
 }
 
 func init() {

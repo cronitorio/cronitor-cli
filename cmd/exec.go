@@ -70,7 +70,7 @@ func sendPing(endpoint string, uniqueIdentifier string, verbose bool, group *syn
 	for i:=1; i<=6; i++  {
 		// Determine the ping API host. After a few failed attempts, try using cronitor.io instead
 		var host string
-		if i > 3 && host == "cronitor.link" {
+		if i > 2 && host == "cronitor.link" {
 			host = "cronitor.io"
 		} else {
 			host = "cronitor.link"
