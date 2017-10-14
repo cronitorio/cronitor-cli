@@ -13,17 +13,6 @@ import (
 	"log"
 )
 
-type Line struct {
-	Name           string
-	FullLine       string
-	LineNumber     int
-	CronExpression string
-	CommandToRun   string
-	Code           string
-	IsMonitorable  bool
-}
-
-
 type Rule struct {
 	RuleType string `json:"rule_type"`
 	Value string `json:"value"`
@@ -36,7 +25,22 @@ type Monitor struct {
 	Key string `json:"key"`
 	Rules []Rule `json:"rules"`
 	Tags []string `json:"tags"`
+	Code string
 }
+
+type Line struct {
+	Name           string
+	FullLine       string
+	LineNumber     int
+	CronExpression string
+	CommandToRun   string
+	Code           string
+	IsMonitorable  bool
+	Mon				Monitor
+}
+
+
+
 
 
 var discoverCmd = &cobra.Command{
@@ -62,7 +66,7 @@ var discoverCmd = &cobra.Command{
 		crontabLines := parseCrontabFile(cronPath)
 
 		// construct JSON payload
-		var monitors []Monitor
+		var monitors map[string]*Monitor
 		for _, line := range crontabLines {
 			if !line.isMonitorable {
 				continue
@@ -71,7 +75,9 @@ var discoverCmd = &cobra.Command{
 			rules := []Rule{createRule(line.CronExpression)}
 			name := createName(line.CommandToRun)
 			key := createKey(line.CommandToRun, line.CronExpression)
-			monitors = append(monitors, Monitor{name, key, rules, []string{"tags", "are", "cool"}})
+
+			line.Mon = Monitor{name, key, rules, []string{"tags", "are", "cool"}, line.Code}
+			monitors[key] = &line.Mon
 		}
 
 		monitors = putMonitors(monitors)
@@ -89,27 +95,35 @@ var discoverCmd = &cobra.Command{
 	},
 }
 
-func putMonitors(monitors []Monitor) []Monitor {
-	response := doPut("https://cronitor.link/v3/monitors", string(json.Marshal(monitors)))
-	var responseMonitors []Monitor
-	json.Unmarshal(response, &responseMonitors)
+func putMonitors(monitors map[string]*Monitor) map[string]*Monitor {
+	var monitorsArray []*Monitor
+	for _, value := range monitors {
+		monitorsArray = append(monitorsArray, value)
+	}
 
-	// todo, make monitors a map so we can iterate response and update the map easily
+	response := doPut("https://cronitor.link/v3/monitors", string(json.Marshal(monitorsArray)))
+	var responseMonitors []Monitor
+
+	json.Unmarshal(response, &responseMonitors)
+	for _, value := range responseMonitors {
+		monitors[value.Key].Code = value.Code
+	}
 
 	return monitors
 }
 
 func createCrontabLine(line Line) string {
-	if !line.IsMonitorable {
+	if !line.IsMonitorable || len(line.Code) > 0 {
+		// If a cronitor integration already existed on the line we have nothing else here to change
 		return line.FullLine
 	}
 
 	var lineParts []string
 	lineParts = append(lineParts, line.CronExpression)
 
-	if len(line.Code) > 0 {
+	if len(line.Mon.Key) > 0 {
 		lineParts = append(lineParts, "cronitor exec")
-		lineParts = append(lineParts, line.Code)
+		lineParts = append(lineParts, line.Mon.Code)
 	}
 
 	if len(line.CommandToRun) > 0 {
