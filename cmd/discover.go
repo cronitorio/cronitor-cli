@@ -22,7 +22,7 @@ type Rule struct {
 }
 
 type Monitor struct {
-	Name  string   `json:"name"`
+	Name  string   `json:"defaultName"`
 	Key   string   `json:"key"`
 	Rules []Rule   `json:"rules"`
 	Tags  []string `json:"tags"`
@@ -46,23 +46,25 @@ func (l Line) IsMonitorable() bool {
 }
 
 var excludeFromName []string
+var saveCrontabFile bool
 
 var discoverCmd = &cobra.Command{
 	Use:   "discover",
 	Short: "Automatically find cron jobs and attach Cronitor monitoring",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		if runtime.GOOS == "windows" {
-			panic(errors.New("sorry, cron job discovery is not available on Windows"))
+		if len(args) == 0 && runtime.GOOS == "windows" {
+			panic(errors.New("A crontab file must be provided"))
 		}
 
-		cronPath := "/etc/crontab"
+		crontabPath := "/etc/crontab"
 		if len(args) > 0 {
-			cronPath = args[0]
+			crontabPath = args[0]
 		}
-		crontabLines := parseCrontabFile(cronPath)
 
-		// construct JSON payload
+		crontabLines := parseCrontab(readCrontab(crontabPath))
+
+		// Read crontabLines into map of Monitor structs
 		monitors := map[string]*Monitor{}
 		for _, line := range crontabLines {
 			if !line.IsMonitorable() {
@@ -85,6 +87,7 @@ var discoverCmd = &cobra.Command{
 			monitors[key] = &line.Mon
 		}
 
+		// Put monitors to Cronitor API
 		monitors = putMonitors(monitors)
 
 		// Re-write crontab lines with new/updated monitoring
@@ -93,11 +96,34 @@ var discoverCmd = &cobra.Command{
 			crontabOutput = append(crontabOutput, createCrontabLine(line))
 		}
 
-		crontabFile := strings.Join(crontabOutput, "\n")
+		updatedCrontabLines := strings.Join(crontabOutput, "\n")
 
-		// Compose internal state back into a crontab file, adding/updating Cronitor wrapping
-		fmt.Print(crontabFile)
+		if saveCrontabFile {
+			if ioutil.WriteFile(crontabPath, []byte(updatedCrontabLines), 0644) != nil {
+				panic(errors.New(fmt.Sprintf("the --save option is supplied but the file at %s could not be written; check permissions and try again", crontabPath)))
+			}
+
+			fmt.Println(fmt.Sprintf("Crontab %s updated", crontabPath))
+		} else {
+			fmt.Println(updatedCrontabLines)
+		}
 	},
+}
+
+func readCrontab(crontabPath string) []string {
+	crontabBytes, err := ioutil.ReadFile(crontabPath)
+	if err != nil {
+		panic(errors.New(fmt.Sprintf("the crontab file at %s could not be read", crontabPath)))
+	}
+
+	// When the save flag is passed, attempt to write the file back to itself to ensure we have proper permissions before going further
+	if saveCrontabFile {
+		if ioutil.WriteFile(crontabPath, crontabBytes, 0644) != nil {
+			panic(errors.New(fmt.Sprintf("the --save option is supplied but the file at %s could not be written; check permissions and try again", crontabPath)))
+		}
+	}
+
+	return strings.Split(string(crontabBytes), "\n")
 }
 
 func putMonitors(monitors map[string]*Monitor) map[string]*Monitor {
@@ -107,7 +133,7 @@ func putMonitors(monitors map[string]*Monitor) map[string]*Monitor {
 	}
 
 	b, _ := json.Marshal(monitorsArray)
-	response := sendHttpPut("https://cronitor.io/v3/monitors", string(b))
+	response := sendHttpPut("http://dev.cronitor.io/v3/monitors", string(b))
 	var responseMonitors []Monitor
 
 	json.Unmarshal(response, &responseMonitors)
@@ -139,13 +165,7 @@ func createCrontabLine(line *Line) string {
 	return strings.Join(lineParts, " ")
 }
 
-func parseCrontabFile(cronPath string) []*Line {
-	bytes, err := ioutil.ReadFile(cronPath)
-	if err != nil {
-		panic(err)
-	}
-	lines := strings.Split(string(bytes), "\n")
-
+func parseCrontab(lines []string) []*Line {
 	var crontabLines []*Line
 	for lineNumber, line := range lines {
 		var cronExpression string
@@ -178,9 +198,9 @@ func parseCrontabFile(cronPath string) []*Line {
 
 		// If this job is already being wrapped by the Cronitor client, read current code
 		// Expects a wrapped command to look like: cronitor exec d3x0 /path/to/cmd.sh
-		if len(command) > 0 && command[1] == "cronitor" && command[2] == "exec" {
-			entry.Code = command[3]
-			command = command[3:]
+		if len(command) > 0 && command[0] == "cronitor" && command[1] == "exec" {
+			entry.Code = command[2]
+			command = command[2:]
 		}
 
 		entry.CommandToRun = strings.Join(command, " ")
@@ -191,7 +211,7 @@ func parseCrontabFile(cronPath string) []*Line {
 }
 
 func createName(CommandToRun string) string {
-	excludeFromName = append(excludeFromName, "/dev/null")
+	excludeFromName = append(excludeFromName, "> /dev/null")
 	excludeFromName = append(excludeFromName, "2>&1")
 	excludeFromName = append(excludeFromName, "/bin/bash -l -c")
 	excludeFromName = append(excludeFromName, "/bin/bash -lc")
@@ -208,8 +228,8 @@ func createName(CommandToRun string) string {
 	}
 
 	CommandToRun = strings.TrimSpace(CommandToRun[:maxLength])
-	CommandToRun = strings.Trim(CommandToRun, "'\"")
-	return CommandToRun
+	CommandToRun = strings.Trim(CommandToRun, ">'\"")
+	return strings.TrimSpace(CommandToRun)
 }
 
 func createKey(CommandToRun string, CronExpression string) string {
@@ -224,6 +244,7 @@ func createTags() []string {
 	if len(hostname) > 0 {
 		tags = append(tags, hostname)
 	}
+	tags = append(tags, "cron-job")
 	return tags
 }
 
@@ -250,7 +271,7 @@ func createRule(cronExpression string) Rule {
 func sendHttpPut(url string, body string) []byte {
 	client := &http.Client{}
 	request, err := http.NewRequest("PUT", url, strings.NewReader(body))
-	request.SetBasicAuth("53b6c114717140cf896899060bcc9d7e", "") // @todo api key from settings
+	request.SetBasicAuth("2055cbee0c0b463787ae0f2a15ac6579", "") // @todo api key from settings
 	request.Header.Add("Content-Type", "application/json")
 	request.Header.Add("User-Agent", "Cronitor Agent") // @todo get version here
 	request.ContentLength = int64(len(body))
@@ -273,6 +294,6 @@ func sendHttpPut(url string, body string) []byte {
 
 func init() {
 	RootCmd.AddCommand(discoverCmd)
-
+	discoverCmd.Flags().BoolVar(&saveCrontabFile,"save", saveCrontabFile, "Save the updated crontab with Cronitor integration")
 	discoverCmd.Flags().StringArrayVarP(&excludeFromName,"exclude-from-name", "e", excludeFromName, "List of paths and common text to exclude from auto-generated monitor name")
 }
