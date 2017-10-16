@@ -9,23 +9,25 @@ import (
 	"github.com/spf13/cobra"
 	"errors"
 	"net/http"
-	"time"
 	"log"
+	"crypto/sha1"
+	"os"
 )
 
 type Rule struct {
-	RuleType string `json:"rule_type"`
-	Value string `json:"value"`
-	TimeUnit string `json:"time_unit,omitempty"`
-	GraceSeconds uint `json:"grace_seconds,omitempty"`
+	RuleType     string `json:"rule_type"`
+	Value        string `json:"value"`
+	TimeUnit     string `json:"time_unit,omitempty"`
+	GraceSeconds uint   `json:"grace_seconds,omitempty"`
 }
 
 type Monitor struct {
-	Name string `json:"name"`
-	Key string `json:"key"`
-	Rules []Rule `json:"rules"`
-	Tags []string `json:"tags"`
-	Code string
+	Name  string   `json:"name"`
+	Key   string   `json:"key"`
+	Rules []Rule   `json:"rules"`
+	Tags  []string `json:"tags"`
+	Type  string   `json:"type"`
+	Code  string
 }
 
 type Line struct {
@@ -35,28 +37,23 @@ type Line struct {
 	CronExpression string
 	CommandToRun   string
 	Code           string
-	IsMonitorable  bool
-	Mon				Monitor
+	Mon            Monitor
 }
 
+func (l Line) IsMonitorable() bool {
+	containsLegacyIntegration := strings.Contains(l.CommandToRun, "cronitor.io") || strings.Contains(l.CommandToRun, "cronitor.link")
+	return len(l.CronExpression) > 0 && len(l.CommandToRun) > 0 && !containsLegacyIntegration
+}
 
-
-
+var excludeFromName []string
 
 var discoverCmd = &cobra.Command{
 	Use:   "discover",
 	Short: "Automatically find cron jobs and attach Cronitor monitoring",
-	Long: ``,
-	Args: func(cmd *cobra.Command, args []string) error {
-		// if len(args) < 2 {
-		// 	return errors.New("A unique monitor code and cli command are required")
-		// }
-
-		return nil
-	},
+	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 		if runtime.GOOS == "windows" {
-			panic(errors.New("sorry, job discovery is not available on Windows"))
+			panic(errors.New("sorry, cron job discovery is not available on Windows"))
 		}
 
 		cronPath := "/etc/crontab"
@@ -66,17 +63,25 @@ var discoverCmd = &cobra.Command{
 		crontabLines := parseCrontabFile(cronPath)
 
 		// construct JSON payload
-		var monitors map[string]*Monitor
+		monitors := map[string]*Monitor{}
 		for _, line := range crontabLines {
-			if !line.isMonitorable {
+			if !line.IsMonitorable() {
 				continue
 			}
 
 			rules := []Rule{createRule(line.CronExpression)}
 			name := createName(line.CommandToRun)
 			key := createKey(line.CommandToRun, line.CronExpression)
+			tags := createTags()
 
-			line.Mon = Monitor{name, key, rules, []string{"tags", "are", "cool"}, line.Code}
+			line.Mon = Monitor{
+				name,
+				key,
+				rules,
+				tags,
+				"heartbeat",
+				line.Code,
+			}
 			monitors[key] = &line.Mon
 		}
 
@@ -84,24 +89,25 @@ var discoverCmd = &cobra.Command{
 
 		// Re-write crontab lines with new/updated monitoring
 		var crontabOutput []string
-		for idx, line := range crontabLines {
-			crontabOutput[idx] = createCrontabLine(line)
+		for _, line := range crontabLines {
+			crontabOutput = append(crontabOutput, createCrontabLine(line))
 		}
 
 		crontabFile := strings.Join(crontabOutput, "\n")
-		
+
 		// Compose internal state back into a crontab file, adding/updating Cronitor wrapping
 		fmt.Print(crontabFile)
 	},
 }
 
 func putMonitors(monitors map[string]*Monitor) map[string]*Monitor {
-	var monitorsArray []*Monitor
-	for _, value := range monitors {
-		monitorsArray = append(monitorsArray, value)
+	monitorsArray := make([]Monitor, 0, len(monitors))
+	for _, v := range monitors {
+		monitorsArray = append(monitorsArray, *v)
 	}
 
-	response := doPut("https://cronitor.link/v3/monitors", string(json.Marshal(monitorsArray)))
+	b, _ := json.Marshal(monitorsArray)
+	response := sendHttpPut("https://cronitor.io/v3/monitors", string(b))
 	var responseMonitors []Monitor
 
 	json.Unmarshal(response, &responseMonitors)
@@ -112,8 +118,8 @@ func putMonitors(monitors map[string]*Monitor) map[string]*Monitor {
 	return monitors
 }
 
-func createCrontabLine(line Line) string {
-	if !line.IsMonitorable || len(line.Code) > 0 {
+func createCrontabLine(line *Line) string {
+	if !line.IsMonitorable() || len(line.Code) > 0 {
 		// If a cronitor integration already existed on the line we have nothing else here to change
 		return line.FullLine
 	}
@@ -133,43 +139,35 @@ func createCrontabLine(line Line) string {
 	return strings.Join(lineParts, " ")
 }
 
-func parseCrontabFile(cronPath string) []Line {
+func parseCrontabFile(cronPath string) []*Line {
 	bytes, err := ioutil.ReadFile(cronPath)
 	if err != nil {
 		panic(err)
 	}
 	lines := strings.Split(string(bytes), "\n")
 
-	var crontabLines []Line
+	var crontabLines []*Line
 	for lineNumber, line := range lines {
 		var cronExpression string
 		var command []string
 
-		// Skip the current line if it's a comment
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "#") {
-			// todo verbose message this
-			continue
-		}
 
-		// If a manual integration was previously done, skip
-		if strings.Contains(line, "cronitor.io") || strings.Contains(line, "cronitor.link") {
-			// todo verbose message this -- previous integration on line number lineNo
-			continue
-		}
-
-		// Split line by whitespace
-		splitLine := strings.Fields(line)
-		if strings.HasPrefix(splitLine[0], "@") {
-			if strings.HasPrefix(splitLine[0], "@reboot") {
-				// todo verbose message -- @reboot aren't scheduled jobs
-			} else {
-				cronExpression = splitLine[0]
-				command = splitLine[1:]
+		// Do not attempt to parse the current line if it's a comment
+		// Otherwise split on any whitespace and parse
+		if !strings.HasPrefix(line, "#") {
+			splitLine := strings.Fields(line)
+			if len(splitLine) > 0 && strings.HasPrefix(splitLine[0], "@") {
+				if strings.HasPrefix(splitLine[0], "@reboot") {
+					// @todo verbose message -- @reboot aren't scheduled jobs
+				} else {
+					cronExpression = splitLine[0]
+					command = splitLine[1:]
+				}
+			} else if len(splitLine) >= 6 {
+				cronExpression = strings.Join(splitLine[0:5], " ")
+				command = splitLine[5:]
 			}
-		} else if len(splitLine) >= 6 {
-			cronExpression = strings.Join(splitLine[0:5], " ")
-			command = splitLine[5:]
 		}
 
 		// Create an Line struct with details for this line (even if it does not have a parsed command
@@ -186,21 +184,47 @@ func parseCrontabFile(cronPath string) []Line {
 		}
 
 		entry.CommandToRun = strings.Join(command, " ")
-		entry.IsMonitorable = len(entry.CommandToRun) > 0 && len(entry.CronExpression) > 0
 
-		fmt.Println(cronExpression, command)
-		crontabLines = append(crontabLines, entry)
+		crontabLines = append(crontabLines, &entry)
 	}
-
 	return crontabLines
 }
 
 func createName(CommandToRun string) string {
+	excludeFromName = append(excludeFromName, "/dev/null")
+	excludeFromName = append(excludeFromName, "2>&1")
+	excludeFromName = append(excludeFromName, "/bin/bash -l -c")
+	excludeFromName = append(excludeFromName, "/bin/bash -lc")
+	excludeFromName = append(excludeFromName, "/bin/bash -c -l")
+	excludeFromName = append(excludeFromName, "/bin/bash -cl")
+
+	for _, substr := range excludeFromName {
+		CommandToRun = strings.Replace(CommandToRun, substr, "", -1)
+	}
+
+	maxLength := 100
+	if len(CommandToRun) < 100 {
+		maxLength = len(CommandToRun)
+	}
+
+	CommandToRun = strings.TrimSpace(CommandToRun[:maxLength])
+	CommandToRun = strings.Trim(CommandToRun, "'\"")
 	return CommandToRun
 }
 
 func createKey(CommandToRun string, CronExpression string) string {
-	return "keykey"
+	hostname, _ := os.Hostname()
+	data := []byte(fmt.Sprintf("%s-%s-%s", hostname, CommandToRun, CronExpression))
+	return fmt.Sprintf("%x", sha1.Sum(data))
+}
+
+func createTags() []string {
+	var tags []string
+	hostname, _ := os.Hostname()
+	if len(hostname) > 0 {
+		tags = append(tags, hostname)
+	}
+	return tags
 }
 
 func createRule(cronExpression string) Rule {
@@ -208,26 +232,31 @@ func createRule(cronExpression string) Rule {
 	if strings.HasPrefix(cronExpression, "@yearly") {
 		rule = Rule{"complete_ping_not_received", "365", "days", 86400}
 	} else if strings.HasPrefix(cronExpression, "@monthly") {
-		rule =  Rule{"complete_ping_not_received", "31", "days", 86400}
+		rule = Rule{"complete_ping_not_received", "31", "days", 86400}
 	} else if strings.HasPrefix(cronExpression, "@weekly") {
-		rule =  Rule{"complete_ping_not_received", "7", "days", 86400}
+		rule = Rule{"complete_ping_not_received", "7", "days", 86400}
 	} else if strings.HasPrefix(cronExpression, "@daily") {
-		rule =  Rule{"complete_ping_not_received", "24", "hours", 3600}
+		rule = Rule{"complete_ping_not_received", "24", "hours", 3600}
 	} else if strings.HasPrefix(cronExpression, "@hourly") {
-		rule =  Rule{"complete_ping_not_received", "1", "hours", 600}
+		rule = Rule{"complete_ping_not_received", "1", "hours", 600}
 	} else {
-		rule =  Rule{"not_on_schedule", cronExpression, "", 0}
+		// @todo GraceSeconds should be json null not 0....
+		rule = Rule{"not_on_schedule", cronExpression, "", 0}
 	}
 
 	return rule
 }
 
-func doPut(url string, body string) []byte {
+func sendHttpPut(url string, body string) []byte {
 	client := &http.Client{}
 	request, err := http.NewRequest("PUT", url, strings.NewReader(body))
+	request.SetBasicAuth("53b6c114717140cf896899060bcc9d7e", "") // @todo api key from settings
+	request.Header.Add("Content-Type", "application/json")
+	request.Header.Add("User-Agent", "Cronitor Agent") // @todo get version here
 	request.ContentLength = int64(len(body))
 	response, err := client.Do(request)
 	if err != nil {
+		fmt.Println(err)
 		log.Fatal(err)
 		return make([]byte, 0)
 	}
@@ -235,6 +264,7 @@ func doPut(url string, body string) []byte {
 	defer response.Body.Close()
 	contents, err := ioutil.ReadAll(response.Body)
 	if err != nil {
+		fmt.Println(err)
 		log.Fatal(err)
 	}
 
@@ -244,13 +274,5 @@ func doPut(url string, body string) []byte {
 func init() {
 	RootCmd.AddCommand(discoverCmd)
 
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// discoverCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// discoverCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	discoverCmd.Flags().StringArrayVarP(&excludeFromName,"exclude-from-name", "e", excludeFromName, "List of paths and common text to exclude from auto-generated monitor name")
 }
