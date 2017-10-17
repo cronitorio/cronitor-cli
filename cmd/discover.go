@@ -13,6 +13,7 @@ import (
 	"crypto/sha1"
 	"os"
 	"github.com/spf13/viper"
+	"regexp"
 )
 
 type Rule struct {
@@ -52,7 +53,7 @@ var saveCrontabFile bool
 
 var discoverCmd = &cobra.Command{
 	Use:   "discover [crontab]",
-	Short: "Find cron jobs and attach Cronitor monitoring. When no crontab argument is provided /etc/crontab is used where available.",
+	Short: "Identify new cron jobs and attach Cronitor monitoring. When no crontab argument is provided /etc/crontab is used where available.",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 && runtime.GOOS == "windows" {
@@ -165,7 +166,7 @@ func createCrontabLine(line *Line) string {
 	var lineParts []string
 	lineParts = append(lineParts, line.CronExpression)
 
-	if len(line.Mon.Key) > 0 {
+	if len(line.Mon.Code) > 0 {
 		lineParts = append(lineParts, "cronitor exec")
 		lineParts = append(lineParts, line.Mon.Code)
 	}
@@ -193,8 +194,16 @@ func parseCrontab(lines []string) []*Line {
 				cronExpression = splitLine[0]
 				command = splitLine[1:]
 			} else if len(splitLine) >= 6 {
-				cronExpression = strings.Join(splitLine[0:5], " ")
-				command = splitLine[5:]
+				// Handle javacron-style 6 item cron expressions
+				// If there are at least 7 items, and the 6th looks like a cron expression, assume it is one
+				match, _ := regexp.MatchString("[-,?*/0-9]", splitLine[5])
+				if match && len(splitLine) >= 7 {
+					cronExpression = strings.Join(splitLine[0:6], " ")
+					command = splitLine[6:]
+				} else {
+					cronExpression = strings.Join(splitLine[0:5], " ")
+					command = splitLine[5:]
+				}
 			}
 		}
 
