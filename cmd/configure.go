@@ -19,7 +19,6 @@ import (
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"io/ioutil"
-	"errors"
 	"github.com/spf13/viper"
 	"encoding/json"
 	"os"

@@ -4,8 +4,6 @@ import (
 	"github.com/spf13/cobra"
 	"sync"
 	"errors"
-	"fmt"
-	"os"
 )
 
 var start bool
@@ -19,7 +17,11 @@ var pingCmd = &cobra.Command{
 	Long: ``,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
-			return errors.New("A unique monitor code is required")
+			return errors.New("a unique monitor code is required")
+		}
+
+		if len(getEndpointFromFlag()) == 0 {
+			return errors.New("an endpoint flag is required")
 		}
 
 		return nil
@@ -27,22 +29,23 @@ var pingCmd = &cobra.Command{
 
 	Run: func(cmd *cobra.Command, args []string) {
 		var wg sync.WaitGroup
-		var endpoint string
-		if fail {
-			endpoint = "fail"
-		} else if complete {
-			endpoint = "complete"
-		} else if start {
-			endpoint = "run"
-		} else {
-			fmt.Fprintln(os.Stderr, "an endpoint flag must be provided")
-			os.Exit(1)
-		}
 
 		wg.Add(1)
-		go sendPing(endpoint, args[0], msg, &wg)
+		go sendPing(getEndpointFromFlag(), args[0], msg, &wg)
 		wg.Wait()
 	},
+}
+
+func getEndpointFromFlag() string {
+	if fail {
+		return "fail"
+	} else if complete {
+		return "complete"
+	} else if start {
+		return "run"
+	}
+
+	return ""
 }
 
 func init() {
