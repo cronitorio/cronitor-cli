@@ -3,14 +3,19 @@ package cmd
 import (
 	"fmt"
 	"os"
-
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"sync"
+	"net/http"
+	"time"
 )
 
 var cfgFile string
-var Verbose bool
+var apiKey string
+var verbose bool
+var version string
+var defaultConfigFile string
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
@@ -31,21 +36,23 @@ func Execute() {
 	}
 }
 
-func init() { 
+func init() {
+	version = "0.1.0"
 	cobra.OnInitialize(initConfig)
 
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
-	RootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.cronitor.yaml)")
+	RootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", cfgFile, "config file (default is .cronitor.json)")
+	RootCmd.PersistentFlags().StringVarP(&apiKey,"api-key", "k", apiKey, "Cronitor API Key")
+	RootCmd.PersistentFlags().BoolVarP(&verbose,"verbose", "v", false, "Verbose output")
 
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
-	RootCmd.PersistentFlags().BoolVarP(&Verbose,"verbose", "v", false, "Verbose output")
+	viper.BindPFlag("CRONITOR-API-KEY", RootCmd.PersistentFlags().Lookup("api-key"))
 }
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
+
 	if cfgFile != "" {
 		// Use config file from the flag.
 		viper.SetConfigFile(cfgFile)
@@ -63,9 +70,35 @@ func initConfig() {
 	}
 
 	viper.AutomaticEnv() // read in environment variables that match
-
 	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Println("Using config file:", viper.ConfigFileUsed())
+	if err := viper.ReadInConfig(); err == nil && verbose {
+		fmt.Println("Reading config from", viper.ConfigFileUsed())
 	}
+}
+
+func sendPing(endpoint string, uniqueIdentifier string, group *sync.WaitGroup) {
+	if verbose {
+		fmt.Printf("Sending %s ping", endpoint)
+	}
+
+	Client := &http.Client{
+		Timeout: time.Second * 3,
+	}
+
+	for i:=1; i<=6; i++  {
+		// Determine the ping API host. After a few failed attempts, try using cronitor.io instead
+		var host string
+		if i > 2 && host == "cronitor.link" {
+			host = "cronitor.io"
+		} else {
+			host = "cronitor.link"
+		}
+
+		_, err := Client.Get( fmt.Sprintf("https://%s/%s/%s?try=%d", host, uniqueIdentifier, endpoint, i))
+		if err == nil {
+			break
+		}
+	}
+
+	group.Done()
 }

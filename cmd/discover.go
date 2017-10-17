@@ -12,6 +12,7 @@ import (
 	"log"
 	"crypto/sha1"
 	"os"
+	"github.com/spf13/viper"
 )
 
 type Rule struct {
@@ -27,7 +28,7 @@ type Monitor struct {
 	Rules []Rule   `json:"rules"`
 	Tags  []string `json:"tags"`
 	Type  string   `json:"type"`
-	Code  string
+	Code  string   `json:"code,omitempty"`
 }
 
 type Line struct {
@@ -42,15 +43,16 @@ type Line struct {
 
 func (l Line) IsMonitorable() bool {
 	containsLegacyIntegration := strings.Contains(l.CommandToRun, "cronitor.io") || strings.Contains(l.CommandToRun, "cronitor.link")
-	return len(l.CronExpression) > 0 && len(l.CommandToRun) > 0 && !containsLegacyIntegration
+	isRebootJob := l.CronExpression == "@reboot"
+	return len(l.CronExpression) > 0 && len(l.CommandToRun) > 0 && !containsLegacyIntegration && !isRebootJob
 }
 
 var excludeFromName []string
 var saveCrontabFile bool
 
 var discoverCmd = &cobra.Command{
-	Use:   "discover",
-	Short: "Automatically find cron jobs and attach Cronitor monitoring",
+	Use:   "discover [crontab]",
+	Short: "Find cron jobs and attach Cronitor monitoring. When no crontab argument is provided /etc/crontab is used where available.",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 && runtime.GOOS == "windows" {
@@ -167,45 +169,41 @@ func createCrontabLine(line *Line) string {
 
 func parseCrontab(lines []string) []*Line {
 	var crontabLines []*Line
-	for lineNumber, line := range lines {
+	for lineNumber, fullLine := range lines {
 		var cronExpression string
 		var command []string
 
-		line = strings.TrimSpace(line)
+		fullLine = strings.TrimSpace(fullLine)
 
 		// Do not attempt to parse the current line if it's a comment
 		// Otherwise split on any whitespace and parse
-		if !strings.HasPrefix(line, "#") {
-			splitLine := strings.Fields(line)
+		if !strings.HasPrefix(fullLine, "#") {
+			splitLine := strings.Fields(fullLine)
 			if len(splitLine) > 0 && strings.HasPrefix(splitLine[0], "@") {
-				if strings.HasPrefix(splitLine[0], "@reboot") {
-					// @todo verbose message -- @reboot aren't scheduled jobs
-				} else {
-					cronExpression = splitLine[0]
-					command = splitLine[1:]
-				}
+				cronExpression = splitLine[0]
+				command = splitLine[1:]
 			} else if len(splitLine) >= 6 {
 				cronExpression = strings.Join(splitLine[0:5], " ")
 				command = splitLine[5:]
 			}
 		}
 
-		// Create an Line struct with details for this line (even if it does not have a parsed command
-		entry := Line{}
-		entry.CronExpression = cronExpression
-		entry.FullLine = line
-		entry.LineNumber = lineNumber
+		// Create a Line struct with details for this line so we can re-create it later
+		line := Line{}
+		line.CronExpression = cronExpression
+		line.FullLine = fullLine
+		line.LineNumber = lineNumber
 
-		// If this job is already being wrapped by the Cronitor client, read current code
+		// If this job is already being wrapped by the Cronitor client, read current code.
 		// Expects a wrapped command to look like: cronitor exec d3x0 /path/to/cmd.sh
 		if len(command) > 0 && command[0] == "cronitor" && command[1] == "exec" {
-			entry.Code = command[2]
+			line.Code = command[2]
 			command = command[2:]
 		}
 
-		entry.CommandToRun = strings.Join(command, " ")
+		line.CommandToRun = strings.Join(command, " ")
 
-		crontabLines = append(crontabLines, &entry)
+		crontabLines = append(crontabLines, &line)
 	}
 	return crontabLines
 }
@@ -261,7 +259,6 @@ func createRule(cronExpression string) Rule {
 	} else if strings.HasPrefix(cronExpression, "@hourly") {
 		rule = Rule{"complete_ping_not_received", "1", "hours", 600}
 	} else {
-		// @todo GraceSeconds should be json null not 0....
 		rule = Rule{"not_on_schedule", cronExpression, "", 0}
 	}
 
@@ -271,9 +268,9 @@ func createRule(cronExpression string) Rule {
 func sendHttpPut(url string, body string) []byte {
 	client := &http.Client{}
 	request, err := http.NewRequest("PUT", url, strings.NewReader(body))
-	request.SetBasicAuth("2055cbee0c0b463787ae0f2a15ac6579", "") // @todo api key from settings
+	request.SetBasicAuth(viper.GetString("CRONITOR_API_KEY"), "")
 	request.Header.Add("Content-Type", "application/json")
-	request.Header.Add("User-Agent", "Cronitor Agent") // @todo get version here
+	request.Header.Add("User-Agent", fmt.Sprintf("Cronitor Agent v%s", version))
 	request.ContentLength = int64(len(body))
 	response, err := client.Do(request)
 	if err != nil {
@@ -295,5 +292,5 @@ func sendHttpPut(url string, body string) []byte {
 func init() {
 	RootCmd.AddCommand(discoverCmd)
 	discoverCmd.Flags().BoolVar(&saveCrontabFile,"save", saveCrontabFile, "Save the updated crontab with Cronitor integration")
-	discoverCmd.Flags().StringArrayVarP(&excludeFromName,"exclude-from-name", "e", excludeFromName, "List of paths and common text to exclude from auto-generated monitor name")
+	discoverCmd.Flags().StringArrayVarP(&excludeFromName,"exclude-from-name", "e", excludeFromName, "Substring to exclude from generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
 }
