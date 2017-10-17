@@ -24,18 +24,18 @@ var execCmd = &cobra.Command{
 		var wg sync.WaitGroup
 		wg.Add(1)
 
-		go sendPing("run", args[0], &wg)
+		go sendPing("run", args[0], "", &wg)
 
 		wrappedCommand := exec.Command("sh", "-c", args[1])
 		err := wrappedCommand.Run()
 
 		if err == nil {
 			wg.Add(1)
-			go sendPing("complete", args[0], &wg)
+			go sendPing("complete", args[0], "", &wg)
 		} else {
 			fmt.Println(err)
 			wg.Add(1)
-			go sendPing("fail", args[0], &wg)
+			go sendPing("fail", args[0], err.Error(), &wg)
 		}
 
 		wg.Wait()

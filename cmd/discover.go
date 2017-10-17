@@ -129,16 +129,26 @@ func readCrontab(crontabPath string) []string {
 }
 
 func putMonitors(monitors map[string]*Monitor) map[string]*Monitor {
+	var url string
 	monitorsArray := make([]Monitor, 0, len(monitors))
 	for _, v := range monitors {
 		monitorsArray = append(monitorsArray, *v)
 	}
 
+	if dev {
+		url = "http://dev.cronitor.io/v3/monitors"
+	} else {
+		url = "https://cronitor.io/v3/monitors"
+	}
+
 	b, _ := json.Marshal(monitorsArray)
-	response := sendHttpPut("http://dev.cronitor.io/v3/monitors", string(b))
+	response := sendHttpPut(url, string(b))
 	var responseMonitors []Monitor
 
-	json.Unmarshal(response, &responseMonitors)
+	err := json.Unmarshal(response, &responseMonitors)
+	if err != nil {
+		panic(errors.New(fmt.Sprintf("Error from %s: %s", url, response)))
+	}
 	for _, value := range responseMonitors {
 		monitors[value.Key].Code = value.Code
 	}
@@ -268,9 +278,9 @@ func createRule(cronExpression string) Rule {
 func sendHttpPut(url string, body string) []byte {
 	client := &http.Client{}
 	request, err := http.NewRequest("PUT", url, strings.NewReader(body))
-	request.SetBasicAuth(viper.GetString("CRONITOR_API_KEY"), "")
+	request.SetBasicAuth(viper.GetString("CRONITOR-API-KEY"), "")
 	request.Header.Add("Content-Type", "application/json")
-	request.Header.Add("User-Agent", fmt.Sprintf("Cronitor Agent v%s", version))
+	request.Header.Add("User-Agent", userAgent)
 	request.ContentLength = int64(len(body))
 	response, err := client.Do(request)
 	if err != nil {

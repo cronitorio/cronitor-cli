@@ -9,13 +9,17 @@ import (
 	"sync"
 	"net/http"
 	"time"
+	"log"
+	"io/ioutil"
+	"net/url"
 )
 
 var cfgFile string
 var apiKey string
 var verbose bool
+var dev bool
 var version string
-var defaultConfigFile string
+var userAgent string
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
@@ -38,6 +42,7 @@ func Execute() {
 
 func init() {
 	version = "0.1.0"
+	userAgent = fmt.Sprintf("CronitorAgent/%s", version)
 	cobra.OnInitialize(initConfig)
 
 	// Here you will define your flags and configuration settings.
@@ -45,7 +50,9 @@ func init() {
 	// will be global for your application.
 	RootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", cfgFile, "config file (default is .cronitor.json)")
 	RootCmd.PersistentFlags().StringVarP(&apiKey,"api-key", "k", apiKey, "Cronitor API Key")
-	RootCmd.PersistentFlags().BoolVarP(&verbose,"verbose", "v", false, "Verbose output")
+	RootCmd.PersistentFlags().BoolVarP(&verbose,"verbose", "v", verbose, "Verbose output")
+	RootCmd.PersistentFlags().BoolVar(&dev,"use-dev",dev, "Dev mode")
+	RootCmd.PersistentFlags().MarkHidden("use-dev")
 
 	viper.BindPFlag("CRONITOR-API-KEY", RootCmd.PersistentFlags().Lookup("api-key"))
 }
@@ -76,28 +83,46 @@ func initConfig() {
 	}
 }
 
-func sendPing(endpoint string, uniqueIdentifier string, group *sync.WaitGroup) {
-	if verbose {
-		fmt.Printf("Sending %s ping", endpoint)
-	}
-
+func sendPing(endpoint string, uniqueIdentifier string, message string, group *sync.WaitGroup) {
 	Client := &http.Client{
 		Timeout: time.Second * 3,
 	}
 
+	message = url.QueryEscape(message)
+
 	for i:=1; i<=6; i++  {
 		// Determine the ping API host. After a few failed attempts, try using cronitor.io instead
 		var host string
-		if i > 2 && host == "cronitor.link" {
-			host = "cronitor.io"
+		if dev {
+			host = "http://dev.cronitor.io"
+		} else if i > 2 && host == "https://cronitor.link" {
+			host = "https://cronitor.io"
 		} else {
-			host = "cronitor.link"
+			host = "https://cronitor.link"
 		}
 
-		_, err := Client.Get( fmt.Sprintf("https://%s/%s/%s?try=%d", host, uniqueIdentifier, endpoint, i))
-		if err == nil {
+		uri := fmt.Sprintf("%s/%s/%s?try=%d&msg=%s", host, uniqueIdentifier, endpoint, i, message)
+
+		if verbose {
+			fmt.Println("Sending ping", uri)
+		}
+
+		request, err := http.NewRequest("GET", uri, nil)
+		request.Header.Add("User-Agent", userAgent)
+		response, err := Client.Do(request)
+
+		if err != nil {
+			fmt.Println(err)
+			log.Fatal(err)
+			return
+		}
+
+		_, err = ioutil.ReadAll(response.Body)
+		if err == nil && response.StatusCode < 400 {
 			break
 		}
+
+		response.Body.Close()
 	}
 
 	group.Done()

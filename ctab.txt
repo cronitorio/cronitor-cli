@@ -3,11 +3,11 @@
 
 0,5,10,15,20,25,30,35,40,45,50,55 * * * * /bin/bash -l -c 'curl https://cronitor.link/IFUpJq/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && RAILS_ENV=production bundle exec rake babylist:email_batch_sync --silent >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/IFUpJq/complete -m 10'
 
-0,15,30,45 * * * * cronitor exec 2xWCs5 /bin/bash -l -c '/var/www/babylist_web/current/bin/delayed_job_status.sh >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1'
+0,15,30,45 * * * * cronitor exec 5up0o2 /bin/bash -l -c '/var/www/babylist_web/current/bin/delayed_job_status.sh >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1'
 
-0,15,30,45 * * * * cronitor exec qHmpmZ /bin/bash -l -c 'cd /var/www/babylist_web/releases/20171010011410 && bin/rails runner -e production '\''BL::SidekiqQueueStatus.run'\'' >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1'
+0,15,30,45 * * * * cronitor exec LHfp43 /bin/bash -l -c 'cd /var/www/babylist_web/releases/20171010011410 && bin/rails runner -e production '\''BL::SidekiqQueueStatus.run'\'' >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1'
 
-0,15,30,45 * * * * cronitor exec fn8Cq1 /bin/bash -l -c '/var/www/babylist_web/current/bin/slave_status.sh >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1'
+0,15,30,45 * * * * cronitor exec cD8I7i /bin/bash -l -c '/var/www/babylist_web/current/bin/slave_status.sh >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1'
 
 0,30 * * * * /bin/bash -l -c 'curl https://cronitor.link/oT8IxV/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && RAILS_ENV=production bundle exec rake babylist:owner_reservation_email --silent >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/oT8IxV/complete -m 10'
 
