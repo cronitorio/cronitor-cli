@@ -4,6 +4,8 @@ import (
 	"github.com/spf13/cobra"
 	"sync"
 	"errors"
+	"fmt"
+	"os"
 )
 
 var start bool
@@ -33,7 +35,8 @@ var pingCmd = &cobra.Command{
 		} else if start {
 			endpoint = "run"
 		} else {
-			panic(errors.New("an endpoint flag must be provided"))
+			fmt.Fprintln(os.Stderr, "an endpoint flag must be provided")
+			os.Exit(1)
 		}
 
 		wg.Add(1)

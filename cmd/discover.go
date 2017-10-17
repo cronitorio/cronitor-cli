@@ -57,7 +57,8 @@ var discoverCmd = &cobra.Command{
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 && runtime.GOOS == "windows" {
-			panic(errors.New("A crontab file must be provided"))
+			fmt.Fprintln(os.Stderr, "A crontab file argument is required on this platform")
+			os.Exit(1)
 		}
 
 		crontabPath := "/etc/crontab"
@@ -65,7 +66,13 @@ var discoverCmd = &cobra.Command{
 			crontabPath = args[0]
 		}
 
-		crontabLines := parseCrontab(readCrontab(crontabPath))
+		crontabStrings, err := readCrontab(crontabPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(126)  // Permissions problem..
+		}
+
+		crontabLines := parseCrontab(crontabStrings)
 
 		// Read crontabLines into map of Monitor structs
 		monitors := map[string]*Monitor{}
@@ -91,7 +98,11 @@ var discoverCmd = &cobra.Command{
 		}
 
 		// Put monitors to Cronitor API
-		monitors = putMonitors(monitors)
+		monitors, err = putMonitors(monitors)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 
 		// Re-write crontab lines with new/updated monitoring
 		var crontabOutput []string
@@ -103,7 +114,8 @@ var discoverCmd = &cobra.Command{
 
 		if saveCrontabFile {
 			if ioutil.WriteFile(crontabPath, []byte(updatedCrontabLines), 0644) != nil {
-				panic(errors.New(fmt.Sprintf("the --save option is supplied but the file at %s could not be written; check permissions and try again", crontabPath)))
+				fmt.Fprintf(os.Stderr, "The --save option is supplied but the file at %s could not be written; check permissions and try again", crontabPath)
+				os.Exit(126)
 			}
 
 			fmt.Println(fmt.Sprintf("Crontab %s updated", crontabPath))
@@ -113,23 +125,23 @@ var discoverCmd = &cobra.Command{
 	},
 }
 
-func readCrontab(crontabPath string) []string {
+func readCrontab(crontabPath string) ([]string, error) {
 	crontabBytes, err := ioutil.ReadFile(crontabPath)
 	if err != nil {
-		panic(errors.New(fmt.Sprintf("the crontab file at %s could not be read", crontabPath)))
+		return nil, errors.New(fmt.Sprintf("the crontab file at %s could not be read", crontabPath))
 	}
 
 	// When the save flag is passed, attempt to write the file back to itself to ensure we have proper permissions before going further
 	if saveCrontabFile {
 		if ioutil.WriteFile(crontabPath, crontabBytes, 0644) != nil {
-			panic(errors.New(fmt.Sprintf("the --save option is supplied but the file at %s could not be written; check permissions and try again", crontabPath)))
+			return nil, errors.New(fmt.Sprintf("the --save option is supplied but the file at %s could not be written; check permissions and try again", crontabPath))
 		}
 	}
 
-	return strings.Split(string(crontabBytes), "\n")
+	return strings.Split(string(crontabBytes), "\n"), nil
 }
 
-func putMonitors(monitors map[string]*Monitor) map[string]*Monitor {
+func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
 	var url string
 	monitorsArray := make([]Monitor, 0, len(monitors))
 	for _, v := range monitors {
@@ -148,13 +160,13 @@ func putMonitors(monitors map[string]*Monitor) map[string]*Monitor {
 
 	err := json.Unmarshal(response, &responseMonitors)
 	if err != nil {
-		panic(errors.New(fmt.Sprintf("Error from %s: %s", url, response)))
+		return nil, errors.New(fmt.Sprintf("Error from %s: %s", url, response))
 	}
 	for _, value := range responseMonitors {
 		monitors[value.Key].Code = value.Code
 	}
 
-	return monitors
+	return monitors, nil
 }
 
 func createCrontabLine(line *Line) string {
@@ -196,7 +208,7 @@ func parseCrontab(lines []string) []*Line {
 			} else if len(splitLine) >= 6 {
 				// Handle javacron-style 6 item cron expressions
 				// If there are at least 7 items, and the 6th looks like a cron expression, assume it is one
-				match, _ := regexp.MatchString("[-,?*/0-9]", splitLine[5])
+				match, _ := regexp.MatchString("[-,?*/0-9]+", splitLine[5])
 				if match && len(splitLine) >= 7 {
 					cronExpression = strings.Join(splitLine[0:6], " ")
 					command = splitLine[6:]

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"github.com/spf13/viper"
 	"encoding/json"
+	"os"
 )
 
 type ConfigFile struct {
@@ -41,13 +42,14 @@ var configureCmd = &cobra.Command{
 
 		b, err := json.MarshalIndent(configData, "", "    ")
 		if err != nil {
-			panic(err)
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		}
 
 		if ioutil.WriteFile(configFilePath(), b, 0644) != nil {
-			panic(errors.New(fmt.Sprintf("the configuration file at %s could not be written; check permissions and try again", configFilePath())))
+			fmt.Fprintf(os.Stderr, "the configuration file at %s could not be written; check permissions and try again", configFilePath())
+			os.Exit(126)
 		}
-
 	},
 }
 
