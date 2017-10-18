@@ -27,6 +27,7 @@ import (
 type ConfigFile struct {
 	ApiKey     string `json:"CRONITOR-API-KEY"`
 	ExcludeText []string `json:"CRONITOR-EXCLUDE-TEXT,omitempty"`
+	Hostname string `json:"CRONITOR-HOSTNAME"`
 }
 
 // configureCmd represents the configure command
@@ -38,6 +39,7 @@ var configureCmd = &cobra.Command{
 		configData := ConfigFile{}
 		configData.ApiKey = viper.GetString("CRONITOR-API-KEY")
 		configData.ExcludeText = viper.GetStringSlice("CRONITOR-EXCLUDE-TEXT")
+		configData.Hostname = viper.GetString("CRONITOR-HOSTNAME")
 
 		b, err := json.MarshalIndent(configData, "", "    ")
 		if err != nil {

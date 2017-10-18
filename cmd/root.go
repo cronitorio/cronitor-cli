@@ -48,13 +48,16 @@ func init() {
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
-	RootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", cfgFile, "config file (default is .cronitor.json)")
+	RootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", cfgFile, "config file (default: .cronitor.json)")
 	RootCmd.PersistentFlags().StringVarP(&apiKey,"api-key", "k", apiKey, "Cronitor API Key")
+	RootCmd.PersistentFlags().StringVarP(&apiKey,"hostname", "n", apiKey, "A unique identifier for this host (default: system hostname)")
 	RootCmd.PersistentFlags().BoolVarP(&verbose,"verbose", "v", verbose, "Verbose output")
+
 	RootCmd.PersistentFlags().BoolVar(&dev,"use-dev",dev, "Dev mode")
 	RootCmd.PersistentFlags().MarkHidden("use-dev")
 
 	viper.BindPFlag("CRONITOR-API-KEY", RootCmd.PersistentFlags().Lookup("api-key"))
+	viper.BindPFlag("CRONITOR-HOSTNAME", RootCmd.PersistentFlags().Lookup("hostname"))
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -126,4 +129,13 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 	}
 
 	group.Done()
+}
+
+func effectiveHostname() string {
+	if len(viper.GetString("CRONITOR-HOSTNAME")) > 0 {
+		return viper.GetString("CRONITOR-HOSTNAME")
+	}
+
+	hostname, _ := os.Hostname()
+	return hostname
 }

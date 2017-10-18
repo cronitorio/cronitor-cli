@@ -94,7 +94,15 @@ var discoverCmd = &cobra.Command{
 				"heartbeat",
 				line.Code,
 			}
-			monitors[key] = &line.Mon
+
+			// We need to match this struct later with the response from the Cronitor API,
+			// so the key needs to use Code when available and fallback to Key when not, just like the API
+			effectiveKey := key
+			if len(line.Code) > 0 {
+				effectiveKey = line.Code
+			}
+
+			monitors[effectiveKey] = &line.Mon
 		}
 
 		// Put monitors to Cronitor API
@@ -163,7 +171,13 @@ func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
 		return nil, errors.New(fmt.Sprintf("Error from %s: %s", url, response))
 	}
 	for _, value := range responseMonitors {
-		monitors[value.Key].Code = value.Code
+
+		// We only need to update the Monitor struct with a code if this is a new monitor.
+		// For updates the monitor code is sent as well as the key and that takes precedence. 
+		if _, ok := monitors[value.Key]; ok {
+			monitors[value.Key].Code = value.Code
+		}
+
 	}
 
 	return monitors, nil
@@ -208,7 +222,7 @@ func parseCrontab(lines []string) []*Line {
 			} else if len(splitLine) >= 6 {
 				// Handle javacron-style 6 item cron expressions
 				// If there are at least 7 items, and the 6th looks like a cron expression, assume it is one
-				match, _ := regexp.MatchString("[-,?*/0-9]+", splitLine[5])
+				match, _ := regexp.MatchString("^[-,?*/0-9]+$", splitLine[5])
 				if match && len(splitLine) >= 7 {
 					cronExpression = strings.Join(splitLine[0:6], " ")
 					command = splitLine[6:]
@@ -227,9 +241,9 @@ func parseCrontab(lines []string) []*Line {
 
 		// If this job is already being wrapped by the Cronitor client, read current code.
 		// Expects a wrapped command to look like: cronitor exec d3x0 /path/to/cmd.sh
-		if len(command) > 0 && command[0] == "cronitor" && command[1] == "exec" {
+		if len(command) > 1 && command[0] == "cronitor" && command[1] == "exec" {
 			line.Code = command[2]
-			command = command[2:]
+			command = command[3:]
 		}
 
 		line.CommandToRun = strings.Join(command, " ")
@@ -258,21 +272,16 @@ func createName(CommandToRun string) string {
 
 	CommandToRun = strings.TrimSpace(CommandToRun[:maxLength])
 	CommandToRun = strings.Trim(CommandToRun, ">'\"")
-	return strings.TrimSpace(CommandToRun)
+	return fmt.Sprintf("[%s] %s", effectiveHostname(), strings.TrimSpace(CommandToRun))[:100]
 }
 
 func createKey(CommandToRun string, CronExpression string) string {
-	hostname, _ := os.Hostname()
-	data := []byte(fmt.Sprintf("%s-%s-%s", hostname, CommandToRun, CronExpression))
+	data := []byte(fmt.Sprintf("%s-%s-%s", effectiveHostname(), CommandToRun, CronExpression))
 	return fmt.Sprintf("%x", sha1.Sum(data))
 }
 
 func createTags() []string {
 	var tags []string
-	hostname, _ := os.Hostname()
-	if len(hostname) > 0 {
-		tags = append(tags, hostname)
-	}
 	tags = append(tags, "cron-job")
 	return tags
 }
@@ -297,6 +306,10 @@ func createRule(cronExpression string) Rule {
 }
 
 func sendHttpPut(url string, body string) []byte {
+
+	fmt.Println("Request:")
+	fmt.Println(body)
+
 	client := &http.Client{}
 	request, err := http.NewRequest("PUT", url, strings.NewReader(body))
 	request.SetBasicAuth(viper.GetString("CRONITOR-API-KEY"), "")
