@@ -14,6 +14,8 @@ import (
 	"os"
 	"github.com/spf13/viper"
 	"regexp"
+	"math/rand"
+	"time"
 )
 
 type Rule struct {
@@ -48,8 +50,15 @@ func (l Line) IsMonitorable() bool {
 	return len(l.CronExpression) > 0 && len(l.CommandToRun) > 0 && !containsLegacyIntegration && !isRebootJob
 }
 
+func (l Line) IsAutoDiscoverCommand() bool {
+	matched, _ := regexp.MatchString(".+cronitor[[:space:]]+discover.+", strings.ToLower(l.CommandToRun))
+	return matched
+}
+
 var excludeFromName []string
+var noAutoDiscover bool
 var saveCrontabFile bool
+var crontabPath string
 
 var discoverCmd = &cobra.Command{
 	Use:   "discover [crontab]",
@@ -61,7 +70,7 @@ var discoverCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		crontabPath := "/etc/crontab"
+		crontabPath = "/etc/crontab"
 		if len(args) > 0 {
 			crontabPath = args[0]
 		}
@@ -82,8 +91,8 @@ var discoverCmd = &cobra.Command{
 			}
 
 			rules := []Rule{createRule(line.CronExpression)}
-			name := createName(line.CommandToRun)
-			key := createKey(line.CommandToRun, line.CronExpression)
+			name := createName(line.CommandToRun, line.IsAutoDiscoverCommand())
+			key := createKey(line.CommandToRun, line.CronExpression, line.IsAutoDiscoverCommand())
 			tags := createTags()
 
 			line.Mon = Monitor{
@@ -104,6 +113,7 @@ var discoverCmd = &cobra.Command{
 
 			monitors[effectiveKey] = &line.Mon
 		}
+
 
 		// Put monitors to Cronitor API
 		monitors, err = putMonitors(monitors)
@@ -163,17 +173,28 @@ func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
 	}
 
 	b, _ := json.Marshal(monitorsArray)
-	response := sendHttpPut(url, string(b))
-	var responseMonitors []Monitor
+	jsonString := string(b)
 
+	if verbose {
+		fmt.Println("Request:")
+		fmt.Println(jsonString)
+	}
+
+	response := sendHttpPut(url, jsonString)
+
+	if verbose {
+		fmt.Println("Response:")
+		fmt.Println(string(response))
+	}
+
+	responseMonitors := []Monitor{}
 	err := json.Unmarshal(response, &responseMonitors)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Error from %s: %s", url, response))
 	}
 	for _, value := range responseMonitors {
-
 		// We only need to update the Monitor struct with a code if this is a new monitor.
-		// For updates the monitor code is sent as well as the key and that takes precedence. 
+		// For updates the monitor code is sent as well as the key and that takes precedence.
 		if _, ok := monitors[value.Key]; ok {
 			monitors[value.Key].Code = value.Code
 		}
@@ -206,6 +227,9 @@ func createCrontabLine(line *Line) string {
 
 func parseCrontab(lines []string) []*Line {
 	var crontabLines []*Line
+	var autoDiscoverLine *Line
+	var usesSixFieldCronExpression bool
+
 	for lineNumber, fullLine := range lines {
 		var cronExpression string
 		var command []string
@@ -223,7 +247,8 @@ func parseCrontab(lines []string) []*Line {
 				// Handle javacron-style 6 item cron expressions
 				// If there are at least 7 items, and the 6th looks like a cron expression, assume it is one
 				match, _ := regexp.MatchString("^[-,?*/0-9]+$", splitLine[5])
-				if match && len(splitLine) >= 7 {
+				usesSixFieldCronExpression = match && len(splitLine) >= 7
+				if usesSixFieldCronExpression {
 					cronExpression = strings.Join(splitLine[0:6], " ")
 					command = splitLine[6:]
 				} else {
@@ -248,18 +273,47 @@ func parseCrontab(lines []string) []*Line {
 
 		line.CommandToRun = strings.Join(command, " ")
 
+		if line.IsAutoDiscoverCommand() {
+			autoDiscoverLine = &line
+			if noAutoDiscover {
+				continue // remove the auto-discover line from the crontab
+			}
+		}
+
 		crontabLines = append(crontabLines, &line)
 	}
+
+	// If we do not have an auto-discover line but we should, add one now
+	if autoDiscoverLine == nil && !noAutoDiscover {
+		crontabLines = append(crontabLines, createAutoDiscoverLine(usesSixFieldCronExpression))
+	}
+
 	return crontabLines
 }
 
-func createName(CommandToRun string) string {
+func createAutoDiscoverLine(usesSixFieldCronExpression bool) *Line {
+	cronExpression := fmt.Sprintf("%s * * * *", randomMinute())
+	if usesSixFieldCronExpression {
+		cronExpression = fmt.Sprintf("* %s", cronExpression)
+	}
+
+	line := Line{}
+	line.CronExpression = cronExpression
+	line.CommandToRun = strings.Replace(strings.Join(os.Args, " "), "--save", "", -1)
+	return &line
+}
+
+func createName(CommandToRun string, IsAutoDiscoverCommand bool) string {
 	excludeFromName = append(excludeFromName, "> /dev/null")
 	excludeFromName = append(excludeFromName, "2>&1")
 	excludeFromName = append(excludeFromName, "/bin/bash -l -c")
 	excludeFromName = append(excludeFromName, "/bin/bash -lc")
 	excludeFromName = append(excludeFromName, "/bin/bash -c -l")
 	excludeFromName = append(excludeFromName, "/bin/bash -cl")
+
+	if IsAutoDiscoverCommand {
+		return fmt.Sprintf("[%s] Auto discover %s", effectiveHostname(), strings.TrimSpace(crontabPath))[:100]
+	}
 
 	for _, substr := range excludeFromName {
 		CommandToRun = strings.Replace(CommandToRun, substr, "", -1)
@@ -275,7 +329,20 @@ func createName(CommandToRun string) string {
 	return fmt.Sprintf("[%s] %s", effectiveHostname(), strings.TrimSpace(CommandToRun))[:100]
 }
 
-func createKey(CommandToRun string, CronExpression string) string {
+func createKey(CommandToRun string, CronExpression string, IsAutoDiscoverCommand bool) string {
+	if IsAutoDiscoverCommand {
+		// Go out of our way to prevent making a duplicate monitor for an auto-discovery command.
+		// Ensure that tinkering with params does not change key
+		normalizedCommand := []string{}
+		for _, field := range strings.Fields(CommandToRun) {
+			if !strings.HasPrefix(CommandToRun, "-") {
+				normalizedCommand = append(normalizedCommand, field)
+			}
+		}
+
+		CommandToRun = strings.Join(normalizedCommand, " ")
+	}
+
 	data := []byte(fmt.Sprintf("%s-%s-%s", effectiveHostname(), CommandToRun, CronExpression))
 	return fmt.Sprintf("%x", sha1.Sum(data))
 }
@@ -306,10 +373,6 @@ func createRule(cronExpression string) Rule {
 }
 
 func sendHttpPut(url string, body string) []byte {
-
-	fmt.Println("Request:")
-	fmt.Println(body)
-
 	client := &http.Client{}
 	request, err := http.NewRequest("PUT", url, strings.NewReader(body))
 	request.SetBasicAuth(viper.GetString("CRONITOR-API-KEY"), "")
@@ -333,8 +396,14 @@ func sendHttpPut(url string, body string) []byte {
 	return contents
 }
 
+func randomMinute() int {
+    rand.Seed(time.Now().Unix())
+    return rand.Intn(59)
+}
+
 func init() {
 	RootCmd.AddCommand(discoverCmd)
-	discoverCmd.Flags().BoolVar(&saveCrontabFile,"save", saveCrontabFile, "Save the updated crontab with Cronitor integration")
+	discoverCmd.Flags().BoolVar(&saveCrontabFile,"save", saveCrontabFile, "Save the updated crontab file")
 	discoverCmd.Flags().StringArrayVarP(&excludeFromName,"exclude-from-name", "e", excludeFromName, "Substring to exclude from generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
+	discoverCmd.Flags().BoolVar(&noAutoDiscover,"no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 }
