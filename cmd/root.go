@@ -55,6 +55,7 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&apiKey,"api-key", "k", apiKey, "Cronitor API Key")
 	RootCmd.PersistentFlags().StringVarP(&apiKey,"hostname", "n", apiKey, "A unique identifier for this host (default: system hostname)")
 	RootCmd.PersistentFlags().BoolVarP(&verbose,"verbose", "v", verbose, "Verbose output")
+	RootCmd.PersistentFlags().BoolVar(&noStdoutPassthru,"no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
 
 	RootCmd.PersistentFlags().BoolVar(&dev,"use-dev",dev, "Dev mode")
 	RootCmd.PersistentFlags().MarkHidden("use-dev")

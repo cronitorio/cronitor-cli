@@ -73,8 +73,5 @@ var execCmd = &cobra.Command{
 
 func init() {
 	RootCmd.AddCommand(execCmd)
-	RootCmd.Flags()
-	execCmd.Flags().BoolVar(&noStdoutPassthru,"no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
-
 }
 

@@ -302,7 +302,10 @@ func createAutoDiscoverLine(usesSixFieldCronExpression bool) *Line {
 
 	// Normalize the command so it can be run reliably from crontab
 	commandToRun := strings.Join(os.Args, " ")
-	commandToRun = strings.Replace(commandToRun, "--save", "", -1)
+	commandToRun = strings.Replace(commandToRun, "--save ", "", -1)
+	commandToRun = strings.Replace(commandToRun, "--verbose ", "", -1)
+	commandToRun = strings.Replace(commandToRun, "-v ", "", -1)
+
 	if absoluteCronPath, err := filepath.Abs(crontabPath); err == nil {
 		commandToRun = strings.Replace(commandToRun, crontabPath, absoluteCronPath, -1)
 	}
@@ -409,5 +412,4 @@ func init() {
 	discoverCmd.Flags().BoolVar(&saveCrontabFile,"save", saveCrontabFile, "Save the updated crontab file")
 	discoverCmd.Flags().StringArrayVarP(&excludeFromName,"exclude-from-name", "e", excludeFromName, "Substring to exclude from generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
 	discoverCmd.Flags().BoolVar(&noAutoDiscover,"no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
-	discoverCmd.Flags().BoolVar(&noStdoutPassthru,"no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
 }
