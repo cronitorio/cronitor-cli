@@ -15,11 +15,14 @@ import (
 )
 
 var cfgFile string
-var apiKey string
-var verbose bool
-var dev bool
 var version string
 var userAgent string
+
+// Flags that are either global or used in multiple commands
+var apiKey string
+var dev bool
+var verbose bool
+var noStdoutPassthru bool
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
@@ -95,15 +98,15 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 	hostname := effectiveHostname()
 
 	if len(message) > 0 {
-		message = fmt.Sprintf("&msg=%s", url.QueryEscape(message))
+		message = fmt.Sprintf("&msg=%s", url.QueryEscape(truncateString(message, 2000)))
 	}
 
 	if len(pingApiAuthKey) > 0 {
-		pingApiAuthKey = fmt.Sprintf("&auth_key=%s", pingApiAuthKey)
+		pingApiAuthKey = fmt.Sprintf("&auth_key=%s", truncateString(pingApiAuthKey, 50))
 	}
 
 	if len(hostname) > 0 {
-		hostname = fmt.Sprintf("&hostname=%s", url.QueryEscape(hostname))
+		hostname = fmt.Sprintf("&hostname=%s", url.QueryEscape(truncateString(hostname, 50)))
 	}
 
 	for i:=1; i<=6; i++  {
@@ -151,4 +154,12 @@ func effectiveHostname() string {
 
 	hostname, _ := os.Hostname()
 	return hostname
+}
+
+func truncateString(s string, length int) string {
+	if len(s) <= length {
+		return s
+	}
+
+	return s[:length]
 }

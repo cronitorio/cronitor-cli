@@ -107,7 +107,6 @@ var discoverCmd = &cobra.Command{
 			monitors[key] = &line.Mon
 		}
 
-
 		// Put monitors to Cronitor API
 		monitors, err = putMonitors(monitors)
 		if err != nil {
@@ -214,7 +213,11 @@ func createCrontabLine(line *Line) string {
 	lineParts = append(lineParts, line.CronExpression)
 
 	if len(line.Mon.Code) > 0 {
-		lineParts = append(lineParts, "cronitor exec")
+		lineParts = append(lineParts, "cronitor")
+		if noStdoutPassthru {
+			lineParts = append(lineParts, "--no-stdout")
+		}
+		lineParts = append(lineParts, "exec")
 		lineParts = append(lineParts, line.Mon.Code)
 	}
 
@@ -401,17 +404,10 @@ func randomMinute() int {
     return rand.Intn(59)
 }
 
-func truncateString(s string, length int) string {
-	if len(s) <= length {
-		return s
-	}
-
-	return s[:length]
-}
-
 func init() {
 	RootCmd.AddCommand(discoverCmd)
 	discoverCmd.Flags().BoolVar(&saveCrontabFile,"save", saveCrontabFile, "Save the updated crontab file")
 	discoverCmd.Flags().StringArrayVarP(&excludeFromName,"exclude-from-name", "e", excludeFromName, "Substring to exclude from generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
 	discoverCmd.Flags().BoolVar(&noAutoDiscover,"no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
+	discoverCmd.Flags().BoolVar(&noStdoutPassthru,"no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
 }

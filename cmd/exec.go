@@ -6,6 +6,8 @@ import (
 	"sync"
 	"os/exec"
 	"errors"
+	"strings"
+	"os"
 )
 
 var monitorCode, command string
@@ -14,12 +16,31 @@ var execCmd = &cobra.Command{
 	Short: "Execute a command with Cronitor monitoring.",
 	Long: ``,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 2 {
-			return errors.New("A unique monitor code and cli command are required")
+		// We need to use raw os.Args so we can pass the wrapped command through unparsed
+		var foundExec, foundCode bool
+		var commandParts []string
+		for _, arg := range os.Args {
+			if foundExec && foundCode {
+				commandParts = append(commandParts, arg)
+				continue
+			}
+
+			if foundExec && !foundCode {
+				monitorCode = arg
+				foundCode = true
+				continue
+			}
+
+			if strings.ToLower(arg) == "exec" {
+				foundExec = true
+				continue
+			}
 		}
 
-		monitorCode = args[0]
-		command = args[1]
+		command = strings.Join(commandParts, " ")
+		if len(monitorCode) < 1 || len(command) < 1 {
+			return errors.New("A unique monitor code and cli command are required immediately after 'exec'")
+		}
 		return nil
 	},
 
@@ -33,15 +54,17 @@ var execCmd = &cobra.Command{
 
 		go sendPing("run", monitorCode, "", &wg)
 
-		output, err := exec.Command("sh", "-c", command).Output()
-		fmt.Println(string(output))
+		output, err := exec.Command("sh", "-c", command).CombinedOutput()
+		if noStdoutPassthru {
+			output = []byte{}
+		}
 
 		if err == nil {
 			wg.Add(1)
-			go sendPing("complete", monitorCode, "", &wg)
+			go sendPing("complete", monitorCode, string(output), &wg)
 		} else {
 			wg.Add(1)
-			go sendPing("fail", monitorCode, err.Error(), &wg)
+			go sendPing("fail", monitorCode, strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), output)), &wg)
 		}
 
 		wg.Wait()
@@ -51,5 +74,7 @@ var execCmd = &cobra.Command{
 func init() {
 	RootCmd.AddCommand(execCmd)
 	RootCmd.Flags()
+	execCmd.Flags().BoolVar(&noStdoutPassthru,"no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
+
 }
 
