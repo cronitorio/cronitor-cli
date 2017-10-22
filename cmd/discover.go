@@ -32,6 +32,7 @@ type Monitor struct {
 	Tags  []string `json:"tags"`
 	Type  string   `json:"type"`
 	Code  string   `json:"code,omitempty"`
+	Note  string   `json:"note,omitempty"`
 }
 
 type Line struct {
@@ -102,6 +103,7 @@ var discoverCmd = &cobra.Command{
 				tags,
 				"heartbeat",
 				line.Code,
+				createNote(line.LineNumber, line.IsAutoDiscoverCommand()),
 			}
 
 			monitors[key] = &line.Mon
@@ -314,6 +316,14 @@ func createAutoDiscoverLine(usesSixFieldCronExpression bool) *Line {
 	line.CronExpression = cronExpression
 	line.CommandToRun = commandToRun
 	return &line
+}
+
+func createNote(LineNumber int, IsAutoDiscoverCommand bool) string {
+	if IsAutoDiscoverCommand {
+		return fmt.Sprintf("Watching for schedule changes and new enties in %s", crontabPath)
+	}
+
+	return fmt.Sprintf("Discovered in %s:%d", crontabPath, LineNumber)
 }
 
 func createName(CommandToRun string, IsAutoDiscoverCommand bool) string {
