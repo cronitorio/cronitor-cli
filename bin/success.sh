@@ -1,2 +1,3 @@
-sleep 3
+sleep 1
+echo "Success!"
 exit

@@ -91,7 +91,20 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 		Timeout: time.Second * 3,
 	}
 
-	message = url.QueryEscape(message)
+	pingApiAuthKey := viper.GetString("CRONITOR-PING-API-AUTH-KEY")
+	hostname := effectiveHostname()
+
+	if len(message) > 0 {
+		message = fmt.Sprintf("&msg=%s", url.QueryEscape(message))
+	}
+
+	if len(pingApiAuthKey) > 0 {
+		pingApiAuthKey = fmt.Sprintf("&auth_key=%s", pingApiAuthKey)
+	}
+
+	if len(hostname) > 0 {
+		hostname = fmt.Sprintf("&hostname=%s", url.QueryEscape(hostname))
+	}
 
 	for i:=1; i<=6; i++  {
 		// Determine the ping API host. After a few failed attempts, try using cronitor.io instead
@@ -104,7 +117,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 			host = "https://cronitor.link"
 		}
 
-		uri := fmt.Sprintf("%s/%s/%s?try=%d&msg=%s", host, uniqueIdentifier, endpoint, i, message)
+		uri := fmt.Sprintf("%s/%s/%s?try=%d%s%s%s", host, uniqueIdentifier, endpoint, i, message, pingApiAuthKey, hostname)
 
 		if verbose {
 			fmt.Println("Sending ping", uri)

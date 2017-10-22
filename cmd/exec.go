@@ -8,6 +8,7 @@ import (
 	"errors"
 )
 
+var monitorCode, command string
 var execCmd = &cobra.Command{
 	Use:   "exec",
 	Short: "Execute a command with Cronitor monitoring.",
@@ -17,6 +18,8 @@ var execCmd = &cobra.Command{
 			return errors.New("A unique monitor code and cli command are required")
 		}
 
+		monitorCode = args[0]
+		command = args[1]
 		return nil
 	},
 
@@ -24,18 +27,21 @@ var execCmd = &cobra.Command{
 		var wg sync.WaitGroup
 		wg.Add(1)
 
-		go sendPing("run", args[0], "", &wg)
+		if verbose {
+			fmt.Println(fmt.Sprintf("Running command: %s", command))
+		}
 
-		wrappedCommand := exec.Command("sh", "-c", args[1])
-		err := wrappedCommand.Run()
+		go sendPing("run", monitorCode, "", &wg)
+
+		output, err := exec.Command("sh", "-c", command).Output()
+		fmt.Println(string(output))
 
 		if err == nil {
 			wg.Add(1)
-			go sendPing("complete", args[0], "", &wg)
+			go sendPing("complete", monitorCode, "", &wg)
 		} else {
-			fmt.Println(err)
 			wg.Add(1)
-			go sendPing("fail", args[0], err.Error(), &wg)
+			go sendPing("fail", monitorCode, err.Error(), &wg)
 		}
 
 		wg.Wait()

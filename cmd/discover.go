@@ -9,13 +9,13 @@ import (
 	"github.com/spf13/cobra"
 	"errors"
 	"net/http"
-	"log"
 	"crypto/sha1"
 	"os"
 	"github.com/spf13/viper"
 	"regexp"
 	"math/rand"
 	"time"
+	"path/filepath"
 )
 
 type Rule struct {
@@ -75,10 +75,10 @@ var discoverCmd = &cobra.Command{
 			crontabPath = args[0]
 		}
 
-		crontabStrings, err := readCrontab(crontabPath)
+		crontabStrings, errCode, err := readCrontab(crontabPath)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			os.Exit(126)  // Permissions problem..
+			os.Exit(errCode)
 		}
 
 		crontabLines := parseCrontab(crontabStrings)
@@ -104,14 +104,7 @@ var discoverCmd = &cobra.Command{
 				line.Code,
 			}
 
-			// We need to match this struct later with the response from the Cronitor API,
-			// so the key needs to use Code when available and fallback to Key when not, just like the API
-			effectiveKey := key
-			if len(line.Code) > 0 {
-				effectiveKey = line.Code
-			}
-
-			monitors[effectiveKey] = &line.Mon
+			monitors[key] = &line.Mon
 		}
 
 
@@ -143,20 +136,24 @@ var discoverCmd = &cobra.Command{
 	},
 }
 
-func readCrontab(crontabPath string) ([]string, error) {
+func readCrontab(crontabPath string) ([]string, int, error) {
+	if _, err := os.Stat(crontabPath); os.IsNotExist(err) {
+	  return nil, 66, errors.New(fmt.Sprintf("the file %s does not exist", crontabPath))
+	}
+
 	crontabBytes, err := ioutil.ReadFile(crontabPath)
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("the crontab file at %s could not be read", crontabPath))
+		return nil, 126, errors.New(fmt.Sprintf("the crontab file at %s could not be read; check permissions and try again", crontabPath))
 	}
 
 	// When the save flag is passed, attempt to write the file back to itself to ensure we have proper permissions before going further
 	if saveCrontabFile {
 		if ioutil.WriteFile(crontabPath, crontabBytes, 0644) != nil {
-			return nil, errors.New(fmt.Sprintf("the --save option is supplied but the file at %s could not be written; check permissions and try again", crontabPath))
+			return nil, 126, errors.New(fmt.Sprintf("the --save option is supplied but the file at %s could not be written; check permissions and try again", crontabPath))
 		}
 	}
 
-	return strings.Split(string(crontabBytes), "\n"), nil
+	return strings.Split(string(crontabBytes), "\n"), 0, nil
 }
 
 func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
@@ -180,7 +177,10 @@ func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
 		fmt.Println(jsonString)
 	}
 
-	response := sendHttpPut(url, jsonString)
+	response, err := sendHttpPut(url, jsonString)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Request to %s failed: %s", url, err))
+	}
 
 	if verbose {
 		fmt.Println("Response:")
@@ -188,10 +188,10 @@ func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
 	}
 
 	responseMonitors := []Monitor{}
-	err := json.Unmarshal(response, &responseMonitors)
-	if err != nil {
+	if err = json.Unmarshal(response, &responseMonitors); err != nil {
 		return nil, errors.New(fmt.Sprintf("Error from %s: %s", url, response))
 	}
+
 	for _, value := range responseMonitors {
 		// We only need to update the Monitor struct with a code if this is a new monitor.
 		// For updates the monitor code is sent as well as the key and that takes precedence.
@@ -292,14 +292,21 @@ func parseCrontab(lines []string) []*Line {
 }
 
 func createAutoDiscoverLine(usesSixFieldCronExpression bool) *Line {
-	cronExpression := fmt.Sprintf("%s * * * *", randomMinute())
+	cronExpression := fmt.Sprintf("%d * * * *", randomMinute())
 	if usesSixFieldCronExpression {
 		cronExpression = fmt.Sprintf("* %s", cronExpression)
 	}
 
+	// Normalize the command so it can be run reliably from crontab
+	commandToRun := strings.Join(os.Args, " ")
+	commandToRun = strings.Replace(commandToRun, "--save", "", -1)
+	if absoluteCronPath, err := filepath.Abs(crontabPath); err == nil {
+		commandToRun = strings.Replace(commandToRun, crontabPath, absoluteCronPath, -1)
+	}
+
 	line := Line{}
 	line.CronExpression = cronExpression
-	line.CommandToRun = strings.Replace(strings.Join(os.Args, " "), "--save", "", -1)
+	line.CommandToRun = commandToRun
 	return &line
 }
 
@@ -312,21 +319,16 @@ func createName(CommandToRun string, IsAutoDiscoverCommand bool) string {
 	excludeFromName = append(excludeFromName, "/bin/bash -cl")
 
 	if IsAutoDiscoverCommand {
-		return fmt.Sprintf("[%s] Auto discover %s", effectiveHostname(), strings.TrimSpace(crontabPath))[:100]
+		return truncateString(fmt.Sprintf("[%s] Auto discover %s", effectiveHostname(), strings.TrimSpace(crontabPath)), 100)
 	}
 
 	for _, substr := range excludeFromName {
 		CommandToRun = strings.Replace(CommandToRun, substr, "", -1)
 	}
 
-	maxLength := 100
-	if len(CommandToRun) < 100 {
-		maxLength = len(CommandToRun)
-	}
-
-	CommandToRun = strings.TrimSpace(CommandToRun[:maxLength])
+	CommandToRun = strings.TrimSpace(truncateString(CommandToRun, 100))
 	CommandToRun = strings.Trim(CommandToRun, ">'\"")
-	return fmt.Sprintf("[%s] %s", effectiveHostname(), strings.TrimSpace(CommandToRun))[:100]
+	return truncateString(fmt.Sprintf("[%s] %s", effectiveHostname(), strings.TrimSpace(CommandToRun)), 100)
 }
 
 func createKey(CommandToRun string, CronExpression string, IsAutoDiscoverCommand bool) string {
@@ -341,6 +343,7 @@ func createKey(CommandToRun string, CronExpression string, IsAutoDiscoverCommand
 		}
 
 		CommandToRun = strings.Join(normalizedCommand, " ")
+		CronExpression = ""  // The schedule is randomized for auto discover, so just ignore it
 	}
 
 	data := []byte(fmt.Sprintf("%s-%s-%s", effectiveHostname(), CommandToRun, CronExpression))
@@ -372,7 +375,7 @@ func createRule(cronExpression string) Rule {
 	return rule
 }
 
-func sendHttpPut(url string, body string) []byte {
+func sendHttpPut(url string, body string) ([]byte, error) {
 	client := &http.Client{}
 	request, err := http.NewRequest("PUT", url, strings.NewReader(body))
 	request.SetBasicAuth(viper.GetString("CRONITOR-API-KEY"), "")
@@ -381,24 +384,29 @@ func sendHttpPut(url string, body string) []byte {
 	request.ContentLength = int64(len(body))
 	response, err := client.Do(request)
 	if err != nil {
-		fmt.Println(err)
-		log.Fatal(err)
-		return make([]byte, 0)
+		return nil, err
 	}
 
 	defer response.Body.Close()
 	contents, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		fmt.Println(err)
-		log.Fatal(err)
+		return nil, err
 	}
 
-	return contents
+	return contents, nil
 }
 
 func randomMinute() int {
     rand.Seed(time.Now().Unix())
     return rand.Intn(59)
+}
+
+func truncateString(s string, length int) string {
+	if len(s) <= length {
+		return s
+	}
+
+	return s[:length]
 }
 
 func init() {
