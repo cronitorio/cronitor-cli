@@ -22,7 +22,7 @@ dDm0JDoKE+xOY9mx3raOGVzXNoxL1EAp
 var updateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Update to the latest version",
-	Long: `Check for and automatically update to the latest version of the Cronitor CLI.`,
+	Long:  `Check for and automatically update to the latest version of the Cronitor CLI.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		var opts equinox.Options
 		if err := opts.SetPublicKeyPEM(publicKey); err != nil {
@@ -33,12 +33,12 @@ var updateCmd = &cobra.Command{
 		// check for the update
 		resp, err := equinox.Check(equinoxAppID, opts)
 		switch {
-			case err == equinox.NotAvailableErr:
-				fmt.Println("No update available.")
-				return
-			case err != nil:
-				fmt.Println("Update failed:", err)
-				os.Exit(1)
+		case err == equinox.NotAvailableErr:
+			fmt.Println("No update available.")
+			return
+		case err != nil:
+			fmt.Println("Update failed:", err)
+			os.Exit(1)
 		}
 
 		// fetch the update and apply it

@@ -1,22 +1,8 @@
-// Copyright © 2017 NAME HERE <EMAIL ADDRESS>
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package cmd
 
 import (
 	"fmt"
-	homedir "github.com/mitchellh/go-homedir"
+	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"io/ioutil"
 	"github.com/spf13/viper"
@@ -25,17 +11,17 @@ import (
 )
 
 type ConfigFile struct {
-	ApiKey     string `json:"CRONITOR-API-KEY"`
-	PingApiAuthKey     string `json:"CRONITOR-PING-API-AUTH-KEY"`
-	ExcludeText []string `json:"CRONITOR-EXCLUDE-TEXT,omitempty"`
-	Hostname string `json:"CRONITOR-HOSTNAME"`
+	ApiKey         string   `json:"CRONITOR-API-KEY"`
+	PingApiAuthKey string   `json:"CRONITOR-PING-API-AUTH-KEY"`
+	ExcludeText    []string `json:"CRONITOR-EXCLUDE-TEXT,omitempty"`
+	Hostname       string   `json:"CRONITOR-HOSTNAME"`
 }
 
 // configureCmd represents the configure command
 var configureCmd = &cobra.Command{
 	Use:   "configure",
 	Short: "Write required configuration variables to the selected config file.",
-	Long: `Set configuration variables`,
+	Long:  `Set configuration variables`,
 	Run: func(cmd *cobra.Command, args []string) {
 		configData := ConfigFile{}
 		configData.ApiKey = viper.GetString("CRONITOR-API-KEY")

@@ -14,7 +14,7 @@ var monitorCode, command string
 var execCmd = &cobra.Command{
 	Use:   "exec",
 	Short: "Execute a command with Cronitor monitoring.",
-	Long: ``,
+	Long:  ``,
 	Args: func(cmd *cobra.Command, args []string) error {
 		// We need to use raw os.Args so we can pass the wrapped command through unparsed
 		var foundExec, foundCode bool
@@ -74,4 +74,3 @@ var execCmd = &cobra.Command{
 func init() {
 	RootCmd.AddCommand(execCmd)
 }
-

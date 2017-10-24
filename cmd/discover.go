@@ -139,7 +139,7 @@ var discoverCmd = &cobra.Command{
 
 func readCrontab(crontabPath string) ([]string, int, error) {
 	if _, err := os.Stat(crontabPath); os.IsNotExist(err) {
-	  return nil, 66, errors.New(fmt.Sprintf("the file %s does not exist", crontabPath))
+		return nil, 66, errors.New(fmt.Sprintf("the file %s does not exist", crontabPath))
 	}
 
 	crontabBytes, err := ioutil.ReadFile(crontabPath)
@@ -359,7 +359,7 @@ func createKey(CommandToRun string, CronExpression string, IsAutoDiscoverCommand
 		}
 
 		CommandToRun = strings.Join(normalizedCommand, " ")
-		CronExpression = ""  // The schedule is randomized for auto discover, so just ignore it
+		CronExpression = "" // The schedule is randomized for auto discover, so just ignore it
 	}
 
 	data := []byte(fmt.Sprintf("%s-%s-%s", effectiveHostname(), CommandToRun, CronExpression))
@@ -413,13 +413,13 @@ func sendHttpPut(url string, body string) ([]byte, error) {
 }
 
 func randomMinute() int {
-    rand.Seed(time.Now().Unix())
-    return rand.Intn(59)
+	rand.Seed(time.Now().Unix())
+	return rand.Intn(59)
 }
 
 func init() {
 	RootCmd.AddCommand(discoverCmd)
-	discoverCmd.Flags().BoolVar(&saveCrontabFile,"save", saveCrontabFile, "Save the updated crontab file")
-	discoverCmd.Flags().StringArrayVarP(&excludeFromName,"exclude-from-name", "e", excludeFromName, "Substring to exclude from generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
-	discoverCmd.Flags().BoolVar(&noAutoDiscover,"no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
+	discoverCmd.Flags().BoolVar(&saveCrontabFile, "save", saveCrontabFile, "Save the updated crontab file")
+	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
+	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 }

@@ -14,7 +14,7 @@ var msg string
 var pingCmd = &cobra.Command{
 	Use:   "ping <code>",
 	Short: "Send a single ping to Cronitor",
-	Long: ``,
+	Long:  ``,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
 			return errors.New("a unique monitor code is required")
@@ -53,6 +53,5 @@ func init() {
 	pingCmd.Flags().BoolVar(&start, "start", false, "Send a /run ping")
 	pingCmd.Flags().BoolVar(&complete, "complete", false, "Send a /complete ping")
 	pingCmd.Flags().BoolVar(&fail, "fail", false, "Send a /fail ping")
-	pingCmd.Flags().StringVar(&msg, "msg", "", "Optional message to send with ping" )
+	pingCmd.Flags().StringVar(&msg, "msg", "", "Optional message to send with ping")
 }
-

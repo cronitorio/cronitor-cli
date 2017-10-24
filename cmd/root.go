@@ -3,19 +3,18 @@ package cmd
 import (
 	"fmt"
 	"os"
-	homedir "github.com/mitchellh/go-homedir"
+	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"sync"
 	"net/http"
 	"time"
-	"log"
 	"io/ioutil"
 	"net/url"
 )
 
+var version = "0.2.0"
 var cfgFile string
-var version string
 var userAgent string
 
 // Flags that are either global or used in multiple commands
@@ -27,11 +26,8 @@ var noStdoutPassthru bool
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
 	Use:   "cronitor",
-	Short: "Command line tools for cronitor.io",
-	Long: ``,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	//	Run: func(cmd *cobra.Command, args []string) { },
+	Short: fmt.Sprintf("Cronitor CLI tools version %s", version),
+	Long:  ``,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -44,20 +40,19 @@ func Execute() {
 }
 
 func init() {
-	version = "0.1.0"
 	userAgent = fmt.Sprintf("CronitorAgent/%s", version)
 	cobra.OnInitialize(initConfig)
 
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
-	RootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", cfgFile, "config file (default: .cronitor.json)")
-	RootCmd.PersistentFlags().StringVarP(&apiKey,"api-key", "k", apiKey, "Cronitor API Key")
-	RootCmd.PersistentFlags().StringVarP(&apiKey,"hostname", "n", apiKey, "A unique identifier for this host (default: system hostname)")
-	RootCmd.PersistentFlags().BoolVarP(&verbose,"verbose", "v", verbose, "Verbose output")
-	RootCmd.PersistentFlags().BoolVar(&noStdoutPassthru,"no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
+	RootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", cfgFile, "Config file (default: .cronitor.json)")
+	RootCmd.PersistentFlags().StringVarP(&apiKey, "api-key", "k", apiKey, "Cronitor API Key")
+	RootCmd.PersistentFlags().StringVarP(&apiKey, "hostname", "n", apiKey, "A unique identifier for this host (default: system hostname)")
+	RootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", verbose, "Verbose output")
+	RootCmd.PersistentFlags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
 
-	RootCmd.PersistentFlags().BoolVar(&dev,"use-dev",dev, "Dev mode")
+	RootCmd.PersistentFlags().BoolVar(&dev, "use-dev", dev, "Dev mode")
 	RootCmd.PersistentFlags().MarkHidden("use-dev")
 
 	viper.BindPFlag("CRONITOR-API-KEY", RootCmd.PersistentFlags().Lookup("api-key"))
@@ -91,6 +86,8 @@ func initConfig() {
 }
 
 func sendPing(endpoint string, uniqueIdentifier string, message string, group *sync.WaitGroup) {
+	defer group.Done()
+
 	Client := &http.Client{
 		Timeout: time.Second * 3,
 	}
@@ -110,7 +107,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 		hostname = fmt.Sprintf("&hostname=%s", url.QueryEscape(truncateString(hostname, 50)))
 	}
 
-	for i:=1; i<=6; i++  {
+	for i := 1; i <= 6; i++ {
 		// Determine the ping API host. After a few failed attempts, try using cronitor.io instead
 		var host string
 		if dev {
@@ -133,8 +130,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 
 		if err != nil {
 			fmt.Println(err)
-			log.Fatal(err)
-			return
+			continue
 		}
 
 		_, err = ioutil.ReadAll(response.Body)
@@ -144,8 +140,6 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 
 		response.Body.Close()
 	}
-
-	group.Done()
 }
 
 func effectiveHostname() string {
