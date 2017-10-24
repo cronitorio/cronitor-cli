@@ -13,7 +13,7 @@ import (
 	"net/url"
 )
 
-var version = "0.3.0"
+var version = "0.4.0"
 var cfgFile string
 var userAgent string
 
