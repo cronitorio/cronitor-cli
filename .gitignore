@@ -67,3 +67,4 @@ target/
 .idea
 
 cronitor
+*.key

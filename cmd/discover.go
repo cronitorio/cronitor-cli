@@ -320,7 +320,7 @@ func createAutoDiscoverLine(usesSixFieldCronExpression bool) *Line {
 
 func createNote(LineNumber int, IsAutoDiscoverCommand bool) string {
 	if IsAutoDiscoverCommand {
-		return fmt.Sprintf("Watching for schedule changes and new enties in %s", crontabPath)
+		return fmt.Sprintf("Watching for schedule changes and new entries in %s", crontabPath)
 	}
 
 	return fmt.Sprintf("Discovered in %s:%d", crontabPath, LineNumber)
