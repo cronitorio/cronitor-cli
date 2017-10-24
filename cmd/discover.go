@@ -175,7 +175,12 @@ func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
 
 	if verbose {
 		fmt.Println("Request:")
-		fmt.Println(jsonString)
+		b, err := json.MarshalIndent(jsonString, "", "    ")
+		if err != nil {
+			fmt.Println(jsonString)
+		} else {
+			fmt.Println(b)
+		}
 	}
 
 	response, err := sendHttpPut(url, jsonString)
@@ -185,7 +190,12 @@ func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
 
 	if verbose {
 		fmt.Println("Response:")
-		fmt.Println(string(response))
+		b, err := json.MarshalIndent(response, "", "    ")
+		if err != nil {
+			fmt.Println(response)
+		} else {
+			fmt.Println(b)
+		}
 	}
 
 	responseMonitors := []Monitor{}
