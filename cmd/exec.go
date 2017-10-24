@@ -37,9 +37,13 @@ var execCmd = &cobra.Command{
 			}
 		}
 
-		command = strings.Join(commandParts, " ")
+		command = strings.TrimSpace(strings.Join(commandParts, " "))
 		if len(monitorCode) < 1 || len(command) < 1 {
 			return errors.New("A unique monitor code and cli command are required immediately after 'exec'")
+		}
+
+		if strings.HasPrefix(command, "-- ") {
+			command = command[3:]
 		}
 		return nil
 	},

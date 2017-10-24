@@ -16,6 +16,7 @@ import (
 	"math/rand"
 	"time"
 	"path/filepath"
+	"bytes"
 )
 
 type Rule struct {
@@ -170,17 +171,14 @@ func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
 		url = "https://cronitor.io/v3/monitors"
 	}
 
-	b, _ := json.Marshal(monitorsArray)
-	jsonString := string(b)
+	jsonBytes, _ := json.Marshal(monitorsArray)
+	jsonString := string(jsonBytes)
 
 	if verbose {
-		fmt.Println("Request:")
-		b, err := json.MarshalIndent(jsonString, "", "    ")
-		if err != nil {
-			fmt.Println(jsonString)
-		} else {
-			fmt.Println(b)
-		}
+		buf := new(bytes.Buffer)
+		json.Indent(buf, jsonBytes, "", "  ")
+		fmt.Println("\nRequest:")
+		fmt.Println(buf)
 	}
 
 	response, err := sendHttpPut(url, jsonString)
@@ -189,13 +187,11 @@ func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
 	}
 
 	if verbose {
-		fmt.Println("Response:")
-		b, err := json.MarshalIndent(response, "", "    ")
-		if err != nil {
-			fmt.Println(response)
-		} else {
-			fmt.Println(b)
-		}
+		buf := new(bytes.Buffer)
+		json.Indent(buf, response, "", "  ")
+		fmt.Println("\nResponse:")
+		fmt.Println(buf)
+		fmt.Println("\n")
 	}
 
 	responseMonitors := []Monitor{}
@@ -317,10 +313,7 @@ func createAutoDiscoverLine(usesSixFieldCronExpression bool) *Line {
 	commandToRun = strings.Replace(commandToRun, "--save ", "", -1)
 	commandToRun = strings.Replace(commandToRun, "--verbose ", "", -1)
 	commandToRun = strings.Replace(commandToRun, "-v ", "", -1)
-
-	if absoluteCronPath, err := filepath.Abs(crontabPath); err == nil {
-		commandToRun = strings.Replace(commandToRun, crontabPath, absoluteCronPath, -1)
-	}
+	commandToRun = strings.Replace(commandToRun, crontabPath, getCrontabPath(), -1)
 
 	line := Line{}
 	line.CronExpression = cronExpression
@@ -333,7 +326,7 @@ func createNote(LineNumber int, IsAutoDiscoverCommand bool) string {
 		return fmt.Sprintf("Watching for schedule changes and new entries in %s", crontabPath)
 	}
 
-	return fmt.Sprintf("Discovered in %s:%d", crontabPath, LineNumber)
+	return fmt.Sprintf("Discovered in %s:%d", getCrontabPath(), LineNumber)
 }
 
 func createName(CommandToRun string, IsAutoDiscoverCommand bool) string {
@@ -425,6 +418,14 @@ func sendHttpPut(url string, body string) ([]byte, error) {
 func randomMinute() int {
 	rand.Seed(time.Now().Unix())
 	return rand.Intn(59)
+}
+
+func getCrontabPath() string {
+	if absoluteCronPath, err := filepath.Abs(crontabPath); err == nil {
+		return absoluteCronPath
+	}
+
+	return crontabPath
 }
 
 func init() {
