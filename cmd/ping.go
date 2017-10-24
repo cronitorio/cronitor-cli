@@ -6,7 +6,7 @@ import (
 	"errors"
 )
 
-var start bool
+var run bool
 var complete bool
 var fail bool
 var msg string
@@ -41,7 +41,7 @@ func getEndpointFromFlag() string {
 		return "fail"
 	} else if complete {
 		return "complete"
-	} else if start {
+	} else if run {
 		return "run"
 	}
 
@@ -50,7 +50,7 @@ func getEndpointFromFlag() string {
 
 func init() {
 	RootCmd.AddCommand(pingCmd)
-	pingCmd.Flags().BoolVar(&start, "start", false, "Send a /run ping")
+	pingCmd.Flags().BoolVar(&run, "run", false, "Send a /run ping")
 	pingCmd.Flags().BoolVar(&complete, "complete", false, "Send a /complete ping")
 	pingCmd.Flags().BoolVar(&fail, "fail", false, "Send a /fail ping")
 	pingCmd.Flags().StringVar(&msg, "msg", "", "Optional message to send with ping")
