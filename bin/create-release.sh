@@ -5,6 +5,9 @@ if [ -z "$1" ]
   then echo "Usage: create-release.sh <version number>" && exit 1
 fi
 
+git tag $1
+git push --tags
+
 equinox release \
  --version="$1" \
  --platforms="darwin_amd64 linux_amd64" \
