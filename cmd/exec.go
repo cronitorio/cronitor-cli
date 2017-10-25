@@ -8,9 +8,11 @@ import (
 	"errors"
 	"strings"
 	"os"
+	"github.com/kballard/go-shellquote"
 )
 
-var monitorCode, command string
+var monitorCode string
+var commandParts []string
 var execCmd = &cobra.Command{
 	Use:   "exec",
 	Short: "Execute a command with Cronitor monitoring.",
@@ -18,10 +20,9 @@ var execCmd = &cobra.Command{
 	Args: func(cmd *cobra.Command, args []string) error {
 		// We need to use raw os.Args so we can pass the wrapped command through unparsed
 		var foundExec, foundCode bool
-		var commandParts []string
 		for _, arg := range os.Args {
-			if foundExec && foundCode {
-				commandParts = append(commandParts, arg)
+			if foundExec && foundCode{
+				commandParts = append(commandParts,  strings.TrimSpace(arg))
 				continue
 			}
 
@@ -37,14 +38,17 @@ var execCmd = &cobra.Command{
 			}
 		}
 
-		command = strings.TrimSpace(strings.Join(commandParts, " "))
-		if len(monitorCode) < 1 || len(command) < 1 {
+		// Earlier in the application a `--` is parsed into the args after the `exec` command to
+		// ensure that any flags passed to this command are not interpreted as flags to the cronitor app.
+		// Remove that.
+		if commandParts[0] == "--" {
+			commandParts = commandParts[1:]
+		}
+
+		if len(monitorCode) < 1 || len(commandParts) < 1 {
 			return errors.New("A unique monitor code and cli command are required immediately after 'exec'")
 		}
 
-		if strings.HasPrefix(command, "-- ") {
-			command = command[3:]
-		}
 		return nil
 	},
 
@@ -53,12 +57,17 @@ var execCmd = &cobra.Command{
 		wg.Add(1)
 
 		if verbose {
-			fmt.Println(fmt.Sprintf("Running command: %s", command))
+			fmt.Println(fmt.Sprintf("Running command: %s", shellquote.Join(commandParts...)))
 		}
 
 		go sendPing("run", monitorCode, "", &wg)
 
-		output, err := exec.Command("sh", "-c", command).CombinedOutput()
+		// Shift a -c param onto the beginning of the command, then pass to /bin/sh
+		commandParts = append(commandParts, "")
+		copy(commandParts[1:], commandParts[0:])
+		commandParts[0] = "-c"
+
+		output, err := exec.Command("sh", commandParts...).CombinedOutput()
 		if noStdoutPassthru {
 			output = []byte{}
 		}
