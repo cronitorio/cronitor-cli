@@ -56,18 +56,14 @@ var execCmd = &cobra.Command{
 		var wg sync.WaitGroup
 		wg.Add(1)
 
-		if verbose {
-			fmt.Println(fmt.Sprintf("Running command: %s", shellquote.Join(commandParts...)))
-		}
-
 		go sendPing("run", monitorCode, "", &wg)
 
-		// Shift a -c param onto the beginning of the command, then pass to /bin/sh
-		commandParts = append(commandParts, "")
-		copy(commandParts[1:], commandParts[0:])
-		commandParts[0] = "-c"
+		command := shellquote.Join(commandParts...)
+		if verbose {
+			fmt.Println(fmt.Sprintf("Running command: %s", command))
+		}
 
-		output, err := exec.Command("sh", commandParts...).CombinedOutput()
+		output, err := exec.Command("sh", "-c", command).CombinedOutput()
 		if noStdoutPassthru {
 			output = []byte{}
 		}

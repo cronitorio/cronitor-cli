@@ -1,3 +1,4 @@
 sleep 1
-echo "Success!"
+echo "Args:"
+echo $0 $*
 exit
