@@ -59,9 +59,7 @@ var execCmd = &cobra.Command{
 		go sendPing("run", monitorCode, "", &wg)
 
 		command := shellquote.Join(commandParts...)
-		if verbose {
-			fmt.Println(fmt.Sprintf("Running command: %s", command))
-		}
+		log(fmt.Sprintf("Running command: %s", command))
 
 		output, err := exec.Command("sh", "-c", command).CombinedOutput()
 		if noStdoutPassthru {

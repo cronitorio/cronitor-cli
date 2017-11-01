@@ -64,8 +64,46 @@ var crontabPath string
 
 var discoverCmd = &cobra.Command{
 	Use:   "discover [crontab]",
-	Short: "Identify new cron jobs and attach Cronitor monitoring. When no crontab argument is provided /etc/crontab is used where available.",
-	Long:  ``,
+	Short: "Identify new cron jobs and attach Cronitor monitoring. When no crontab argument is provided /etc/crontab is used.",
+	Long:  `Discover will parse your crontab file create or update monitors using the Cronitor API as entries are added and modified.
+
+	To use Discover, you will need to pass the Cronitor API key from your dashboard. This can be passed as a flag, environment variable, or saved
+	in your Cronitor configuration file. See 'help configure' for more details.
+
+	Example:
+
+		$ cronitor discover
+		  ... Create monitors on your Cronitor dashboard for each entry in /etc/crontab. The command string will be used as a name.
+		  ... Output contents of the crontab with Cronitor integration to stdout
+
+	Example with customized monitor names:
+
+		$ cronitor discover -e "/var/app/code/path/" -e "/var/app/bin/" -e "> /dev/null"
+		  ... Update previously discovered monitors or create new monitors, excluding the provided snippets from the monitor name.
+		  ... Output contents of the crontab with Cronitor integration to stdout
+
+		You can run the command as many times as you need with additional exclusion text until the job names on your Cronitor Dashboard are clear and readable.
+
+	Example with an arbitrary crontab file:
+
+		$ cronitor discover /path/to/crontab
+		  ... Create monitors on your Cronitor dashboard for each entry in /path/to/crontab.
+		  ... Output contents of the crontab with Cronitor integration to stdout
+
+		When a monitor is created its crontab file location is added as a default note.
+
+	Example where your Crontab file is updated:
+
+		$ cronitor discover --save
+		  ... Create or update monitors
+		  ... Add Cronitor integration and save the updated crontab.
+
+		Note: You will need to run this command as 'sudo' if your account does not have privileges to write /etc/crontab
+
+	In all of these examples, auto discover is enabled by adding 'cronitor discover' to your crontab as an hourly task. If a --save param is provided, auto discover
+	will ensure that any entries added to your crontab are automatically integrated with Cronitor. Even without --save, auto discover will push schedule changes
+	to Cronitor to keep your monitoring in sync with your Crontab.
+	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 && runtime.GOOS == "windows" {
 			fmt.Fprintln(os.Stderr, "A crontab file argument is required on this platform")
@@ -174,25 +212,19 @@ func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
 	jsonBytes, _ := json.Marshal(monitorsArray)
 	jsonString := string(jsonBytes)
 
-	if verbose {
-		buf := new(bytes.Buffer)
-		json.Indent(buf, jsonBytes, "", "  ")
-		fmt.Println("\nRequest:")
-		fmt.Println(buf)
-	}
+	buf := new(bytes.Buffer)
+	json.Indent(buf, jsonBytes, "", "  ")
+	log("\nRequest:")
+	log(buf.String() + "\n")
 
 	response, err := sendHttpPut(url, jsonString)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Request to %s failed: %s", url, err))
 	}
 
-	if verbose {
-		buf := new(bytes.Buffer)
-		json.Indent(buf, response, "", "  ")
-		fmt.Println("\nResponse:")
-		fmt.Println(buf)
-		fmt.Println("\n")
-	}
+	json.Indent(buf, response, "", "  ")
+	log("\nResponse:")
+	log(buf.String() + "\n")
 
 	responseMonitors := []Monitor{}
 	if err = json.Unmarshal(response, &responseMonitors); err != nil {

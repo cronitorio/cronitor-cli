@@ -11,6 +11,7 @@ import (
 	"time"
 	"io/ioutil"
 	"net/url"
+	"strconv"
 )
 
 var version = "0.6.0"
@@ -19,6 +20,7 @@ var userAgent string
 
 // Flags that are either global or used in multiple commands
 var apiKey string
+var debugLog string
 var dev bool
 var verbose bool
 var noStdoutPassthru bool
@@ -55,8 +57,13 @@ func init() {
 	RootCmd.PersistentFlags().BoolVar(&dev, "use-dev", dev, "Dev mode")
 	RootCmd.PersistentFlags().MarkHidden("use-dev")
 
+	RootCmd.PersistentFlags().StringVar(&debugLog, "log", debugLog, "Write debug logs to supplied file")
+	RootCmd.PersistentFlags().MarkHidden("log")
+
 	viper.BindPFlag("CRONITOR-API-KEY", RootCmd.PersistentFlags().Lookup("api-key"))
 	viper.BindPFlag("CRONITOR-HOSTNAME", RootCmd.PersistentFlags().Lookup("hostname"))
+	viper.BindPFlag("CRONITOR-CONFIG", RootCmd.PersistentFlags().Lookup("config"))
+	viper.BindPFlag("CRONITOR-LOG", RootCmd.PersistentFlags().Lookup("log"))
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -80,8 +87,8 @@ func initConfig() {
 
 	viper.AutomaticEnv() // read in environment variables that match
 	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil && verbose {
-		fmt.Println("Reading config from", viper.ConfigFileUsed())
+	if err := viper.ReadInConfig(); err == nil {
+		log("Reading config from " + viper.ConfigFileUsed())
 	}
 }
 
@@ -94,6 +101,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 
 	pingApiAuthKey := viper.GetString("CRONITOR-PING-API-AUTH-KEY")
 	hostname := effectiveHostname()
+	stamp := strconv.FormatFloat(makeStamp(), 'f', 3, 64)
 
 	if len(message) > 0 {
 		message = fmt.Sprintf("&msg=%s", url.QueryEscape(truncateString(message, 2000)))
@@ -118,11 +126,8 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 			host = "https://cronitor.link"
 		}
 
-		uri := fmt.Sprintf("%s/%s/%s?try=%d%s%s%s", host, uniqueIdentifier, endpoint, i, message, pingApiAuthKey, hostname)
-
-		if verbose {
-			fmt.Println("Sending ping", uri)
-		}
+		uri := fmt.Sprintf("%s/%s/%s?try=%d&stamp=%s%s%s%s", host, uniqueIdentifier, endpoint, i, stamp, message, pingApiAuthKey, hostname)
+		log("Sending ping " + uri)
 
 		request, err := http.NewRequest("GET", uri, nil)
 		request.Header.Add("User-Agent", userAgent)
@@ -130,6 +135,11 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 
 		if err != nil {
 			fmt.Println(err)
+
+			// After 3 failed attempts, begin to sleep between tries
+			if i > 2 {
+				time.Sleep(time.Second * 2)
+			}
 			continue
 		}
 
@@ -157,4 +167,23 @@ func truncateString(s string, length int) string {
 	}
 
 	return s[:length]
+}
+
+func log(msg string) {
+	if len(debugLog) > 0 {
+		if verbose {
+			fmt.Println("Writing to log file " + debugLog)
+		}
+		f, _ := os.OpenFile(debugLog, os.O_APPEND|os.O_WRONLY, 0644)
+		defer f.Close()
+		f.WriteString(msg)
+	}
+
+	if verbose {
+		fmt.Println(msg)
+	}
+}
+
+func makeStamp() float64 {
+	return float64(time.Now().UnixNano()) / float64(time.Second)
 }
