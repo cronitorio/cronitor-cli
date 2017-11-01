@@ -14,7 +14,7 @@ import (
 	"strconv"
 )
 
-var version = "0.6.0"
+var version = "0.7.0"
 var cfgFile string
 var userAgent string
 
