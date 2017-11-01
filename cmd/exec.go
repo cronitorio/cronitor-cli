@@ -21,12 +21,14 @@ var execCmd = &cobra.Command{
 		// We need to use raw os.Args so we can pass the wrapped command through unparsed
 		var foundExec, foundCode bool
 		for _, arg := range os.Args {
-			if foundExec && foundCode{
+			// Treat anything that comes after the monitor code as the command to execute
+			if foundCode {
 				commandParts = append(commandParts,  strings.TrimSpace(arg))
 				continue
 			}
 
-			if foundExec && !foundCode {
+			// After finding "exec" we are looking for a monitor code, ignoring any flags
+			if foundExec && !foundCode && !strings.HasPrefix(arg, "-") {
 				monitorCode = arg
 				foundCode = true
 				continue
