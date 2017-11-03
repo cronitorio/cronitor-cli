@@ -21,7 +21,8 @@ type ConfigFile struct {
 var configureCmd = &cobra.Command{
 	Use:   "configure",
 	Short: "Write required configuration variables to the selected config file.",
-	Long:  `Optionally write configuration options to a JSON file, by default ~/.cronitor.json.
+	Long:  `
+Optionally write configuration options to a JSON file, by default ~/.cronitor.json.
 
 Cronitor Cli configuration can be supplied from a file, environment variables, or command line flags.
 You can use a default config file for some things and environment variables or command line flags for others -- the goal is flexibility.

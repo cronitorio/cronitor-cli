@@ -65,7 +65,8 @@ var crontabPath string
 var discoverCmd = &cobra.Command{
 	Use:   "discover [crontab]",
 	Short: "Identify new cron jobs and attach Cronitor monitoring. When no crontab argument is provided /etc/crontab is used.",
-	Long:  `Cronitor discover will parse your crontab file and create or update monitors using the Cronitor API.
+	Long:  `
+Cronitor discover will parse your crontab file and create or update monitors using the Cronitor API.
 
 Note: You must supply your Cronitor API key. This can be passed as a flag, environment variable, or saved in your Cronitor configuration file. See 'help configure' for more details.
 

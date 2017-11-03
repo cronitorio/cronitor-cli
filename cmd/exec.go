@@ -16,7 +16,8 @@ var commandParts []string
 var execCmd = &cobra.Command{
 	Use:   "exec",
 	Short: "Execute a command with Cronitor monitoring.",
-	Long:  `The supplied command will be executed and Cronitor will be notified of success or failure.
+	Long:  `
+The supplied command will be executed and Cronitor will be notified of success or failure.
 
 Example:
 
