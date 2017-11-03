@@ -42,7 +42,7 @@ func Execute() {
 }
 
 func init() {
-	userAgent = fmt.Sprintf("CronitorAgent/%s", version)
+	userAgent = fmt.Sprintf("CronitorCli/%s", version)
 	cobra.OnInitialize(initConfig)
 
 	// Here you will define your flags and configuration settings.
@@ -50,6 +50,7 @@ func init() {
 	// will be global for your application.
 	RootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", cfgFile, "Config file (default: .cronitor.json)")
 	RootCmd.PersistentFlags().StringVarP(&apiKey, "api-key", "k", apiKey, "Cronitor API Key")
+	RootCmd.PersistentFlags().StringVarP(&apiKey, "ping-api-key", "p", apiKey, "Ping API Key")
 	RootCmd.PersistentFlags().StringVarP(&apiKey, "hostname", "n", apiKey, "A unique identifier for this host (default: system hostname)")
 	RootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", verbose, "Verbose output")
 	RootCmd.PersistentFlags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
@@ -64,6 +65,7 @@ func init() {
 	viper.BindPFlag("CRONITOR-HOSTNAME", RootCmd.PersistentFlags().Lookup("hostname"))
 	viper.BindPFlag("CRONITOR-CONFIG", RootCmd.PersistentFlags().Lookup("config"))
 	viper.BindPFlag("CRONITOR-LOG", RootCmd.PersistentFlags().Lookup("log"))
+	viper.BindPFlag("CRONITOR-PING-API-AUTH-KEY", RootCmd.PersistentFlags().Lookup("ping-api-key"))
 }
 
 // initConfig reads in config file and ENV variables if set.

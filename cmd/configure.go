@@ -21,7 +21,22 @@ type ConfigFile struct {
 var configureCmd = &cobra.Command{
 	Use:   "configure",
 	Short: "Write required configuration variables to the selected config file.",
-	Long:  `Set configuration variables`,
+	Long:  `Optionally write configuration options to a JSON file, by default ~/.cronitor.json.
+
+Cronitor Cli configuration can be supplied from a file, environment variables, or command line flags.
+You can use a default config file for some things and environment variables or command line flags for others -- the goal is flexibility.
+
+Environment variables that are read:
+  CRONITOR-API-KEY
+  CRONITOR-PING-API-AUTH-KEY
+  CRONITOR-EXCLUDE-TEXT
+  CRONITOR-HOSTNAME
+
+Example setting your API Key:
+  $ cronitor configure --api-key 4319e94e890a013dbaca57c2df2ff60c2
+
+Example setting common exclude text for use with 'cronitor discover':
+  $ cronitor configure -e "/var/app/code/path/" -e "/var/app/bin/" -e "> /dev/null"`,
 	Run: func(cmd *cobra.Command, args []string) {
 		configData := ConfigFile{}
 		configData.ApiKey = viper.GetString("CRONITOR-API-KEY")
