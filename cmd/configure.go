@@ -39,6 +39,14 @@ Example setting your API Key:
 Example setting common exclude text for use with 'cronitor discover':
   $ cronitor configure -e "/var/app/code/path/" -e "/var/app/bin/" -e "> /dev/null"`,
 	Run: func(cmd *cobra.Command, args []string) {
+
+		if verbose {
+			fmt.Println("\nHostname:")
+			fmt.Println(effectiveHostname())
+			fmt.Println("\nLocation:")
+			fmt.Println(effectiveTimezoneLocationName())
+		}
+
 		configData := ConfigFile{}
 		configData.ApiKey = viper.GetString("CRONITOR-API-KEY")
 		configData.PingApiAuthKey = viper.GetString("CRONITOR-PING-API-AUTH-KEY")
