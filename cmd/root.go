@@ -12,6 +12,9 @@ import (
 	"io/ioutil"
 	"net/url"
 	"strconv"
+	"os/exec"
+	"strings"
+	"regexp"
 )
 
 var version = "0.8.1"
@@ -161,6 +164,37 @@ func effectiveHostname() string {
 
 	hostname, _ := os.Hostname()
 	return hostname
+}
+
+func effectiveTimezoneLocationName() string {
+	// First, check a TZ environemnt variable if one is set
+	if locale, isSetFlag := os.LookupEnv("TZ"); isSetFlag {
+		return locale
+	}
+
+	// Attempt to parse timedatectl (should work on FreeBSD, many linux distros)
+	if output, err := exec.Command("timedatectl").Output(); err == nil {
+		outputString := strings.Replace(string(output), "Time zone", "Timezone", -1)
+		r := regexp.MustCompile(`(?m:Timezone:\s+(\S+).+$)`)
+		if ret := r.FindStringSubmatch(outputString); ret != nil && len(ret) > 1 {
+			return ret[1]
+		}
+	}
+
+	// If /etc/localtime is a symlink, check what it is linking to
+	if localtimeFile, err := os.Lstat("/etc/localtime"); err == nil && localtimeFile.Mode() & os.ModeSymlink == os.ModeSymlink {
+		if symlink, _ := os.Readlink("/etc/localtime"); len(symlink) > 0 {
+			symlinkParts := strings.Split(symlink, "/")
+			return strings.Join(symlinkParts[len(symlinkParts)-2:], "/")
+		}
+	}
+
+	// If we happen to have an /etc/timezone, no guarantee it's used, but read that
+	if locale, err := ioutil.ReadFile("/etc/timezone"); err == nil {
+		return string(locale)
+	}
+
+	return ""
 }
 
 func truncateString(s string, length int) string {

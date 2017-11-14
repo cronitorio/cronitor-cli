@@ -27,13 +27,14 @@ type Rule struct {
 }
 
 type Monitor struct {
-	Name  string   `json:"defaultName"`
-	Key   string   `json:"key"`
-	Rules []Rule   `json:"rules"`
-	Tags  []string `json:"tags"`
-	Type  string   `json:"type"`
-	Code  string   `json:"code,omitempty"`
-	Note  string   `json:"note,omitempty"`
+	Name  		string   `json:"defaultName"`
+	Key   		string   `json:"key"`
+	Rules 		[]Rule   `json:"rules"`
+	Tags  		[]string `json:"tags"`
+	Type  		string   `json:"type"`
+	Code  		string   `json:"code,omitempty"`
+	Timezone	string   `json:"timezone,omitempty"`
+	Note  		string   `json:"note,omitempty"`
 }
 
 type Line struct {
@@ -121,6 +122,7 @@ to Cronitor to keep your monitoring in sync with your Crontab.
 		}
 
 		crontabLines := parseCrontab(crontabStrings)
+		timezone := effectiveTimezoneLocationName()
 
 		// Read crontabLines into map of Monitor structs
 		monitors := map[string]*Monitor{}
@@ -141,6 +143,7 @@ to Cronitor to keep your monitoring in sync with your Crontab.
 				tags,
 				"heartbeat",
 				line.Code,
+				timezone,
 				createNote(line.LineNumber, line.IsAutoDiscoverCommand()),
 			}
 
