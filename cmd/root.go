@@ -17,7 +17,7 @@ import (
 	"regexp"
 )
 
-var version = "0.8.1"
+var version = "1.0.0"
 var cfgFile string
 var userAgent string
 
