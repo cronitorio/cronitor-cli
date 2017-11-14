@@ -15,12 +15,16 @@ func main() {
 			commandIndex = idx + 2
 		}
 
+		if arg == "help" && commandIndex == 0 {
+			break
+		}
+
 		if commandIndex > 0 && arg == "--" {
 			argsEscaped = true
 		}
 	}
 
-	if commandIndex > 0 && !argsEscaped {
+	if commandIndex > 0 && !argsEscaped && len(os.Args) > commandIndex + 1 {
 		os.Args = append(os.Args, "")
 		copy(os.Args[commandIndex+1:], os.Args[commandIndex:])
 		os.Args[commandIndex] = "--"

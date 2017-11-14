@@ -54,7 +54,7 @@ Example with no command output send to Cronitor:
 		// Earlier in the application a `--` is parsed into the args after the `exec` command to
 		// ensure that any flags passed to this command are not interpreted as flags to the cronitor app.
 		// Remove that.
-		if commandParts[0] == "--" {
+		if len(commandParts) > 0 && commandParts[0] == "--" {
 			commandParts = commandParts[1:]
 		}
 
