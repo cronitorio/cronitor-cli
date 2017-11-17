@@ -106,8 +106,7 @@ to Cronitor to keep your monitoring in sync with your Crontab.
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 && runtime.GOOS == "windows" {
-			fmt.Fprintln(os.Stderr, "A crontab file argument is required on this platform")
-			os.Exit(1)
+			fatal("A crontab file argument is required on this platform", 1)
 		}
 
 		crontabPath = "/etc/crontab"
@@ -117,8 +116,7 @@ to Cronitor to keep your monitoring in sync with your Crontab.
 
 		crontabStrings, errCode, err := readCrontab(crontabPath)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(errCode)
+			fatal(err.Error(), errCode)
 		}
 
 		crontabLines := parseCrontab(crontabStrings)
@@ -153,8 +151,7 @@ to Cronitor to keep your monitoring in sync with your Crontab.
 		// Put monitors to Cronitor API
 		monitors, err = putMonitors(monitors)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			fatal(err.Error(), 1)
 		}
 
 		// Re-write crontab lines with new/updated monitoring
@@ -167,8 +164,7 @@ to Cronitor to keep your monitoring in sync with your Crontab.
 
 		if saveCrontabFile {
 			if ioutil.WriteFile(crontabPath, []byte(updatedCrontabLines), 0644) != nil {
-				fmt.Fprintf(os.Stderr, "The --save option is supplied but the file at %s could not be written; check permissions and try again", crontabPath)
-				os.Exit(126)
+				fatal(fmt.Sprintf("The --save option is supplied but the file at %s could not be written; check permissions and try again", crontabPath), 126)
 			}
 
 			fmt.Println(fmt.Sprintf("Crontab %s updated", crontabPath))

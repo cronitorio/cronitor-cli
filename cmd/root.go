@@ -39,8 +39,7 @@ var RootCmd = &cobra.Command{
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	if err := RootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		fatal(err.Error(), 1)
 	}
 }
 
@@ -81,8 +80,7 @@ func initConfig() {
 		// Find home directory.
 		home, err := homedir.Dir()
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			fatal(err.Error(), 1)
 		}
 
 		// Search config in home directory
@@ -139,7 +137,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 		response, err := Client.Do(request)
 
 		if err != nil {
-			fmt.Println(err)
+			log(err.Error())
 
 			// After 3 failed attempts, begin to sleep between tries
 			if i > 2 {
@@ -207,17 +205,25 @@ func truncateString(s string, length int) string {
 
 func log(msg string) {
 	if len(debugLog) > 0 {
-		if verbose {
-			fmt.Println("Writing to log file " + debugLog)
-		}
-		f, _ := os.OpenFile(debugLog, os.O_APPEND|os.O_WRONLY, 0644)
+		f, _ := os.OpenFile(debugLog, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 		defer f.Close()
-		f.WriteString(msg)
+		f.WriteString(msg + "\n")
 	}
 
 	if verbose {
 		fmt.Println(msg)
 	}
+}
+
+func fatal(msg string, exitCode int) {
+	if len(debugLog) > 0 {
+		f, _ := os.OpenFile(debugLog, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+		defer f.Close()
+		f.WriteString(msg + "\n")
+	}
+
+	fmt.Fprintln(os.Stderr, msg)
+	os.Exit(exitCode)
 }
 
 func makeStamp() float64 {
