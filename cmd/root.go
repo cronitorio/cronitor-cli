@@ -155,6 +155,28 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 	}
 }
 
+func sendApiRequest(url string) ([]byte, error) {
+	client := &http.Client{}
+	request, err := http.NewRequest("GET", url, nil)
+	request.SetBasicAuth(viper.GetString("CRONITOR-API-KEY"), "")
+	request.Header.Add("Content-Type", "application/json")
+	request.Header.Add("User-Agent", userAgent)
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+
+	defer response.Body.Close()
+	contents, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return contents, nil
+}
+
+
+
 func effectiveHostname() string {
 	if len(viper.GetString("CRONITOR-HOSTNAME")) > 0 {
 		return viper.GetString("CRONITOR-HOSTNAME")
@@ -193,6 +215,15 @@ func effectiveTimezoneLocationName() string {
 	}
 
 	return ""
+}
+
+func effectiveApiUrl() string {
+	if dev {
+		return "http://dev.cronitor.io/v3/monitors"
+	} else {
+		return "https://cronitor.io/v3/monitors"
+	}
+
 }
 
 func truncateString(s string, length int) string {

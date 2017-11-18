@@ -104,6 +104,14 @@ In all of these examples, auto discover is enabled by adding 'cronitor discover'
 will ensure that any entries added to your crontab are automatically integrated with Cronitor. Even without --save, auto discover will push schedule changes
 to Cronitor to keep your monitoring in sync with your Crontab.
 	`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(viper.GetString("CRONITOR-API-KEY")) < 10 {
+			return errors.New("you must provide an API key with this command or save a key using 'cronitor configure'")
+		}
+
+		return nil
+	},
+
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 && runtime.GOOS == "windows" {
 			fatal("A crontab file argument is required on this platform", 1)
@@ -195,16 +203,10 @@ func readCrontab(crontabPath string) ([]string, int, error) {
 }
 
 func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
-	var url string
+	url := effectiveApiUrl()
 	monitorsArray := make([]Monitor, 0, len(monitors))
 	for _, v := range monitors {
 		monitorsArray = append(monitorsArray, *v)
-	}
-
-	if dev {
-		url = "http://dev.cronitor.io/v3/monitors"
-	} else {
-		url = "https://cronitor.io/v3/monitors"
 	}
 
 	jsonBytes, _ := json.Marshal(monitorsArray)
