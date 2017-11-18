@@ -13,6 +13,7 @@ import (
 
 type StatusMonitor struct {
 	Name       string  `json:"name"`
+	Code       string  `json:"code"`
 	Passing		bool	`json:"passing"`
 	Status     string	`json:"status"`
 }
@@ -77,7 +78,7 @@ Examples:
 
 		fmt.Println(url)
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Health", "Status", "Name"})
+		table.SetHeader([]string{"Health", "Name", "Code", "Status"})
 		table.SetAutoWrapText(false)
 		table.SetHeaderAlignment(3)
 
@@ -86,7 +87,7 @@ Examples:
 			if !v.Passing {
 				state = "Fail"
 			}
-			table.Append([]string{state, v.Status, v.Name})
+			table.Append([]string{state, v.Name, v.Code, v.Status})
 		}
 
 		table.Render()
