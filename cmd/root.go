@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"strings"
 	"regexp"
+	"errors"
 )
 
 var version = "1.1.0"
@@ -164,6 +165,10 @@ func sendApiRequest(url string) ([]byte, error) {
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, err
+	}
+
+	if response.StatusCode != 200 {
+		return nil, errors.New(fmt.Sprintf("Unexpected %d API response", response.StatusCode))
 	}
 
 	defer response.Body.Close()

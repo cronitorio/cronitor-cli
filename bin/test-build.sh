@@ -125,6 +125,13 @@ if ../cronitor status 44oI2n --log $LOGFILE | grep -q "Pass"
     else echo "${TEST}.. Failed"
 fi
 
+rm $LOGFILE
+TEST="Status integration test with bad monitor code"
+if ../cronitor status asdfgh --log $LOGFILE 2>&1 | grep -q "404"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. Failed"
+fi
+
 #################
 # ACTIVITY TESTS
 #################
