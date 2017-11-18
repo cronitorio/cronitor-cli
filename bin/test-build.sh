@@ -11,7 +11,7 @@ LOGFILE="/tmp/test-build.log"
 
 # Test basic ping
 rm $LOGFILE
-TEST="Basic ping check"
+TEST="Ping without args"
 ../cronitor ping d3x0c1 --run --log /tmp/test-build.log
 if grep -q "Sending ping https://cronitor.link/d3x0c1/run" $LOGFILE
     then echo "${TEST}.. OK"
@@ -20,7 +20,7 @@ fi
 
 # Test using a custom hostname
 rm $LOGFILE
-TEST="Ping check with custom hostname"
+TEST="Ping with custom hostname"
 ../cronitor ping d3x0c1 --run --hostname customHostnameForTest --log $LOGFILE
 if grep -q "Sending ping https://cronitor.link/d3x0c1/run" $LOGFILE && grep -q "hostname=customHostnameForTest" $LOGFILE
     then echo "${TEST}.. OK"
@@ -28,7 +28,7 @@ if grep -q "Sending ping https://cronitor.link/d3x0c1/run" $LOGFILE && grep -q "
 fi
 
 rm $LOGFILE
-TEST="Ping check with message"
+TEST="Ping with message"
 MSG="messagewithoutspaces"
 ../cronitor ping d3x0c1 --run --msg "$MSG" --log $LOGFILE
 if grep -q "Sending ping https://cronitor.link/d3x0c1/run" $LOGFILE && grep -q "$MSG" $LOGFILE
@@ -38,7 +38,7 @@ fi
 
 # Test with a ping api key
 rm $LOGFILE
-TEST="Ping check api key"
+TEST="Ping with ping api key"
 KEY="XXXXXXXXXX"
 ../cronitor ping d3x0c1 --run --ping-api-key $KEY --log $LOGFILE
 if grep -q "Sending ping https://cronitor.link/d3x0c1/run" $LOGFILE && grep -q $KEY $LOGFILE
