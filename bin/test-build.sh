@@ -5,6 +5,11 @@ cd $SCRIPT_DIR
 
 LOGFILE="/tmp/test-build.log"
 
+# First, build fresh
+cd ../
+go build
+cd - > /dev/null
+
 #################
 # PING TESTS
 #################
