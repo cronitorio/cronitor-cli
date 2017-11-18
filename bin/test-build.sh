@@ -104,3 +104,49 @@ if ../cronitor activity 44oI2n | grep -q "$MSG"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. Failed"
 fi
+
+
+#################
+# STATUS TESTS
+#################
+
+# Production integration tests
+rm $LOGFILE
+TEST="Status integration test without filter"
+if ../cronitor status --log $LOGFILE | grep -q "Pass"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. Failed"
+fi
+
+rm $LOGFILE
+TEST="Status integration test with filter"
+if ../cronitor status 44oI2n --log $LOGFILE | grep -q "Pass"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. Failed"
+fi
+
+#################
+# ACTIVITY TESTS
+#################
+
+# Activity integration tests
+rm $LOGFILE
+TEST="Activity integration test without filter"
+if ../cronitor activity 44oI2n --log $LOGFILE | grep -q "monitor_name"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. Failed"
+fi
+
+rm $LOGFILE
+TEST="Activity integration test with only pings filter"
+if ../cronitor activity 44oI2n --only pings --log $LOGFILE | grep -q "monitor_name"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. Failed"
+fi
+
+rm $LOGFILE
+TEST="Activity integration test with only alerts filter"
+if ../cronitor activity 44oI2n --only alerts --log $LOGFILE | grep -q "No alert history for this monitor"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. Failed"
+fi
