@@ -14,8 +14,8 @@ import (
 type StatusMonitor struct {
 	Name       string  `json:"name"`
 	Code       string  `json:"code"`
-	Passing		bool	`json:"passing"`
-	Status     string	`json:"status"`
+	Passing    bool	  `json:"passing"`
+	Status     string  `json:"status"`
 }
 
 type StatusMonitors struct {
