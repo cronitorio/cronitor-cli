@@ -20,12 +20,10 @@ var execCmd = &cobra.Command{
 The supplied command will be executed and Cronitor will be notified of success or failure.
 
 Example:
-
   $ cronitor exec d3x0c1 /path/to/command.sh --command-param argument1 argument2
   This command will ping your Cronitor monitor d3x0c1 and execute the command '/path/to/command.sh --command-param argument1 argument2'
 
 Example with no command output send to Cronitor:
-
   By default, stdout and stderr messages are sent to Cronitor when your job completes. To prevent any stdout output from being sent to cronitor, use the --no-stdout flag:
   $ cronitor exec d3x0c1 --no-stdout /path/to/command.sh --command-param argument1 argument2`,
 	Args: func(cmd *cobra.Command, args []string) error {

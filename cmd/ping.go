@@ -18,12 +18,10 @@ var pingCmd = &cobra.Command{
 Ping the specified monitor to report current status.
 
 Example:
-
   Notify Cronitor that your job has started to run
   $ cronitor ping d3x0c1 --run
 
 Example with a custom hostname:
-
   $ cronitor ping d3x0c1 --run --hostname "custom-name"
   If no hostname is provided, the system hostname is used.
 

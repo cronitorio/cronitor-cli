@@ -72,13 +72,11 @@ Cronitor discover will parse your crontab file and create or update monitors usi
 Note: You must supply your Cronitor API key. This can be passed as a flag, environment variable, or saved in your Cronitor configuration file. See 'help configure' for more details.
 
 Example:
-
   $ cronitor discover
     ... Create monitors on your Cronitor dashboard for each entry in /etc/crontab. The command string will be used as a name.
     ... Add Cronitor integration to your crontab and output to stdout
 
 Example with customized monitor names:
-
   $ cronitor discover -e "/var/app/code/path/" -e "/var/app/bin/" -e "> /dev/null"
     ... Update previously discovered monitors or create new monitors, excluding the provided snippets from the monitor name.
     ... Add Cronitor integration to your crontab and output to stdout
@@ -86,7 +84,6 @@ Example with customized monitor names:
   You can run the command as many times as you need with additional exclusion text until the job names on your Cronitor Dashboard are clear and readable.
 
 Example with an arbitrary crontab file:
-
   $ cronitor discover /path/to/crontab
     ... Create monitors on your Cronitor dashboard for each entry in /path/to/crontab.
     ... Add Cronitor integration to your crontab and output to stdout
@@ -94,7 +91,6 @@ Example with an arbitrary crontab file:
   When a monitor is created its crontab file location is added as a default note.
 
 Example where your Crontab file is updated in place:
-
   $ cronitor discover --save
     ... Create or update monitors
     ... Add Cronitor integration to your crontab and save the file
