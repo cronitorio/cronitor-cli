@@ -28,7 +28,7 @@ fi
 rm -f $LOGFILE
 TEST="Ping with custom hostname"
 ../cronitor ping d3x0c1 --run --hostname customHostnameForTest --log $LOGFILE
-if grep -q "Sending ping https://cronitor.link/d3x0c1/run" $LOGFILE && grep -q "hostname=customHostnameForTest" $LOGFILE
+if grep -q "Sending ping https://cronitor.link/d3x0c1/run" $LOGFILE && grep -q "host=customHostnameForTest" $LOGFILE
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
@@ -100,6 +100,31 @@ if grep -q "Sending ping https://cronitor.link/d3x0c1/fail" $LOGFILE
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
+
+rm -f $LOGFILE
+TEST="Exec sends status code on complete ping"
+../cronitor --log $LOGFILE exec d3x0c1 ./fail.sh
+if grep -q "status_code=123" $LOGFILE
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+TEST="Exec sends run timestamp as complete ping tag"
+../cronitor --log $LOGFILE exec d3x0c1 true
+if grep -q "tag=1" $LOGFILE
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+TEST="Exec sends duration with complete ping"
+../cronitor --log $LOGFILE exec d3x0c1 sleep 1
+if grep -q "duration=1." $LOGFILE
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
 
 # Production integration test
 rm -f $LOGFILE

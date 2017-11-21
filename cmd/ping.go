@@ -48,7 +48,7 @@ Example when using authenticated ping requests:
 		var wg sync.WaitGroup
 
 		wg.Add(1)
-		go sendPing(getEndpointFromFlag(), args[0], msg, &wg)
+		go sendPing(getEndpointFromFlag(), args[0], msg, "", makeStamp(), nil, nil, &wg)
 		wg.Wait()
 	},
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"os"
 	"github.com/kballard/go-shellquote"
+	"syscall"
 )
 
 var monitorCode string
@@ -69,22 +70,40 @@ Example with no command output send to Cronitor:
 		var wg sync.WaitGroup
 		wg.Add(1)
 
-		go sendPing("run", monitorCode, "", &wg)
+		startTime := makeStamp()
+		formattedStartTime := formatStamp(startTime)
+		go sendPing("run", monitorCode, "", formattedStartTime, startTime, nil, nil, &wg)
 
-		command := shellquote.Join(commandParts...)
-		log(fmt.Sprintf("Running command: %s", command))
+		subcommand := shellquote.Join(commandParts...)
+		log(fmt.Sprintf("Running subcommand: %s", subcommand))
 
-		output, err := exec.Command("sh", "-c", command).CombinedOutput()
+		output, err := exec.Command("sh", "-c", subcommand).CombinedOutput()
 		if noStdoutPassthru {
 			output = []byte{}
 		}
 
+		endTime := makeStamp()
+		duration := endTime - startTime
+		exitCode := 0
 		if err == nil {
 			wg.Add(1)
-			go sendPing("complete", monitorCode, string(output), &wg)
+			go sendPing("complete", monitorCode, string(output), formattedStartTime, endTime, &duration, &exitCode, &wg)
 		} else {
 			wg.Add(1)
-			go sendPing("fail", monitorCode, strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), output)), &wg)
+			message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), output))
+
+			// This works on both Unix and Windows. Although package syscall is generally platform dependent, WaitStatus is
+			// defined for both Unix and Windows and in both cases has an ExitStatus() method with the same signature.
+			// https://stackoverflow.com/questions/10385551/get-exit-code-go
+			if exiterr, ok := err.(*exec.ExitError); ok {
+				if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+					exitCode = status.ExitStatus()
+				} else {
+					exitCode = 1
+				}
+			}
+
+			go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, &wg)
 		}
 
 		wg.Wait()

@@ -96,7 +96,7 @@ func initConfig() {
 	}
 }
 
-func sendPing(endpoint string, uniqueIdentifier string, message string, group *sync.WaitGroup) {
+func sendPing(endpoint string, uniqueIdentifier string, message string, tag string, timestamp float64, duration *float64, exitCode *int, group *sync.WaitGroup) {
 	defer group.Done()
 
 	Client := &http.Client{
@@ -105,7 +105,9 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 
 	pingApiAuthKey := viper.GetString("CRONITOR-PING-API-AUTH-KEY")
 	hostname := effectiveHostname()
-	stamp := strconv.FormatFloat(makeStamp(), 'f', 3, 64)
+	formattedStamp := formatStamp(timestamp)
+	formattedDuration := ""
+	formattedStatusCode := ""
 
 	if len(message) > 0 {
 		message = fmt.Sprintf("&msg=%s", url.QueryEscape(truncateString(message, 2000)))
@@ -116,7 +118,22 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 	}
 
 	if len(hostname) > 0 {
-		hostname = fmt.Sprintf("&hostname=%s", url.QueryEscape(truncateString(hostname, 50)))
+		hostname = fmt.Sprintf("&host=%s", url.QueryEscape(truncateString(hostname, 50)))
+	}
+
+	// By passing duration up, we save the computation on the server side
+	if duration != nil {
+		formattedDuration = fmt.Sprintf("&duration=%s", formatStamp(*duration))
+	}
+
+	// We aren't using exit code at time of writing, but we have the field available for healthcheck monitors.
+	if exitCode != nil {
+		formattedStatusCode = fmt.Sprintf("&status_code=%d", *exitCode)
+	}
+
+	// The `tag` data is used to match start events and run events. Useful if multiple instances of a job are running.
+	if len(tag) > 0 {
+		tag = fmt.Sprintf("&tag=%s", tag)
 	}
 
 	for i := 1; i <= 6; i++ {
@@ -130,7 +147,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, group *s
 			host = "https://cronitor.link"
 		}
 
-		uri := fmt.Sprintf("%s/%s/%s?try=%d&stamp=%s%s%s%s", host, uniqueIdentifier, endpoint, i, stamp, message, pingApiAuthKey, hostname)
+		uri := fmt.Sprintf("%s/%s/%s?try=%d&stamp=%s%s%s%s%s%s%s", host, uniqueIdentifier, endpoint, i, formattedStamp, message, pingApiAuthKey, hostname, formattedDuration, tag, formattedStatusCode)
 		log("Sending ping " + uri)
 
 		request, err := http.NewRequest("GET", uri, nil)
@@ -264,4 +281,8 @@ func fatal(msg string, exitCode int) {
 
 func makeStamp() float64 {
 	return float64(time.Now().UnixNano()) / float64(time.Second)
+}
+
+func formatStamp(timestamp float64) string {
+	return strconv.FormatFloat(timestamp, 'f', 3, 64)
 }
