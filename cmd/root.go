@@ -103,9 +103,13 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, tag stri
 
 	pingApiAuthKey := viper.GetString("CRONITOR-PING-API-AUTH-KEY")
 	hostname := effectiveHostname()
-	formattedStamp := formatStamp(timestamp)
+	formattedStamp := ""
 	formattedDuration := ""
 	formattedStatusCode := ""
+
+	if timestamp > 0 {
+		formattedStamp = fmt.Sprintf("&stamp=%s", formatStamp(timestamp))
+	}
 
 	if len(message) > 0 {
 		message = fmt.Sprintf("&msg=%s", url.QueryEscape(truncateString(message, 2000)))
@@ -145,7 +149,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, tag stri
 			host = "https://cronitor.link"
 		}
 
-		uri := fmt.Sprintf("%s/%s/%s?try=%d&stamp=%s%s%s%s%s%s%s", host, uniqueIdentifier, endpoint, i, formattedStamp, message, pingApiAuthKey, hostname, formattedDuration, tag, formattedStatusCode)
+		uri := fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s", host, uniqueIdentifier, endpoint, i, formattedStamp, message, pingApiAuthKey, hostname, formattedDuration, tag, formattedStatusCode)
 		log("Sending ping " + uri)
 
 		request, err := http.NewRequest("GET", uri, nil)

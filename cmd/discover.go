@@ -34,7 +34,7 @@ type Monitor struct {
 	Type  		string   `json:"type"`
 	Code  		string   `json:"code,omitempty"`
 	Timezone	string   `json:"timezone,omitempty"`
-	Note  		string   `json:"note,omitempty"`
+	Note  		string   `json:"defaultNote,omitempty"`
 }
 
 type Line struct {
