@@ -18,7 +18,7 @@ import (
 	"errors"
 )
 
-var version = "1.3.0"
+var version = "1.4.0"
 var cfgFile string
 var userAgent string
 
