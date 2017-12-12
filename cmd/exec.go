@@ -77,9 +77,10 @@ Example with no command output send to Cronitor:
 		subcommand := shellquote.Join(commandParts...)
 		log(fmt.Sprintf("Running subcommand: %s", subcommand))
 
-		output, err := exec.Command("sh", "-c", subcommand).CombinedOutput()
+		outputForStdout, err := exec.Command("sh", "-c", subcommand).CombinedOutput()
+		outputForPing := outputForStdout
 		if noStdoutPassthru {
-			output = []byte{}
+			outputForPing = []byte{}
 		}
 
 		endTime := makeStamp()
@@ -87,10 +88,10 @@ Example with no command output send to Cronitor:
 		exitCode := 0
 		if err == nil {
 			wg.Add(1)
-			go sendPing("complete", monitorCode, string(output), formattedStartTime, endTime, &duration, &exitCode, &wg)
+			go sendPing("complete", monitorCode, string(outputForPing), formattedStartTime, endTime, &duration, &exitCode, &wg)
 		} else {
 			wg.Add(1)
-			message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), output))
+			message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), outputForPing))
 
 			// This works on both Unix and Windows. Although package syscall is generally platform dependent, WaitStatus is
 			// defined for both Unix and Windows and in both cases has an ExitStatus() method with the same signature.
@@ -106,6 +107,7 @@ Example with no command output send to Cronitor:
 			go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, &wg)
 		}
 
+		fmt.Println(string(outputForStdout))
 		wg.Wait()
 	},
 }
