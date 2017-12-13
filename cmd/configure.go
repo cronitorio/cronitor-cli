@@ -11,10 +11,10 @@ import (
 )
 
 type ConfigFile struct {
-	ApiKey         string   `json:"CRONITOR-API-KEY"`
-	PingApiAuthKey string   `json:"CRONITOR-PING-API-AUTH-KEY"`
-	ExcludeText    []string `json:"CRONITOR-EXCLUDE-TEXT,omitempty"`
-	Hostname       string   `json:"CRONITOR-HOSTNAME"`
+	ApiKey         string   `json:"CRONITOR_API_KEY"`
+	PingApiAuthKey string   `json:"CRONITOR_PING_API_KEY"`
+	ExcludeText    []string `json:"CRONITOR_EXCLUDE_TEXT,omitempty"`
+	Hostname       string   `json:"CRONITOR_HOSTNAME"`
 }
 
 // configureCmd represents the configure command
@@ -28,10 +28,10 @@ Cronitor Cli configuration can be supplied from a file, environment variables, o
 You can use a default config file for some things and environment variables or command line flags for others -- the goal is flexibility.
 
 Environment variables that are read:
-  CRONITOR-API-KEY
-  CRONITOR-PING-API-AUTH-KEY
-  CRONITOR-EXCLUDE-TEXT
-  CRONITOR-HOSTNAME
+  CRONITOR_API_KEY
+  CRONITOR_PING-API_KEY
+  CRONITOR_EXCLUDE_TEXT
+  CRONITOR_HOSTNAME
 
 Example setting your API Key:
   $ cronitor configure --api-key 4319e94e890a013dbaca57c2df2ff60c2
@@ -48,10 +48,10 @@ Example setting common exclude text for use with 'cronitor discover':
 		}
 
 		configData := ConfigFile{}
-		configData.ApiKey = viper.GetString("CRONITOR-API-KEY")
-		configData.PingApiAuthKey = viper.GetString("CRONITOR-PING-API-AUTH-KEY")
-		configData.ExcludeText = viper.GetStringSlice("CRONITOR-EXCLUDE-TEXT")
-		configData.Hostname = viper.GetString("CRONITOR-HOSTNAME")
+		configData.ApiKey = viper.GetString(varApiKey)
+		configData.PingApiAuthKey = viper.GetString(varPingApiKey)
+		configData.ExcludeText = viper.GetStringSlice(varExcludeText)
+		configData.Hostname = viper.GetString(varHostname)
 
 		b, err := json.MarshalIndent(configData, "", "    ")
 		if err != nil {
@@ -78,9 +78,6 @@ func configFilePath() string {
 
 func init() {
 	RootCmd.AddCommand(configureCmd)
-	configureCmd.Flags().String("ping-api-auth-key", "", "Ping api auth key - see https://cronitor.io/docs/understanding-ping-urls#security")
-	viper.BindPFlag("CRONITOR-PING-API-AUTH-KEY", configureCmd.Flags().Lookup("ping-api-auth-key"))
-
 	configureCmd.Flags().StringSliceP("exclude-from-name", "e", []string{}, "Substring to always exclude from generated monitor name e.g. $ cronitor configure -e '> /dev/null' -e '/path/to/app'")
-	viper.BindPFlag("CRONITOR-EXCLUDE-TEXT", configureCmd.Flags().Lookup("exclude-from-name"))
+	viper.BindPFlag(varExcludeText, configureCmd.Flags().Lookup("exclude-from-name"))
 }

@@ -20,6 +20,44 @@ go build && echo "Build created.. OK"
 cd - > /dev/null
 
 #################
+# CONFIGURE TESTS
+#################
+echo ""
+
+rm -f $LOGFILE
+TEST="Configure uses log file from env var"
+CRONITOR_LOG=$LOGFILE ../cronitor $CRONITOR_ARGS ping d3x0c1 --run
+if grep -q "Sending ping ${HOSTNAME}/d3x0c1/run" $LOGFILE
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+TEST="Configure uses hostname from env var"
+CRONITOR_HOSTNAME=myHost ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --log $LOGFILE
+if grep -q "&host=myHost" $LOGFILE
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+TEST="Configure uses hostname from arg not env var"
+CRONITOR_HOSTNAME=myHost ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --log $LOGFILE --hostname otherHost
+if grep -q "&host=otherHost" $LOGFILE
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+TEST="Configure uses ping api key from env var"
+CRONITOR_PING_API_KEY=123 ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --log $LOGFILE
+if grep -q "&auth_key=123" $LOGFILE
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+
+#################
 # PING TESTS
 #################
 echo ""

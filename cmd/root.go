@@ -44,6 +44,12 @@ func Execute() {
 	}
 }
 
+var varApiKey = "CRONITOR_API_KEY"
+var varHostname = "CRONITOR_HOSTNAME"
+var varLog = "CRONITOR_LOG"
+var varPingApiKey = "CRONITOR_PING_API_KEY"
+var varExcludeText = "CRONITOR_EXCLUDE_TEXT"
+
 func init() {
 	userAgent = fmt.Sprintf("CronitorCli/%s", version)
 	cobra.OnInitialize(initConfig)
@@ -62,11 +68,10 @@ func init() {
 	RootCmd.PersistentFlags().BoolVar(&dev, "use-dev", dev, "Dev mode")
 	RootCmd.PersistentFlags().MarkHidden("use-dev")
 
-	viper.BindPFlag("CRONITOR-API-KEY", RootCmd.PersistentFlags().Lookup("api-key"))
-	viper.BindPFlag("CRONITOR-HOSTNAME", RootCmd.PersistentFlags().Lookup("hostname"))
-	viper.BindPFlag("CRONITOR-CONFIG", RootCmd.PersistentFlags().Lookup("config"))
-	viper.BindPFlag("CRONITOR-LOG", RootCmd.PersistentFlags().Lookup("log"))
-	viper.BindPFlag("CRONITOR-PING-API-AUTH-KEY", RootCmd.PersistentFlags().Lookup("ping-api-key"))
+	viper.BindPFlag(varApiKey, RootCmd.PersistentFlags().Lookup("api-key"))
+	viper.BindPFlag(varHostname, RootCmd.PersistentFlags().Lookup("hostname"))
+	viper.BindPFlag(varLog, RootCmd.PersistentFlags().Lookup("log"))
+	viper.BindPFlag(varPingApiKey, RootCmd.PersistentFlags().Lookup("ping-api-key"))
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -101,7 +106,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, tag stri
 		Timeout: time.Second * 3,
 	}
 
-	pingApiAuthKey := viper.GetString("CRONITOR-PING-API-AUTH-KEY")
+	pingApiAuthKey := viper.GetString(varPingApiKey)
 	hostname := effectiveHostname()
 	formattedStamp := ""
 	formattedDuration := ""
@@ -178,7 +183,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, tag stri
 func sendApiRequest(url string) ([]byte, error) {
 	client := &http.Client{}
 	request, err := http.NewRequest("GET", url, nil)
-	request.SetBasicAuth(viper.GetString("CRONITOR-API-KEY"), "")
+	request.SetBasicAuth(viper.GetString(varApiKey), "")
 	request.Header.Add("Content-Type", "application/json")
 	request.Header.Add("User-Agent", userAgent)
 	response, err := client.Do(request)
@@ -202,8 +207,8 @@ func sendApiRequest(url string) ([]byte, error) {
 
 
 func effectiveHostname() string {
-	if len(viper.GetString("CRONITOR-HOSTNAME")) > 0 {
-		return viper.GetString("CRONITOR-HOSTNAME")
+	if len(viper.GetString(varHostname)) > 0 {
+		return viper.GetString(varHostname)
 	}
 
 	hostname, _ := os.Hostname()
@@ -259,6 +264,7 @@ func truncateString(s string, length int) string {
 }
 
 func log(msg string) {
+	debugLog := viper.GetString(varLog)
 	if len(debugLog) > 0 {
 		f, _ := os.OpenFile(debugLog, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 		defer f.Close()
@@ -271,6 +277,7 @@ func log(msg string) {
 }
 
 func fatal(msg string, exitCode int) {
+	debugLog := viper.GetString(varLog)
 	if len(debugLog) > 0 {
 		f, _ := os.OpenFile(debugLog, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 		defer f.Close()

@@ -101,8 +101,8 @@ will ensure that any entries added to your crontab are automatically integrated 
 to Cronitor to keep your monitoring in sync with your Crontab.
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(viper.GetString("CRONITOR-API-KEY")) < 10 {
-			return errors.New("you must provide an API key with this command or save a key using 'cronitor configure'")
+		if len(viper.GetString(varApiKey)) < 10 {
+			return errors.New("you must provide a valid API key with this command or save a key using 'cronitor configure'")
 		}
 
 		return nil
@@ -425,7 +425,7 @@ func createRule(cronExpression string) Rule {
 func sendHttpPut(url string, body string) ([]byte, error) {
 	client := &http.Client{}
 	request, err := http.NewRequest("PUT", url, strings.NewReader(body))
-	request.SetBasicAuth(viper.GetString("CRONITOR-API-KEY"), "")
+	request.SetBasicAuth(viper.GetString(varApiKey), "")
 	request.Header.Add("Content-Type", "application/json")
 	request.Header.Add("User-Agent", userAgent)
 	request.ContentLength = int64(len(body))

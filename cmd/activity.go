@@ -41,7 +41,7 @@ Examples:
 			return errors.New("invalid argument supplied to 'only'. Expecting 'pings' or 'alerts'")
 		}
 
-		if len(viper.GetString("CRONITOR-API-KEY")) < 10 {
+		if len(viper.GetString(varApiKey)) < 10 {
 			return errors.New("you must provide an API key with this command or save a key using 'cronitor configure'")
 		}
 
