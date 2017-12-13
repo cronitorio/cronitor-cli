@@ -16,7 +16,7 @@ var monitorCode string
 var commandParts []string
 var execCmd = &cobra.Command{
 	Use:   "exec",
-	Short: "Execute a command with Cronitor monitoring.",
+	Short: "Execute a command with monitoring",
 	Long:  `
 The supplied command will be executed and Cronitor will be notified of success or failure.
 
@@ -114,4 +114,5 @@ Example with no command output send to Cronitor:
 
 func init() {
 	RootCmd.AddCommand(execCmd)
+	execCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
 }

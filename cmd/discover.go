@@ -65,19 +65,19 @@ var crontabPath string
 
 var discoverCmd = &cobra.Command{
 	Use:   "discover [crontab]",
-	Short: "Identify new cron jobs and attach Cronitor monitoring. When no crontab argument is provided /etc/crontab is used.",
+	Short: "Identify new cron jobs and attach monitoring",
 	Long:  `
 Cronitor discover will parse your crontab file and create or update monitors using the Cronitor API.
 
 Note: You must supply your Cronitor API key. This can be passed as a flag, environment variable, or saved in your Cronitor configuration file. See 'help configure' for more details.
 
 Example:
-  $ cronitor discover
+  $ cronitor discover /path/to/crontab
     ... Create monitors on your Cronitor dashboard for each entry in /etc/crontab. The command string will be used as a name.
     ... Add Cronitor integration to your crontab and output to stdout
 
 Example with customized monitor names:
-  $ cronitor discover -e "/var/app/code/path/" -e "/var/app/bin/" -e "> /dev/null"
+  $ cronitor discover /path/to/crontab -e "/var/app/code/path/" -e "/var/app/bin/" -e "> /dev/null"
     ... Update previously discovered monitors or create new monitors, excluding the provided snippets from the monitor name.
     ... Add Cronitor integration to your crontab and output to stdout
 
@@ -91,7 +91,7 @@ Example with an arbitrary crontab file:
   When a monitor is created its crontab file location is added as a default note.
 
 Example where your Crontab file is updated in place:
-  $ cronitor discover --save
+  $ cronitor discover /path/to/crontab --save
     ... Create or update monitors
     ... Add Cronitor integration to your crontab and save the file
 
@@ -105,6 +105,10 @@ to Cronitor to keep your monitoring in sync with your Crontab.
 			return errors.New("you must provide a valid API key with this command or save a key using 'cronitor configure'")
 		}
 
+		if len(args) == 0 {
+			return errors.New("you must provide a crontab file")
+		}
+
 		return nil
 	},
 
@@ -113,11 +117,7 @@ to Cronitor to keep your monitoring in sync with your Crontab.
 			fatal("A crontab file argument is required on this platform", 1)
 		}
 
-		crontabPath = "/etc/crontab"
-		if len(args) > 0 {
-			crontabPath = args[0]
-		}
-
+		crontabPath = args[0]
 		crontabStrings, errCode, err := readCrontab(crontabPath)
 		if err != nil {
 			fatal(err.Error(), errCode)
@@ -461,4 +461,5 @@ func init() {
 	discoverCmd.Flags().BoolVar(&saveCrontabFile, "save", saveCrontabFile, "Save the updated crontab file")
 	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
 	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
-}
+	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
+	}

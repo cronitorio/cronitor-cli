@@ -78,15 +78,6 @@ if grep -q "Sending ping ${HOSTNAME}/d3x0c1/run" $LOGFILE && grep -q "host=custo
     else echo "${TEST}.. FAIL"
 fi
 
-
-rm -f $LOGFILE
-TEST="Ping with custom hostname"
-../cronitor $CRONITOR_ARGS ping d3x0c1 --run --hostname customHostnameForTest --log $LOGFILE
-if grep -q "Sending ping ${HOSTNAME}/d3x0c1/run" $LOGFILE && grep -q "host=customHostnameForTest" $LOGFILE
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
-
 rm -f $LOGFILE
 TEST="Ping with message"
 MSG="messagewithoutspaces"
@@ -100,7 +91,7 @@ rm -f $LOGFILE
 TEST="Ping with ping api key"
 KEY="XXXXXXXXXX"
 ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --ping-api-key $KEY --log $LOGFILE
-if grep -q "Sending ping ${HOSTNAME}/d3x0c1/run" $LOGFILE && grep -q $KEY $LOGFILE
+if grep -q "Sending ping ${HOSTNAME}/d3x0c1/run" $LOGFILE && grep -q "auth_key=${KEY}" $LOGFILE
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi

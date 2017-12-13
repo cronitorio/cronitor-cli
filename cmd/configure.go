@@ -20,7 +20,7 @@ type ConfigFile struct {
 // configureCmd represents the configure command
 var configureCmd = &cobra.Command{
 	Use:   "configure",
-	Short: "Write required configuration variables to the selected config file.",
+	Short: "Save configuration variables to the config file",
 	Long:  `
 Optionally write configuration options to a JSON file, by default ~/.cronitor.json.
 

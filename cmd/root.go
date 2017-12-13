@@ -18,7 +18,7 @@ import (
 	"errors"
 )
 
-var version = "1.4.0"
+var version = "1.5.0"
 var cfgFile string
 var userAgent string
 
@@ -26,14 +26,20 @@ var userAgent string
 var apiKey string
 var debugLog string
 var dev bool
+var hostname string
+var pingApiKey string
 var verbose bool
 var noStdoutPassthru bool
+
+var shortDescription = fmt.Sprintf("CronitorCLI version %s", version)
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
 	Use:   "cronitor",
-	Short: fmt.Sprintf("Cronitor CLI tools version %s", version),
-	Long:  ``,
+	Short: shortDescription,
+	Long:  shortDescription + `
+
+Command line tools for Cronitor.io. See https://cronitor.io/docs/using-cronitor-cli for details.`,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -59,11 +65,10 @@ func init() {
 	// will be global for your application.
 	RootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", cfgFile, "Config file (default: .cronitor.json)")
 	RootCmd.PersistentFlags().StringVarP(&apiKey, "api-key", "k", apiKey, "Cronitor API Key")
-	RootCmd.PersistentFlags().StringVarP(&apiKey, "ping-api-key", "p", apiKey, "Ping API Key")
-	RootCmd.PersistentFlags().StringVarP(&apiKey, "hostname", "n", apiKey, "A unique identifier for this host (default: system hostname)")
-	RootCmd.PersistentFlags().StringVar(&debugLog, "log", debugLog, "Write debug logs to supplied file")
+	RootCmd.PersistentFlags().StringVarP(&pingApiKey, "ping-api-key", "p", pingApiKey, "Ping API Key")
+	RootCmd.PersistentFlags().StringVarP(&hostname, "hostname", "n", hostname, "A unique identifier for this host (default: system hostname)")
+	RootCmd.PersistentFlags().StringVarP(&debugLog, "log", "l", debugLog, "Write debug logs to supplied file")
 	RootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", verbose, "Verbose output")
-	RootCmd.PersistentFlags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
 
 	RootCmd.PersistentFlags().BoolVar(&dev, "use-dev", dev, "Dev mode")
 	RootCmd.PersistentFlags().MarkHidden("use-dev")
