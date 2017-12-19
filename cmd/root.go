@@ -55,6 +55,7 @@ var varHostname = "CRONITOR_HOSTNAME"
 var varLog = "CRONITOR_LOG"
 var varPingApiKey = "CRONITOR_PING_API_KEY"
 var varExcludeText = "CRONITOR_EXCLUDE_TEXT"
+var varConfig = "CRONITOR_CONFIG"
 
 func init() {
 	userAgent = fmt.Sprintf("CronitorCli/%s", version)
@@ -77,14 +78,17 @@ func init() {
 	viper.BindPFlag(varHostname, RootCmd.PersistentFlags().Lookup("hostname"))
 	viper.BindPFlag(varLog, RootCmd.PersistentFlags().Lookup("log"))
 	viper.BindPFlag(varPingApiKey, RootCmd.PersistentFlags().Lookup("ping-api-key"))
+	viper.BindPFlag(varConfig, RootCmd.PersistentFlags().Lookup("config"))
 }
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
 
-	if cfgFile != "" {
-		// Use config file from the flag.
-		viper.SetConfigFile(cfgFile)
+	viper.AutomaticEnv() // read in environment variables that match
+
+	// If a custom config file is specified by flag or env var, use it. Otherwise use default file.
+	if len(viper.GetString(varConfig)) > 0 {
+		viper.SetConfigFile(viper.GetString(varConfig))
 	} else {
 		// Find home directory.
 		home, err := homedir.Dir()
@@ -97,7 +101,7 @@ func initConfig() {
 		viper.SetConfigName(".cronitor")
 	}
 
-	viper.AutomaticEnv() // read in environment variables that match
+
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
 		log("Reading config from " + viper.ConfigFileUsed())

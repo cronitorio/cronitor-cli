@@ -15,6 +15,7 @@ type ConfigFile struct {
 	PingApiAuthKey string   `json:"CRONITOR_PING_API_KEY"`
 	ExcludeText    []string `json:"CRONITOR_EXCLUDE_TEXT,omitempty"`
 	Hostname       string   `json:"CRONITOR_HOSTNAME"`
+	Log       		string   `json:"CRONITOR_LOG"`
 }
 
 // configureCmd represents the configure command
@@ -29,9 +30,10 @@ You can use a default config file for some things and environment variables or c
 
 Environment variables that are read:
   CRONITOR_API_KEY
-  CRONITOR_PING-API_KEY
+  CRONITOR_PING_API_KEY
   CRONITOR_EXCLUDE_TEXT
   CRONITOR_HOSTNAME
+  CRONITOR_LOG
 
 Example setting your API Key:
   $ cronitor configure --api-key 4319e94e890a013dbaca57c2df2ff60c2
@@ -52,6 +54,7 @@ Example setting common exclude text for use with 'cronitor discover':
 		configData.PingApiAuthKey = viper.GetString(varPingApiKey)
 		configData.ExcludeText = viper.GetStringSlice(varExcludeText)
 		configData.Hostname = viper.GetString(varHostname)
+		configData.Log = viper.GetString(varLog)
 
 		b, err := json.MarshalIndent(configData, "", "    ")
 		if err != nil {
