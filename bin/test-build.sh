@@ -13,6 +13,10 @@ if [ "$1" = "--use-dev" ]
 fi
 
 LOGFILE="/tmp/test-build.log"
+LOGFILE_ALTERNATE="/tmp/test-build-alternate.log"
+CONFIGFILE="${HOME}/.cronitor.json"
+CONFIGFILE_ALTERNATE="/tmp/test-build-config.json"
+ACTUAL_API_KEY="cb54ac4fd16142469f2d84fc1bbebd84"
 
 # First, build fresh
 cd ../
@@ -52,6 +56,92 @@ rm -f $LOGFILE
 TEST="Configure uses ping api key from env var"
 CRONITOR_PING_API_KEY=123 ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --log $LOGFILE
 if grep -q "&auth_key=123" $LOGFILE
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+MSG=`date`
+TEST="Configure writes hostname correctly to config file"
+../cronitor $CRONITOR_ARGS configure --hostname "$MSG"
+if grep "CRONITOR_HOSTNAME" $CONFIGFILE | grep -q "$MSG"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+MSG=`date`
+TEST="Configure writes API Key correctly to config file"
+../cronitor $CRONITOR_ARGS configure --api-key "$MSG"
+if grep "CRONITOR_API_KEY" $CONFIGFILE | grep -q "$MSG"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+rm -f $CONFIGFILE
+MSG=`date`
+TEST="Configure writes API Key correctly to new config file"
+../cronitor $CRONITOR_ARGS configure --api-key "$ACTUAL_API_KEY"  # Using actual API key here so it will be avail for later integration tests..
+if grep "CRONITOR_API_KEY" $CONFIGFILE | grep -q "$ACTUAL_API_KEY"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+rm -f $CONFIGFILE_ALTERNATE
+MSG=`date`
+TEST="Configure writes API Key correctly to custom config file set by param"
+../cronitor $CRONITOR_ARGS configure --config $CONFIGFILE_ALTERNATE --api-key "$MSG"
+if grep "CRONITOR_API_KEY" $CONFIGFILE_ALTERNATE | grep -q "$MSG"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+rm -f $CONFIGFILE_ALTERNATE
+MSG=`date`
+TEST="Configure writes API Key correctly to custom config file set by env var"
+CRONITOR_CONFIG=$CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --api-key "$MSG"
+if grep "CRONITOR_API_KEY" $CONFIGFILE_ALTERNATE | grep -q "$MSG"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+MSG=`date`
+TEST="Configure writes Ping API Key correctly to config file"
+../cronitor $CRONITOR_ARGS configure --ping-api-key "$MSG"
+if grep "CRONITOR_PING_API_KEY" $CONFIGFILE | grep -q "$MSG"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+rm -f $LOGFILE_ALTERNATE
+TEST="Configure writes log path correctly to config file"
+../cronitor $CRONITOR_ARGS configure --log $LOGFILE_ALTERNATE
+if grep "CRONITOR_LOG" $CONFIGFILE | grep -q $LOGFILE_ALTERNATE
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+rm -f $LOGFILE_ALTERNATE # Remove the log file we just created...
+
+
+rm -f $LOGFILE
+MSG=`date`
+TEST="Configure writes exclude text correctly to config file"
+../cronitor $CRONITOR_ARGS configure --exclude-from-name "$MSG"
+if grep -q "CRONITOR_EXCLUDE_TEXT" $CONFIGFILE && grep -q "$MSG" $CONFIGFILE
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+MSG=`date`
+TEST="Configure writes multiple exclude text entries correctly to config file"
+../cronitor $CRONITOR_ARGS configure --exclude-from-name "${MSG}A" --exclude-from-name "${MSG}B"
+if grep -q "CRONITOR_EXCLUDE_TEXT" $CONFIGFILE && grep -q "${MSG}A" $CONFIGFILE && grep -q "${MSG}B" $CONFIGFILE
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
@@ -209,14 +299,14 @@ echo ""
 
 rm -f $LOGFILE
 TEST="Status integration test without filter"
-if ../cronitor $CRONITOR_ARGS status --log $LOGFILE | grep -q "Pass"
+if ../cronitor $CRONITOR_ARGS status --log $LOGFILE | grep -q "Ok"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
 
 rm -f $LOGFILE
 TEST="Status integration test with filter"
-if ../cronitor $CRONITOR_ARGS status 44oI2n --log $LOGFILE | grep -q "Pass"
+if ../cronitor $CRONITOR_ARGS status 44oI2n --log $LOGFILE | grep -q "Ok"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
@@ -227,6 +317,7 @@ if ../cronitor $CRONITOR_ARGS status asdfgh --log $LOGFILE 2>&1 | grep -q "404"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
+
 
 #################
 # ACTIVITY TESTS
@@ -253,6 +344,7 @@ if ../cronitor $CRONITOR_ARGS activity 44oI2n --only alerts --log $LOGFILE | gre
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
+
 
 #################
 # DISCOVER TESTS
