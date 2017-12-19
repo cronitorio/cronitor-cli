@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"io/ioutil"
 	"github.com/spf13/viper"
@@ -15,7 +14,7 @@ type ConfigFile struct {
 	PingApiAuthKey string   `json:"CRONITOR_PING_API_KEY"`
 	ExcludeText    []string `json:"CRONITOR_EXCLUDE_TEXT,omitempty"`
 	Hostname       string   `json:"CRONITOR_HOSTNAME"`
-	Log       		string   `json:"CRONITOR_LOG"`
+	Log       	   string   `json:"CRONITOR_LOG"`
 }
 
 // configureCmd represents the configure command
@@ -23,7 +22,12 @@ var configureCmd = &cobra.Command{
 	Use:   "configure",
 	Short: "Save configuration variables to the config file",
 	Long:  `
-Optionally write configuration options to a JSON file, by default ~/.cronitor.json.
+Optionally write configuration options to a JSON file.
+
+By default, configuration files are system-wide for ease of use in cron jobs and scripts. Default configuration file location varies by platform:
+  Linux        /etc/cronitor/cronitor.json
+  MacOS        /etc/cronitor/cronitor.json
+  Windows      %SystemDrive%\ProgramData\Cronitor\cronitor.json
 
 CronitorCLI configuration can be supplied from a file, environment variables, or command line flags.
 You can use a default config file for some things and environment variables or command line arguments for others -- the goal is flexibility.
@@ -47,7 +51,7 @@ Example setting common exclude text for use with 'cronitor discover':
 			fmt.Println("\nHostname:")
 			fmt.Println(effectiveHostname())
 			fmt.Println("\nLocation:")
-			fmt.Println(effectiveTimezoneLocationName())
+			fmt.Println(timezoneLocationName())
 		}
 
 		configData := ConfigFile{}
@@ -63,6 +67,7 @@ Example setting common exclude text for use with 'cronitor discover':
 			os.Exit(1)
 		}
 
+		os.MkdirAll(defaultConfigFileDirectory(), os.ModePerm)
 		if ioutil.WriteFile(configFilePath(), b, 0644) != nil {
 			fmt.Fprintf(os.Stderr, "the configuration file at %s could not be written; check permissions and try again", configFilePath())
 			os.Exit(126)
@@ -76,8 +81,7 @@ func configFilePath() string {
 		return viperConfig
 	}
 
-	defaultConfig, _ := homedir.Expand("~/.cronitor.json")
-	return defaultConfig
+	return fmt.Sprintf("%s/cronitor.json", defaultConfigFileDirectory())
 }
 
 func init() {

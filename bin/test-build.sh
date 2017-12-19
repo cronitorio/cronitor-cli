@@ -14,7 +14,7 @@ fi
 
 LOGFILE="/tmp/test-build.log"
 LOGFILE_ALTERNATE="/tmp/test-build-alternate.log"
-CONFIGFILE="${HOME}/.cronitor.json"
+CONFIGFILE="/etc/cronitor/cronitor.json"
 CONFIGFILE_ALTERNATE="/tmp/test-build-config.json"
 ACTUAL_API_KEY="cb54ac4fd16142469f2d84fc1bbebd84"
 

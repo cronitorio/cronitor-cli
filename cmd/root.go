@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"sync"
@@ -16,6 +15,7 @@ import (
 	"strings"
 	"regexp"
 	"errors"
+	"runtime"
 )
 
 var version = "1.6.0"
@@ -90,15 +90,9 @@ func initConfig() {
 	if len(viper.GetString(varConfig)) > 0 {
 		viper.SetConfigFile(viper.GetString(varConfig))
 	} else {
-		// Find home directory.
-		home, err := homedir.Dir()
-		if err != nil {
-			fatal(err.Error(), 1)
-		}
-
 		// Search config in home directory
-		viper.AddConfigPath(home)
-		viper.SetConfigName(".cronitor")
+		viper.AddConfigPath(defaultConfigFileDirectory())
+		viper.SetConfigName("cronitor")
 	}
 
 
@@ -213,8 +207,6 @@ func sendApiRequest(url string) ([]byte, error) {
 	return contents, nil
 }
 
-
-
 func effectiveHostname() string {
 	if len(viper.GetString(varHostname)) > 0 {
 		return viper.GetString(varHostname)
@@ -224,7 +216,7 @@ func effectiveHostname() string {
 	return hostname
 }
 
-func effectiveTimezoneLocationName() string {
+func timezoneLocationName() string {
 	// First, check a TZ environemnt variable if one is set
 	if locale, isSetFlag := os.LookupEnv("TZ"); isSetFlag {
 		return locale
@@ -255,13 +247,20 @@ func effectiveTimezoneLocationName() string {
 	return ""
 }
 
-func effectiveApiUrl() string {
+func apiUrl() string {
 	if dev {
 		return "http://dev.cronitor.io/v3/monitors"
 	} else {
 		return "https://cronitor.io/v3/monitors"
 	}
+}
 
+func defaultConfigFileDirectory() string {
+	if runtime.GOOS == "windows" {
+		return fmt.Sprintf("%s\\ProgramData\\Cronitor", os.Getenv("SYSTEMDRIVE"))
+	}
+
+	return "/etc/cronitor"
 }
 
 func truncateString(s string, length int) string {

@@ -124,7 +124,7 @@ to Cronitor to keep your monitoring in sync with your Crontab.
 		}
 
 		crontabLines := parseCrontab(crontabStrings)
-		timezone := effectiveTimezoneLocationName()
+		timezone := timezoneLocationName()
 
 		// Read crontabLines into map of Monitor structs
 		monitors := map[string]*Monitor{}
@@ -199,7 +199,7 @@ func readCrontab(crontabPath string) ([]string, int, error) {
 }
 
 func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
-	url := effectiveApiUrl()
+	url := apiUrl()
 	monitorsArray := make([]Monitor, 0, len(monitors))
 	for _, v := range monitors {
 		monitorsArray = append(monitorsArray, *v)

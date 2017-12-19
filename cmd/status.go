@@ -45,7 +45,7 @@ Examples:
 	},
 
 	Run: func(cmd *cobra.Command, args []string) {
-		url := effectiveApiUrl()
+		url := apiUrl()
 		if len(args) > 0 {
 			url = url + "/" + args[0]
 		}
