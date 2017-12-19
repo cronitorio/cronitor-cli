@@ -30,10 +30,11 @@ You can use a default config file for some things and environment variables or c
 
 Environment variables that are read:
   CRONITOR_API_KEY
-  CRONITOR_PING_API_KEY
+  CRONITOR_CONFIG
   CRONITOR_EXCLUDE_TEXT
   CRONITOR_HOSTNAME
   CRONITOR_LOG
+  CRONITOR_PING_API_KEY
 
 Example setting your API Key:
   $ cronitor configure --api-key 4319e94e890a013dbaca57c2df2ff60c2
