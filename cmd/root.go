@@ -58,7 +58,7 @@ var varExcludeText = "CRONITOR_EXCLUDE_TEXT"
 var varConfig = "CRONITOR_CONFIG"
 
 func init() {
-	userAgent = fmt.Sprintf("CronitorCli/%s", version)
+	userAgent = fmt.Sprintf("CronitorCLI/%s", version)
 	cobra.OnInitialize(initConfig)
 
 	// Here you will define your flags and configuration settings.

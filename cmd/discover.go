@@ -65,7 +65,7 @@ var crontabPath string
 
 var discoverCmd = &cobra.Command{
 	Use:   "discover [crontab]",
-	Short: "Identify new cron jobs and attach monitoring",
+	Short: "Attach monitoring to new cron jobs and watch for schedule updates",
 	Long:  `
 Cronitor discover will parse your crontab file and create or update monitors using the Cronitor API.
 

@@ -1,0 +1,38 @@
+# Begin Whenever generated tasks for: babylist_web
+0,5,10,15,20,25,30,35,40,45,50,55 * * * * /bin/bash -l -c 'curl https://cronitor.link/fQjCsx/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && RAILS_ENV=production bundle exec rake babylist:check_chat_status --silent >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/fQjCsx/complete -m 10'
+
+0,5,10,15,20,25,30,35,40,45,50,55 * * * * /bin/bash -l -c 'curl https://cronitor.link/IFUpJq/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && RAILS_ENV=production bundle exec rake babylist:email_batch_sync --silent >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/IFUpJq/complete -m 10'
+
+0,15,30,45 * * * * /bin/bash -l -c '/var/www/babylist_web/current/bin/delayed_job_status.sh >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1'
+
+0,15,30,45 * * * * /bin/bash -l -c 'cd /var/www/babylist_web/releases/20171010011410 && bin/rails runner -e production '\''BL::SidekiqQueueStatus.run'\'' >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1'
+
+0,15,30,45 * * * * /bin/bash -l -c '/var/www/babylist_web/current/bin/slave_status.sh >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1'
+
+0,30 * * * * /bin/bash -l -c 'curl https://cronitor.link/oT8IxV/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && RAILS_ENV=production bundle exec rake babylist:owner_reservation_email --silent >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/oT8IxV/complete -m 10'
+
+0 * * * * /bin/bash -l -c 'curl https://cronitor.link/RUoIjr/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && RAILS_ENV=production bundle exec rake babylist:reconcile_inventory_counts --silent >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/RUoIjr/complete -m 10'
+
+0 * * * * /bin/bash -l -c 'curl https://cronitor.link/FnI0KR/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && RAILS_ENV=production bundle exec rake babylist:item_unavailable_notification --silent >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/FnI0KR/complete -m 10'
+
+0 0,4,8,12,16,20 * * * /bin/bash -l -c 'curl https://cronitor.link/gWTCxv/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && bin/rails runner -e production '\''BLContent::CatalogCategory.all(force: true) && BLRegistry::CatalogCategory.build_category_graph(force: true)'\'' >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/gWTCxv/complete -m 10'
+
+0 0,4,8,12,16,20 * * * /bin/bash -l -c 'curl https://cronitor.link/HQMIjR/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && bin/rails runner -e production '\''BLContent::GenericProduct.all(force: true)'\'' >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/HQMIjR/complete -m 10'
+
+0 0,6,12,18 * * * /bin/bash -l -c 'curl https://cronitor.link/73TGpB/run -m 10 ; touch /var/www/babylist_web/current/tmp/restart.txt >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/73TGpB/complete -m 10'
+
+10 8 * * * /bin/bash -l -c 'curl https://cronitor.link/Cdp0MR/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && RAILS_ENV=production bundle exec rake babylist:send_daily_stats --silent >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/Cdp0MR/complete -m 10'
+
+10 8 * * * /bin/bash -l -c 'curl https://cronitor.link/Iz9pAp/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && RAILS_ENV=production bundle exec rake babylist:send_daily_email_stats --silent >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/Iz9pAp/complete -m 10'
+
+0 1 * * * /bin/bash -l -c 'curl https://cronitor.link/d4SIol/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && RAILS_ENV=production bundle exec rake babylist:admin:estimate_product_volume --silent >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/d4SIol/complete -m 10'
+
+0 4 * * * /bin/bash -l -c 'curl https://cronitor.link/9N9Goo/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && RAILS_ENV=production bundle exec rake babylist:update_registry_prices_and_notify_user --silent >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/9N9Goo/complete -m 10'
+
+0 6 * * * /bin/bash -l -c 'curl https://cronitor.link/AIj0zQ/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && RAILS_ENV=production bundle exec rake babylist:set_registry_search_level_private --silent >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/AIj0zQ/complete -m 10'
+
+0 7 * * * /bin/bash -l -c 'curl https://cronitor.link/F8WCbX/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && RAILS_ENV=production bundle exec rake babylist:update_products --silent >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/F8WCbX/complete -m 10'
+
+0 7 * * * /bin/bash -l -c 'curl https://cronitor.link/xkACVB/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && bin/rails runner -e production '\''BLRegistry::SendGridContactReconciliationService.new.run'\'' >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/xkACVB/complete -m 10'
+
+5 8 * * * /bin/bash -l -c 'curl https://cronitor.link/dEQpXB/run -m 10 ; cd /var/www/babylist_web/releases/20171010011410 && RAILS_ENV=production bundle exec rake babylist:expire_credit --silent >> /var/www/babylist_web/releases/20171010011410/log/cron.log 2>&1 && curl https://cronitor.link/dEQpXB/complete -m 10'
