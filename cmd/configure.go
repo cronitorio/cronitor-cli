@@ -69,7 +69,9 @@ Example setting common exclude text for use with 'cronitor discover':
 
 		os.MkdirAll(defaultConfigFileDirectory(), os.ModePerm)
 		if ioutil.WriteFile(configFilePath(), b, 0644) != nil {
-			fmt.Fprintf(os.Stderr, "the configuration file at %s could not be written; check permissions and try again", configFilePath())
+			fmt.Fprintf(os.Stderr,
+				"\nERROR: The configuration file %s could not be written; check permissions and try again. " +
+				"\n\nBy default, configuration files are system-wide for ease of use in cron jobs and scripts. Specify an alternate config file using the --config argument or CRONITOR_CONFIG environment variable.\n\n", configFilePath())
 			os.Exit(126)
 		}
 	},
