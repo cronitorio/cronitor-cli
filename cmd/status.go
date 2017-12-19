@@ -83,9 +83,9 @@ Examples:
 		table.SetHeaderAlignment(3)
 
 		for _, v := range responseMonitors.Monitors {
-			state := "Pass"
+			state := "Ok"
 			if !v.Passing {
-				state = "Fail"
+				state = "Failing"
 			}
 			table.Append([]string{state, v.Name, v.Code, v.Status})
 		}
