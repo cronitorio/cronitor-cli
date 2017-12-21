@@ -9,7 +9,7 @@ if [ "$1" = "--use-dev" ]
         HOSTNAME="http://dev.cronitor.io"
     else
         CRONITOR_ARGS=""
-        HOSTNAME="${HOSTNAME}"
+        HOSTNAME="https://cronitor.link"
 fi
 
 LOGFILE="/tmp/test-build.log"

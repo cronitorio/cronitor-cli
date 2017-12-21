@@ -10,6 +10,7 @@ import (
 	"os"
 	"github.com/kballard/go-shellquote"
 	"syscall"
+	"runtime"
 )
 
 var monitorCode string
@@ -77,7 +78,15 @@ Example with no command output send to Cronitor:
 		subcommand := shellquote.Join(commandParts...)
 		log(fmt.Sprintf("Running subcommand: %s", subcommand))
 
-		outputForStdout, err := exec.Command("sh", "-c", subcommand).CombinedOutput()
+		var outputForStdout []byte
+		var err error
+
+		if runtime.GOOS == "windows" {
+			outputForStdout, err = exec.Command("cmd", "/c", subcommand).CombinedOutput()
+		} else {
+			outputForStdout, err = exec.Command("sh", "-c", subcommand).CombinedOutput()
+		}
+
 		outputForPing := outputForStdout
 		if noStdoutPassthru {
 			outputForPing = []byte{}
