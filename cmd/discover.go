@@ -113,10 +113,6 @@ to Cronitor to keep your monitoring in sync with your Crontab.
 	},
 
 	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) == 0 && runtime.GOOS == "windows" {
-			fatal("A crontab file argument is required on this platform", 1)
-		}
-
 		crontabPath = args[0]
 		crontabStrings, errCode, err := readCrontab(crontabPath)
 		if err != nil {
