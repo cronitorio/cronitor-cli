@@ -49,8 +49,12 @@ type Line struct {
 
 func (l Line) IsMonitorable() bool {
 	containsLegacyIntegration := strings.Contains(l.CommandToRun, "cronitor.io") || strings.Contains(l.CommandToRun, "cronitor.link")
+	return len(l.CronExpression) > 0 && len(l.CommandToRun) > 0 && !containsLegacyIntegration
+}
+
+func (l Line) ShouldHaveRules() bool {
 	isRebootJob := l.CronExpression == "@reboot"
-	return len(l.CronExpression) > 0 && len(l.CommandToRun) > 0 && !containsLegacyIntegration && !isRebootJob
+	return !isRebootJob
 }
 
 func (l Line) IsAutoDiscoverCommand() bool {
@@ -129,7 +133,11 @@ to Cronitor to keep your monitoring in sync with your Crontab.
 				continue
 			}
 
-			rules := []Rule{createRule(line.CronExpression)}
+			var rules []Rule
+			if line.ShouldHaveRules() {
+				rules = append(rules, createRule(line.CronExpression))
+			}
+
 			name := createName(line.CommandToRun, line.IsAutoDiscoverCommand())
 			key := createKey(line.CommandToRun, line.CronExpression, line.IsAutoDiscoverCommand())
 			tags := createTags()
@@ -400,22 +408,7 @@ func createTags() []string {
 }
 
 func createRule(cronExpression string) Rule {
-	var rule Rule
-	if strings.HasPrefix(cronExpression, "@yearly") {
-		rule = Rule{"complete_ping_not_received", "365", "days", 86400}
-	} else if strings.HasPrefix(cronExpression, "@monthly") {
-		rule = Rule{"complete_ping_not_received", "31", "days", 86400}
-	} else if strings.HasPrefix(cronExpression, "@weekly") {
-		rule = Rule{"complete_ping_not_received", "7", "days", 86400}
-	} else if strings.HasPrefix(cronExpression, "@daily") {
-		rule = Rule{"complete_ping_not_received", "24", "hours", 3600}
-	} else if strings.HasPrefix(cronExpression, "@hourly") {
-		rule = Rule{"complete_ping_not_received", "1", "hours", 600}
-	} else {
-		rule = Rule{"not_on_schedule", cronExpression, "", 0}
-	}
-
-	return rule
+	return Rule{"not_on_schedule", cronExpression, "", 0}
 }
 
 func sendHttpPut(url string, body string) ([]byte, error) {
