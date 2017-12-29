@@ -52,11 +52,6 @@ func (l Line) IsMonitorable() bool {
 	return len(l.CronExpression) > 0 && len(l.CommandToRun) > 0 && !containsLegacyIntegration
 }
 
-func (l Line) ShouldHaveRules() bool {
-	isRebootJob := l.CronExpression == "@reboot"
-	return !isRebootJob
-}
-
 func (l Line) IsAutoDiscoverCommand() bool {
 	matched, _ := regexp.MatchString(".+cronitor[[:space:]]+discover.+", strings.ToLower(l.CommandToRun))
 	return matched
@@ -133,11 +128,7 @@ to Cronitor to keep your monitoring in sync with your Crontab.
 				continue
 			}
 
-			var rules []Rule
-			if line.ShouldHaveRules() {
-				rules = append(rules, createRule(line.CronExpression))
-			}
-
+			rules := []Rule{createRule(line.CronExpression)}
 			name := createName(line.CommandToRun, line.IsAutoDiscoverCommand())
 			key := createKey(line.CommandToRun, line.CronExpression, line.IsAutoDiscoverCommand())
 			tags := createTags()
