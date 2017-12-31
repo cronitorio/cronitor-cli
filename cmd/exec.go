@@ -35,7 +35,7 @@ Example with no command output send to Cronitor:
 	Args: func(cmd *cobra.Command, args []string) error {
 		// We need to use raw os.Args so we can pass the wrapped command through unparsed
 		var foundExec, foundCode bool
-		monitorCodeRegex := regexp.MustCompile(`^[A-Za-z0-9]{3,12}]$`)
+		monitorCodeRegex := regexp.MustCompile(`^[A-Za-z0-9]{3,12}$`)
 
 		for _, arg := range os.Args {
 			// Treat anything that comes after the monitor code as the command to execute
@@ -44,15 +44,18 @@ Example with no command output send to Cronitor:
 				continue
 			}
 
-			// After finding "exec" we are looking for a monitor code, ignoring any flags
+			// After finding "exec" we are looking for a monitor code
 			if foundExec && !foundCode {
-				if ret := monitorCodeRegex.FindStringSubmatch(arg); ret != nil {
+				log(fmt.Sprintf("Parsing exec looking for code: '%s'", arg))
+				if ret := monitorCodeRegex.FindStringSubmatch(strings.TrimSpace(arg)); ret != nil {
 					monitorCode = arg
 					foundCode = true
-					continue
 				}
+
+				continue
 			}
 
+			log(fmt.Sprintf("Parsing command looking for exec: %s", arg))
 			if strings.ToLower(arg) == "exec" {
 				foundExec = true
 				continue
@@ -96,8 +99,7 @@ Example with no command output send to Cronitor:
 		// Handle stdin to the subcommand
 		execCmdStdin, _ := execCmd.StdinPipe()
 		defer execCmdStdin.Close()
-		stdinStat, _ := os.Stdin.Stat()
-		if stdinStat.Size() > 0 {
+		if stdinStat, _ := os.Stdin.Stat(); stdinStat.Size() > 0 {
 			execStdIn, _ := ioutil.ReadAll(os.Stdin)
 			execCmdStdin.Write(execStdIn)
 		}

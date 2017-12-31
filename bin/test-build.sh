@@ -17,6 +17,7 @@ LOGFILE_ALTERNATE="/tmp/test-build-alternate.log"
 CONFIGFILE="/etc/cronitor/cronitor.json"
 CONFIGFILE_ALTERNATE="/tmp/test-build-config.json"
 ACTUAL_API_KEY="cb54ac4fd16142469f2d84fc1bbebd84"
+CRONTAB_TEMP="/tmp/crontab"
 
 # First, build fresh
 cd ../
@@ -340,7 +341,7 @@ fi
 
 rm -f $LOGFILE
 TEST="Activity integration test with only alerts filter"
-if ../cronitor $CRONITOR_ARGS activity 44oI2n --only alerts --log $LOGFILE | grep -q "No alert history for this monitor"
+if ../cronitor $CRONITOR_ARGS activity 44oI2n --only alerts --log $LOGFILE | grep -q -v "\"description\": \"ping\""
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
@@ -363,6 +364,14 @@ fi
 rm -f $LOGFILE
 TEST="Discover parses reponse and rewrites crontab"
 if ../cronitor $CRONITOR_ARGS discover ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e| grep "slave_status.sh" | grep -q "cronitor exec"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+TEST="Discover correctly rewrites crontab with username"
+echo "* * * * * sharter /usr/bin/true" | cat - ../fixtures/crontab.txt > $CRONTAB_TEMP
+if ../cronitor $CRONITOR_ARGS discover $CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "delayed_job_status.sh" | grep -q "sharter cronitor exec"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi

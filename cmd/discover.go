@@ -17,6 +17,8 @@ import (
 	"time"
 	"path/filepath"
 	"bytes"
+	"os/exec"
+	"strconv"
 )
 
 type Rule struct {
@@ -44,6 +46,7 @@ type Line struct {
 	CronExpression string
 	CommandToRun   string
 	Code           string
+	RunAs          string
 	Mon            Monitor
 }
 
@@ -129,8 +132,8 @@ to Cronitor to keep your monitoring in sync with your Crontab.
 			}
 
 			rules := []Rule{createRule(line.CronExpression)}
-			name := createName(line.CommandToRun, line.IsAutoDiscoverCommand())
-			key := createKey(line.CommandToRun, line.CronExpression, line.IsAutoDiscoverCommand())
+			name := createName(line.CommandToRun, line.RunAs, line.IsAutoDiscoverCommand())
+			key := createKey(line.CommandToRun, line.CronExpression, line.RunAs, line.IsAutoDiscoverCommand())
 			tags := createTags()
 
 			line.Mon = Monitor{
@@ -213,6 +216,7 @@ func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
 		return nil, errors.New(fmt.Sprintf("Request to %s failed: %s", url, err))
 	}
 
+	buf.Truncate(0)
 	json.Indent(buf, response, "", "  ")
 	log("\nResponse:")
 	log(buf.String() + "\n")
@@ -242,6 +246,7 @@ func createCrontabLine(line *Line) string {
 
 	var lineParts []string
 	lineParts = append(lineParts, line.CronExpression)
+	lineParts = append(lineParts, line.RunAs)
 
 	if len(line.Mon.Code) > 0 {
 		lineParts = append(lineParts, "cronitor")
@@ -256,7 +261,7 @@ func createCrontabLine(line *Line) string {
 		lineParts = append(lineParts, line.CommandToRun)
 	}
 
-	return strings.Join(lineParts, " ")
+	return strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)
 }
 
 func parseCrontab(lines []string) []*Line {
@@ -267,6 +272,7 @@ func parseCrontab(lines []string) []*Line {
 	for lineNumber, fullLine := range lines {
 		var cronExpression string
 		var command []string
+		var runAs string
 
 		fullLine = strings.TrimSpace(fullLine)
 
@@ -292,11 +298,23 @@ func parseCrontab(lines []string) []*Line {
 			}
 		}
 
+		// Try to determine if the command begins with a "run as" user designation
+		// Basically, just see if the first word of the command is a valid user name. This is how vixie cron does it.
+		// https://github.com/rhuitl/uClinux/blob/master/user/vixie-cron/entry.c#L224
+		if runtime.GOOS != "windows" && len(command) > 1 {
+			idOrError, _ := exec.Command("id", "-u", command[0]).CombinedOutput()
+			if _, err := strconv.Atoi(strings.TrimSpace(string(idOrError))); err == nil {
+			    runAs = command[0]
+			    command = command[1:]
+			}
+		}
+
 		// Create a Line struct with details for this line so we can re-create it later
 		line := Line{}
 		line.CronExpression = cronExpression
 		line.FullLine = fullLine
 		line.LineNumber = lineNumber
+		line.RunAs = runAs
 
 		// If this job is already being wrapped by the Cronitor client, read current code.
 		// Expects a wrapped command to look like: cronitor exec d3x0 /path/to/cmd.sh
@@ -352,7 +370,7 @@ func createNote(LineNumber int, IsAutoDiscoverCommand bool) string {
 	return fmt.Sprintf("Discovered in %s:%d", getCrontabPath(), LineNumber)
 }
 
-func createName(CommandToRun string, IsAutoDiscoverCommand bool) string {
+func createName(CommandToRun string, RunAs string, IsAutoDiscoverCommand bool) string {
 	excludeFromName = append(excludeFromName, "> /dev/null")
 	excludeFromName = append(excludeFromName, "2>&1")
 	excludeFromName = append(excludeFromName, "/bin/bash -l -c")
@@ -370,10 +388,14 @@ func createName(CommandToRun string, IsAutoDiscoverCommand bool) string {
 
 	CommandToRun = strings.TrimSpace(truncateString(CommandToRun, 100))
 	CommandToRun = strings.Trim(CommandToRun, ">'\"")
-	return truncateString(fmt.Sprintf("[%s] %s", effectiveHostname(), strings.TrimSpace(CommandToRun)), 100)
+
+	if len(RunAs) > 0 {
+		RunAs = fmt.Sprintf("%s ", RunAs)
+	}
+	return truncateString(fmt.Sprintf("[%s] %s%s", effectiveHostname(), RunAs, strings.TrimSpace(CommandToRun)), 100)
 }
 
-func createKey(CommandToRun string, CronExpression string, IsAutoDiscoverCommand bool) string {
+func createKey(CommandToRun string, CronExpression string, RunAs string, IsAutoDiscoverCommand bool) string {
 	if IsAutoDiscoverCommand {
 		// Go out of our way to prevent making a duplicate monitor for an auto-discovery command.
 		// Ensure that tinkering with params does not change key
@@ -388,7 +410,7 @@ func createKey(CommandToRun string, CronExpression string, IsAutoDiscoverCommand
 		CronExpression = "" // The schedule is randomized for auto discover, so just ignore it
 	}
 
-	data := []byte(fmt.Sprintf("%s-%s-%s", effectiveHostname(), CommandToRun, CronExpression))
+	data := []byte(fmt.Sprintf("%s-%s-%s-%s", effectiveHostname(), CommandToRun, CronExpression, RunAs))
 	return fmt.Sprintf("%x", sha1.Sum(data))
 }
 
