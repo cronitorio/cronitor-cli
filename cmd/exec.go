@@ -11,6 +11,7 @@ import (
 	"github.com/kballard/go-shellquote"
 	"syscall"
 	"runtime"
+	"io/ioutil"
 )
 
 var monitorCode string
@@ -80,13 +81,24 @@ Example with no command output send to Cronitor:
 
 		var outputForStdout []byte
 		var err error
-
+		var execCmd *exec.Cmd
 		if runtime.GOOS == "windows" {
-			outputForStdout, err = exec.Command("cmd", "/c", subcommand).CombinedOutput()
+			execCmd = exec.Command("cmd", "/c", subcommand)
 		} else {
-			outputForStdout, err = exec.Command("sh", "-c", subcommand).CombinedOutput()
+			execCmd = exec.Command("sh", "-c", subcommand)
 		}
 
+		// Handle stdin to the subcommand
+		execCmdStdin, _ := execCmd.StdinPipe()
+		defer execCmdStdin.Close()
+		stdinStat, _ := os.Stdin.Stat()
+		if stdinStat.Size() > 0 {
+			execStdIn, _ := ioutil.ReadAll(os.Stdin)
+			execCmdStdin.Write(execStdIn)
+		}
+
+		// Handle stdout from subcommand
+		outputForStdout, err = execCmd.CombinedOutput()
 		outputForPing := outputForStdout
 		if noStdoutPassthru {
 			outputForPing = []byte{}
