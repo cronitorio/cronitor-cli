@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"runtime"
 	"io/ioutil"
+	"regexp"
 )
 
 var monitorCode string
@@ -34,6 +35,8 @@ Example with no command output send to Cronitor:
 	Args: func(cmd *cobra.Command, args []string) error {
 		// We need to use raw os.Args so we can pass the wrapped command through unparsed
 		var foundExec, foundCode bool
+		monitorCodeRegex := regexp.MustCompile(`^[A-Za-z0-9]{3,12}]$`)
+
 		for _, arg := range os.Args {
 			// Treat anything that comes after the monitor code as the command to execute
 			if foundCode {
@@ -42,10 +45,12 @@ Example with no command output send to Cronitor:
 			}
 
 			// After finding "exec" we are looking for a monitor code, ignoring any flags
-			if foundExec && !foundCode && !strings.HasPrefix(arg, "-") {
-				monitorCode = arg
-				foundCode = true
-				continue
+			if foundExec && !foundCode {
+				if ret := monitorCodeRegex.FindStringSubmatch(arg); ret != nil {
+					monitorCode = arg
+					foundCode = true
+					continue
+				}
 			}
 
 			if strings.ToLower(arg) == "exec" {
@@ -62,7 +67,7 @@ Example with no command output send to Cronitor:
 		}
 
 		if len(monitorCode) < 1 || len(commandParts) < 1 {
-			return errors.New("A unique monitor code and cli command are required immediately after 'exec'")
+			return errors.New("A unique monitor code and cli command are required e.g. cronitor exec d3x0c1 /path/to/command.sh")
 		}
 
 		return nil
