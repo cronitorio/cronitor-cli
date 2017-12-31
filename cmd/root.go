@@ -120,7 +120,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, tag stri
 	}
 
 	if len(message) > 0 {
-		message = fmt.Sprintf("&msg=%s", url.QueryEscape(truncateString(message, 2000)))
+		message = fmt.Sprintf("&msg=%s", url.QueryEscape(truncateString(message, 1000)))
 	}
 
 	if len(pingApiAuthKey) > 0 {
