@@ -47,19 +47,25 @@ Example setting common exclude text for use with 'cronitor discover':
   $ cronitor configure -e "/var/app/code/path/" -e "/var/app/bin/" -e "> /dev/null"`,
 	Run: func(cmd *cobra.Command, args []string) {
 
-		if verbose {
-			fmt.Println("\nHostname:")
-			fmt.Println(effectiveHostname())
-			fmt.Println("\nLocation:")
-			fmt.Println(timezoneLocationName())
-		}
-
 		configData := ConfigFile{}
 		configData.ApiKey = viper.GetString(varApiKey)
 		configData.PingApiAuthKey = viper.GetString(varPingApiKey)
 		configData.ExcludeText = viper.GetStringSlice(varExcludeText)
 		configData.Hostname = viper.GetString(varHostname)
 		configData.Log = viper.GetString(varLog)
+
+		if verbose {
+			fmt.Println("\nAPI Key:")
+			fmt.Println(configData.ApiKey)
+			fmt.Println("\nPing API Key:")
+			fmt.Println(configData.PingApiAuthKey)
+			fmt.Println("\nHostname:")
+			fmt.Println(effectiveHostname())
+			fmt.Println("\nTimezone Location:")
+			fmt.Println(timezoneLocationName())
+			fmt.Println("\nDebug Log:")
+			fmt.Println(viper.GetString(varLog))
+		}
 
 		b, err := json.MarshalIndent(configData, "", "    ")
 		if err != nil {
