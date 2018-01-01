@@ -61,6 +61,7 @@ func (l Line) IsAutoDiscoverCommand() bool {
 }
 
 var excludeFromName []string
+var isAutoDiscover bool
 var noAutoDiscover bool
 var saveCrontabFile bool
 var crontabPath string
@@ -198,6 +199,10 @@ func readCrontab(crontabPath string) ([]string, int, error) {
 
 func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
 	url := apiUrl()
+	if isAutoDiscover {
+		url = url + "?auto-discover=1"
+	}
+
 	monitorsArray := make([]Monitor, 0, len(monitors))
 	for _, v := range monitors {
 		monitorsArray = append(monitorsArray, *v)
@@ -349,12 +354,16 @@ func createAutoDiscoverLine(usesSixFieldCronExpression bool) *Line {
 		cronExpression = fmt.Sprintf("* %s", cronExpression)
 	}
 
-	// Normalize the command so it can be run reliably from crontab
+	// Normalize the command so it can be run reliably from crontab.
 	commandToRun := strings.Join(os.Args, " ")
 	commandToRun = strings.Replace(commandToRun, "--save ", "", -1)
 	commandToRun = strings.Replace(commandToRun, "--verbose ", "", -1)
 	commandToRun = strings.Replace(commandToRun, "-v ", "", -1)
 	commandToRun = strings.Replace(commandToRun, crontabPath, getCrontabPath(), -1)
+
+	// Remove existing --auto flag before adding a new one to prevent doubling up
+	commandToRun = strings.Replace(commandToRun, "--auto ", "", -1)
+	commandToRun = strings.Replace(commandToRun, " discover ", " discover --auto ", -1)
 
 	line := Line{}
 	line.CronExpression = cronExpression
@@ -464,4 +473,7 @@ func init() {
 	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
 	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
-	}
+
+	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Indicates when being run automatcially")
+	discoverCmd.Flags().MarkHidden("auto")
+}
