@@ -102,7 +102,7 @@ func initConfig() {
 	}
 }
 
-func sendPing(endpoint string, uniqueIdentifier string, message string, tag string, timestamp float64, duration *float64, exitCode *int, group *sync.WaitGroup) {
+func sendPing(endpoint string, uniqueIdentifier string, message string, series string, timestamp float64, duration *float64, exitCode *int, group *sync.WaitGroup) {
 	defer group.Done()
 
 	Client := &http.Client{
@@ -142,9 +142,9 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, tag stri
 		formattedStatusCode = fmt.Sprintf("&status_code=%d", *exitCode)
 	}
 
-	// The `tag` data is used to match start events and run events. Useful if multiple instances of a job are running.
-	if len(tag) > 0 {
-		tag = fmt.Sprintf("&tag=%s", tag)
+	// The `series` data is used to match run events with complete or fail. Useful if multiple instances of a job are running.
+	if len(series) > 0 {
+		series = fmt.Sprintf("&series=%s", series)
 	}
 
 	for i := 1; i <= 6; i++ {
@@ -156,7 +156,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, tag stri
 			pingApiHost = "https://cronitor.link"
 		}
 
-		uri := fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, pingApiAuthKey, hostname, formattedDuration, tag, formattedStatusCode)
+		uri := fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, pingApiAuthKey, hostname, formattedDuration, series, formattedStatusCode)
 		log("Sending ping " + uri)
 
 		request, err := http.NewRequest("GET", uri, nil)
