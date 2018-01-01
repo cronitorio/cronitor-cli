@@ -35,7 +35,7 @@ type Monitor struct {
 	Tags  		[]string `json:"tags"`
 	Type  		string   `json:"type"`
 	Code  		string   `json:"code,omitempty"`
-	Timezone	string   `json:"timezone,omitempty"`
+	Timezone		string   `json:"timezone,omitempty"`
 	Note  		string   `json:"defaultNote,omitempty"`
 }
 
@@ -76,32 +76,24 @@ Note: You must supply your Cronitor API key. This can be passed as a flag, envir
 
 Example:
   $ cronitor discover /path/to/crontab
-    ... Create monitors on your Cronitor dashboard for each entry in /etc/crontab. The command string will be used as a name.
-    ... Add Cronitor integration to your crontab and output to stdout
+    ... Creates monitors on your Cronitor dashboard for each entry in the specified crontab. The command string will be used as the monitor name.
+    ... Adds Cronitor integration to your crontab and outputs to stdout
 
 Example with customized monitor names:
   $ cronitor discover /path/to/crontab -e "/var/app/code/path/" -e "/var/app/bin/" -e "> /dev/null"
-    ... Update previously discovered monitors or create new monitors, excluding the provided snippets from the monitor name.
-    ... Add Cronitor integration to your crontab and output to stdout
+    ... Updates previously discovered monitors or creates new monitors, excluding the provided snippets from the monitor name.
+    ... Adds Cronitor integration to your crontab and outputs to stdout
 
-  You can run the command as many times as you need with additional exclusion text until the job names on your Cronitor Dashboard are clear and readable.
-
-Example with an arbitrary crontab file:
-  $ cronitor discover /path/to/crontab
-    ... Create monitors on your Cronitor dashboard for each entry in /path/to/crontab.
-    ... Add Cronitor integration to your crontab and output to stdout
-
-  When a monitor is created its crontab file location is added as a default note.
+  You can run the command as many times as you need with additional exclusion params until the job names on your Cronitor Dashboard are clear and readable.
 
 Example where your Crontab file is updated in place:
   $ cronitor discover /path/to/crontab --save
-    ... Create or update monitors
-    ... Add Cronitor integration to your crontab and save the file
+    ... Creates or updates monitors
+    ... Adds Cronitor integration to your crontab and saves the file in place.
 
 
-In all of these examples, auto discover is enabled by adding 'cronitor discover' to your crontab as an hourly task. If a --save param is provided, auto discover
-will ensure that any entries added to your crontab are automatically integrated with Cronitor. Even without --save, auto discover will push schedule changes
-to Cronitor to keep your monitoring in sync with your Crontab.
+In all of these examples, auto discover is enabled by adding 'cronitor discover' to your crontab as an hourly task. Auto discover will push schedule changes
+to Cronitor and alert if you if new jobs are added to your crontab without monitoring."
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(viper.GetString(varApiKey)) < 10 {
