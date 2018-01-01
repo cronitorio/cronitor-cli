@@ -56,7 +56,7 @@ func (l Line) IsMonitorable() bool {
 }
 
 func (l Line) IsAutoDiscoverCommand() bool {
-	matched, _ := regexp.MatchString(".+cronitor[[:space:]]+discover.+", strings.ToLower(l.CommandToRun))
+	matched, _ := regexp.MatchString(".+discover[[:space:]]+--auto.+", strings.ToLower(l.CommandToRun))
 	return matched
 }
 

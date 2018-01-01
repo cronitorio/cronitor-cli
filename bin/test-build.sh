@@ -244,9 +244,9 @@ if grep -q "&status_code=123" $LOGFILE
 fi
 
 rm -f $LOGFILE
-TEST="Exec sends run timestamp as complete ping tag"
+TEST="Exec sends run timestamp as complete ping series"
 ../cronitor $CRONITOR_ARGS --log $LOGFILE exec d3x0c1 true > /dev/null
-if grep -q "&tag=1" $LOGFILE
+if grep -q "&series=1" $LOGFILE
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
@@ -371,7 +371,7 @@ fi
 rm -f $LOGFILE
 TEST="Discover correctly rewrites crontab with username"
 echo "* * * * * sharter /usr/bin/true" | cat - ../fixtures/crontab.txt > $CRONTAB_TEMP
-if ../cronitor $CRONITOR_ARGS discover $CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "delayed_job_status.sh" | grep -q "sharter cronitor exec"
+if ../cronitor $CRONITOR_ARGS discover $CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "/usr/bin/true" | grep -q "sharter cronitor exec"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
