@@ -18,7 +18,7 @@ import (
 	"runtime"
 )
 
-var version = "1.9.0"
+var version = "1.10.0"
 var cfgFile string
 var userAgent string
 
