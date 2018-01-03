@@ -35,7 +35,7 @@ type Monitor struct {
 	Tags  		[]string `json:"tags"`
 	Type  		string   `json:"type"`
 	Code  		string   `json:"code,omitempty"`
-	Timezone		string   `json:"timezone,omitempty"`
+	Timezone	string   `json:"timezone,omitempty"`
 	Note  		string   `json:"defaultNote,omitempty"`
 }
 
@@ -49,6 +49,7 @@ type Line struct {
 	RunAs          string
 	Mon            Monitor
 }
+
 
 func (l Line) IsMonitorable() bool {
 	containsLegacyIntegration := strings.Contains(l.CommandToRun, "cronitor.io") || strings.Contains(l.CommandToRun, "cronitor.link")
@@ -65,6 +66,7 @@ var isAutoDiscover bool
 var noAutoDiscover bool
 var saveCrontabFile bool
 var crontabPath string
+var timezone TimezoneLocationName
 
 var discoverCmd = &cobra.Command{
 	Use:   "discover [crontab]",
@@ -92,7 +94,7 @@ Example where your Crontab file is updated in place:
     ... Adds Cronitor integration to your crontab and saves the file in place.
 
 
-In all of these examples, auto discover is enabled by adding 'cronitor discover' to your crontab as an hourly task. Auto discover will push schedule changes
+In all of these examples, auto discover is enabled by adding 'cronitor discover --auto' to your crontab as an hourly task. Auto discover will push schedule changes
 to Cronitor and alert if you if new jobs are added to your crontab without monitoring."
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
@@ -114,8 +116,14 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 			fatal(err.Error(), errCode)
 		}
 
-		crontabLines := parseCrontab(crontabStrings)
-		timezone := timezoneLocationName()
+		crontabLines, parsedTimezoneLocationName := parseCrontab(crontabStrings)
+
+		// If a timezone env var is set in the crontab it takes precedence over system tz
+		if parsedTimezoneLocationName != nil {
+			timezone = *parsedTimezoneLocationName
+		} else {
+			timezone = effectiveTimezoneLocationName()
+		}
 
 		// Read crontabLines into map of Monitor structs
 		monitors := map[string]*Monitor{}
@@ -136,7 +144,7 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 				tags,
 				"heartbeat",
 				line.Code,
-				timezone,
+				timezone.Name,
 				createNote(line.LineNumber, line.IsAutoDiscoverCommand()),
 			}
 
@@ -261,10 +269,12 @@ func createCrontabLine(line *Line) string {
 	return strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)
 }
 
-func parseCrontab(lines []string) []*Line {
+func parseCrontab(lines []string) ([]*Line, *TimezoneLocationName) {
+	// returns
 	var crontabLines []*Line
 	var autoDiscoverLine *Line
 	var usesSixFieldCronExpression bool
+	var timezoneLocationName *TimezoneLocationName
 
 	for lineNumber, fullLine := range lines {
 		var cronExpression string
@@ -277,14 +287,20 @@ func parseCrontab(lines []string) []*Line {
 		// Otherwise split on any whitespace and parse
 		if !strings.HasPrefix(fullLine, "#") {
 			splitLine := strings.Fields(fullLine)
-			if len(splitLine) > 0 && strings.HasPrefix(splitLine[0], "@") {
+			splitLineLen := len(splitLine)
+			if splitLineLen == 1 && strings.Contains(splitLine[0], "=") {
+				// Handling for environment variables... we're looking for timezone declarations
+				if splitExport := strings.Split(splitLine[0], "="); splitExport[0] == "TZ" || splitExport[0] == "CRON_TZ" {
+					timezoneLocationName = &TimezoneLocationName{splitExport[1]}
+				}
+			} else if splitLineLen > 0 && strings.HasPrefix(splitLine[0], "@") {
+				// Handling for special cron @keyword
 				cronExpression = splitLine[0]
 				command = splitLine[1:]
-			} else if len(splitLine) >= 6 {
-				// Handle javacron-style 6 item cron expressions
-				// If there are at least 7 items, and the 6th looks like a cron expression, assume it is one
-				match, _ := regexp.MatchString("^[-,?*/0-9]+$", splitLine[5])
-				usesSixFieldCronExpression = match && len(splitLine) >= 7
+			} else if splitLineLen >= 6 {
+				// Handling for javacron-style 6 item cron expressions
+				usesSixFieldCronExpression = splitLineLen >= 7 && isSixFieldCronExpression(splitLine)
+
 				if usesSixFieldCronExpression {
 					cronExpression = strings.Join(splitLine[0:6], " ")
 					command = splitLine[6:]
@@ -337,7 +353,7 @@ func parseCrontab(lines []string) []*Line {
 		crontabLines = append(crontabLines, createAutoDiscoverLine(usesSixFieldCronExpression))
 	}
 
-	return crontabLines
+	return crontabLines, timezoneLocationName
 }
 
 func createAutoDiscoverLine(usesSixFieldCronExpression bool) *Line {
@@ -372,7 +388,6 @@ func createNote(LineNumber int, IsAutoDiscoverCommand bool) string {
 }
 
 func createName(CommandToRun string, RunAs string, IsAutoDiscoverCommand bool) string {
-	excludeFromName = append(excludeFromName, "> /dev/null")
 	excludeFromName = append(excludeFromName, "2>&1")
 	excludeFromName = append(excludeFromName, "/bin/bash -l -c")
 	excludeFromName = append(excludeFromName, "/bin/bash -lc")
@@ -381,6 +396,15 @@ func createName(CommandToRun string, RunAs string, IsAutoDiscoverCommand bool) s
 
 	if IsAutoDiscoverCommand {
 		return truncateString(fmt.Sprintf("[%s] Auto discover %s", effectiveHostname(), strings.TrimSpace(crontabPath)), 100)
+	}
+
+	// Before we apply exclusions, remove common log-file append
+	redirectAppendPosition := strings.Index(CommandToRun, ">>")
+	redirectPosition := strings.Index(CommandToRun, ">")
+	if redirectAppendPosition > 0 {
+		CommandToRun = CommandToRun[:redirectAppendPosition]
+	} else if redirectPosition > 0 {
+		CommandToRun = CommandToRun[:redirectPosition]
 	}
 
 	for _, substr := range excludeFromName {
@@ -457,6 +481,13 @@ func getCrontabPath() string {
 	}
 
 	return crontabPath
+}
+
+func isSixFieldCronExpression(splitLine []string) bool {
+	matchDigitOrWildcard, _ := regexp.MatchString("^[-,?*/0-9]+$", splitLine[5])
+	matchDayOfWeekStringRange, _ := regexp.MatchString("^(Mon|Tue|Wed|Thr|Fri|Sat|Sun)(-(Mon|Tue|Wed|Thr|Fri|Sat|Sun))?$", splitLine[5])
+	matchDayOfWeekStringList, _ := regexp.MatchString("^((Mon|Tue|Wed|Thr|Fri|Sat|Sun),?)+$", splitLine[5])
+	return matchDigitOrWildcard || matchDayOfWeekStringRange || matchDayOfWeekStringList
 }
 
 func init() {

@@ -369,13 +369,46 @@ if ../cronitor $CRONITOR_ARGS discover ../fixtures/crontab.txt -k 53b6c114717140
 fi
 
 rm -f $LOGFILE
-TEST="Discover correctly rewrites crontab with username"
-echo "* * * * * sharter /usr/bin/true" | cat - ../fixtures/crontab.txt > $CRONTAB_TEMP
-if ../cronitor $CRONITOR_ARGS discover $CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "/usr/bin/true" | grep -q "sharter cronitor exec"
+TEST="Discover correctly parses crontab with username"
+echo "* * * * * sharter echo 'username parse'" | cat - ../fixtures/crontab.txt > $CRONTAB_TEMP
+if ../cronitor $CRONITOR_ARGS discover $CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "echo '" | grep -q "sharter cronitor exec"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
 
+rm -f $LOGFILE
+TEST="Discover correctly parses crontab with 6 digits"
+echo "* * * * * 0 echo 'six dig parse'" | cat - ../fixtures/crontab.txt > $CRONTAB_TEMP
+if ../cronitor $CRONITOR_ARGS discover $CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "echo '" | grep -q "0 cronitor exec"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+TEST="Discover correctly parses crontab with 6th digit DoW string range"
+echo "* * * * * Mon-Fri echo 'DoW string parse'" | cat - ../fixtures/crontab.txt > $CRONTAB_TEMP
+if ../cronitor $CRONITOR_ARGS discover $CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "echo '" | grep -q "Mon-Fri cronitor exec"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+TEST="Discover correctly parses crontab with 6th digit DoW string list"
+echo "* * * * * Mon,Wed,Fri echo 'DoW string list parse'" | cat - ../fixtures/crontab.txt > $CRONTAB_TEMP
+if ../cronitor $CRONITOR_ARGS discover $CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "echo '" | grep -q "Mon,Wed,Fri cronitor exec"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+TEST="Discover correctly parses crontab with 6th digit DoW string name"
+echo "* * * * * Mon echo 'DoW string name parse'" | cat - ../fixtures/crontab.txt > $CRONTAB_TEMP
+if ../cronitor $CRONITOR_ARGS discover $CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "echo '" | grep -q "Mon cronitor exec"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
 TEST="Discover rewrites crontab in place"
 TMPFILE="/tmp/crontab.txt"
 cp ../fixtures/crontab.txt $TMPFILE

@@ -31,6 +31,10 @@ var pingApiKey string
 var verbose bool
 var noStdoutPassthru bool
 
+type TimezoneLocationName struct {
+	Name string
+}
+
 var shortDescription = fmt.Sprintf("CronitorCLI version %s", version)
 
 // RootCmd represents the base command when called without any subcommands
@@ -215,10 +219,14 @@ func effectiveHostname() string {
 	return hostname
 }
 
-func timezoneLocationName() string {
-	// First, check a TZ environemnt variable if one is set
+func effectiveTimezoneLocationName() TimezoneLocationName {
+	// First, check if a TZ or CRON_TZ environemnt variable is set -- Diff var used by diff distros
 	if locale, isSetFlag := os.LookupEnv("TZ"); isSetFlag {
-		return locale
+		return TimezoneLocationName{locale}
+	}
+
+	if locale, isSetFlag := os.LookupEnv("CRON_TZ"); isSetFlag {
+		return TimezoneLocationName{locale}
 	}
 
 	// Attempt to parse timedatectl (should work on FreeBSD, many linux distros)
@@ -226,7 +234,7 @@ func timezoneLocationName() string {
 		outputString := strings.Replace(string(output), "Time zone", "Timezone", -1)
 		r := regexp.MustCompile(`(?m:Timezone:\s+(\S+).+$)`)
 		if ret := r.FindStringSubmatch(outputString); ret != nil && len(ret) > 1 {
-			return ret[1]
+			return TimezoneLocationName{ret[1]}
 		}
 	}
 
@@ -234,16 +242,16 @@ func timezoneLocationName() string {
 	if localtimeFile, err := os.Lstat("/etc/localtime"); err == nil && localtimeFile.Mode() & os.ModeSymlink == os.ModeSymlink {
 		if symlink, _ := os.Readlink("/etc/localtime"); len(symlink) > 0 {
 			symlinkParts := strings.Split(symlink, "/")
-			return strings.Join(symlinkParts[len(symlinkParts)-2:], "/")
+			return TimezoneLocationName{strings.Join(symlinkParts[len(symlinkParts)-2:], "/")}
 		}
 	}
 
 	// If we happen to have an /etc/timezone, no guarantee it's used, but read that
 	if locale, err := ioutil.ReadFile("/etc/timezone"); err == nil {
-		return string(locale)
+		return TimezoneLocationName{string(locale)}
 	}
 
-	return ""
+	return TimezoneLocationName{""}
 }
 
 func apiUrl() string {

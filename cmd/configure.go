@@ -62,7 +62,7 @@ Example setting common exclude text for use with 'cronitor discover':
 			fmt.Println("\nHostname:")
 			fmt.Println(effectiveHostname())
 			fmt.Println("\nTimezone Location:")
-			fmt.Println(timezoneLocationName())
+			fmt.Println(effectiveTimezoneLocationName())
 			fmt.Println("\nDebug Log:")
 			fmt.Println(viper.GetString(varLog))
 		}
