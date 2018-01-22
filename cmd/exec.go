@@ -82,9 +82,9 @@ Example with no command output send to Cronitor:
 
 		startTime := makeStamp()
 		formattedStartTime := formatStamp(startTime)
-		go sendPing("run", monitorCode, "", formattedStartTime, startTime, nil, nil, &wg)
-
 		subcommand := shellquote.Join(commandParts...)
+		go sendPing("run", monitorCode, subcommand, formattedStartTime, startTime, nil, nil, &wg)
+
 		log(fmt.Sprintf("Running subcommand: %s", subcommand))
 
 		var outputForStdout []byte
