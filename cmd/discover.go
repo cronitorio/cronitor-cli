@@ -394,11 +394,15 @@ func createName(CommandToRun string, RunAs string, IsAutoDiscoverCommand bool) s
 	excludeFromName = append(excludeFromName, "/bin/bash -c -l")
 	excludeFromName = append(excludeFromName, "/bin/bash -cl")
 
+	excludeFromName = append(excludeFromName, "'")
+	excludeFromName = append(excludeFromName, "\"")
+	excludeFromName = append(excludeFromName, "\\")
+
 	if IsAutoDiscoverCommand {
 		return truncateString(fmt.Sprintf("[%s] Auto discover %s", effectiveHostname(), strings.TrimSpace(crontabPath)), 100)
 	}
 
-	// Before we apply exclusions, remove common log-file append
+	// Remove output redirection
 	redirectAppendPosition := strings.Index(CommandToRun, ">>")
 	redirectPosition := strings.Index(CommandToRun, ">")
 	if redirectAppendPosition > 0 {
@@ -407,17 +411,29 @@ func createName(CommandToRun string, RunAs string, IsAutoDiscoverCommand bool) s
 		CommandToRun = CommandToRun[:redirectPosition]
 	}
 
+	// Remove exclusion text
 	for _, substr := range excludeFromName {
 		CommandToRun = strings.Replace(CommandToRun, substr, "", -1)
 	}
-
-	CommandToRun = strings.TrimSpace(truncateString(CommandToRun, 100))
-	CommandToRun = strings.Trim(CommandToRun, ">'\"")
+	CommandToRun = strings.TrimSpace(CommandToRun)
 
 	if len(RunAs) > 0 {
-		RunAs = fmt.Sprintf("%s ", RunAs)
+		CommandToRun = fmt.Sprintf("%s %s", RunAs, CommandToRun)
 	}
-	return truncateString(fmt.Sprintf("[%s] %s%s", effectiveHostname(), RunAs, strings.TrimSpace(CommandToRun)), 100)
+
+	// Assemble the name and return if short
+	maxNameLen := 100
+	formattedHostname := fmt.Sprintf("[%s] ", effectiveHostname())
+	if maxNameLen >= len(formattedHostname + CommandToRun) {
+		return formattedHostname + CommandToRun
+	}
+
+	// Truncation necessary; Keep the first and last portion of the command
+	commandPrefixLen := 20
+	commandSuffixLen := maxNameLen - len(formattedHostname) - commandPrefixLen
+	formattedCommandToRun := fmt.Sprintf("%s...%s", strings.TrimSpace(CommandToRun[:commandPrefixLen]), strings.TrimSpace(CommandToRun[len(CommandToRun) - commandSuffixLen + 3:]))
+
+	return fmt.Sprintf("%s%s", formattedHostname, formattedCommandToRun)
 }
 
 func createKey(CommandToRun string, CronExpression string, RunAs string, IsAutoDiscoverCommand bool) string {
