@@ -260,6 +260,14 @@ if grep -q "&duration=1." $LOGFILE
 fi
 
 rm -f $LOGFILE
+TEST="Exec sends command with run ping"
+../cronitor $CRONITOR_ARGS --log $LOGFILE exec --no-stdout d3x0c1 ./success.sh xyz > /dev/null
+if grep "/run" $LOGFILE | grep "&msg=" | grep -q "success.sh+xyz"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
 TEST="Exec sends stdout with complete ping"
 ../cronitor $CRONITOR_ARGS --log $LOGFILE exec d3x0c1 ./success.sh xyz > /dev/null
 if grep "&msg=" $LOGFILE | grep -q "xyz"
@@ -270,7 +278,7 @@ fi
 rm -f $LOGFILE
 TEST="Exec does not send stdout when suppressed"
 ../cronitor $CRONITOR_ARGS --log $LOGFILE exec --no-stdout d3x0c1 ./success.sh xyz > /dev/null
-if grep "&msg=" $LOGFILE | grep -q "xyz"
+if grep "/complete" $LOGFILE | grep "&msg=" | grep -q "xyz"
     then echo "${TEST}.. FAIL"
     else echo "${TEST}.. OK"
 fi
