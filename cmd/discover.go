@@ -82,11 +82,11 @@ Example:
     ... Adds Cronitor integration to your crontab and outputs to stdout
 
 Example with customized monitor names:
-  $ cronitor discover /path/to/crontab -e "/var/app/code/path/" -e "/var/app/bin/" -e "> /dev/null"
+  $ cronitor discover /path/to/crontab -e "/var/app/code/path/" -e "/var/app/bin/"
     ... Updates previously discovered monitors or creates new monitors, excluding the provided snippets from the monitor name.
     ... Adds Cronitor integration to your crontab and outputs to stdout
 
-  You can run the command as many times as you need with additional exclusion params until the job names on your Cronitor Dashboard are clear and readable.
+  You can run the command as many times as you need with additional exclusion params until the job names on your Cronitor dashboard are clear and readable.
 
 Example where your Crontab file is updated in place:
   $ cronitor discover /path/to/crontab --save
