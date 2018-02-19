@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"os/exec"
 	"strconv"
+	"github.com/manifoldco/promptui"
 )
 
 type Rule struct {
@@ -29,14 +30,15 @@ type Rule struct {
 }
 
 type Monitor struct {
-	Name  		string   `json:"defaultName"`
-	Key   		string   `json:"key"`
-	Rules 		[]Rule   `json:"rules"`
-	Tags  		[]string `json:"tags"`
-	Type  		string   `json:"type"`
-	Code  		string   `json:"code,omitempty"`
-	Timezone	string   `json:"timezone,omitempty"`
-	Note  		string   `json:"defaultNote,omitempty"`
+	Name  			string   `json:"Name"`
+	DefaultName		string   `json:"defaultName"`
+	Key   			string   `json:"key"`
+	Rules 			[]Rule   `json:"rules"`
+	Tags  			[]string `json:"tags"`
+	Type  			string   `json:"type"`
+	Code			string   `json:"code,omitempty"`
+	Timezone		string	 `json:"timezone,omitempty"`
+	Note  			string   `json:"defaultNote,omitempty"`
 }
 
 type Line struct {
@@ -62,11 +64,13 @@ func (l Line) IsAutoDiscoverCommand() bool {
 }
 
 var excludeFromName []string
+var interactiveMode bool
 var isAutoDiscover bool
 var noAutoDiscover bool
 var saveCrontabFile bool
 var crontabPath string
 var timezone TimezoneLocationName
+var maxNameLen = 100
 
 var discoverCmd = &cobra.Command{
 	Use:   "discover [crontab]",
@@ -81,7 +85,11 @@ Example:
     ... Creates monitors on your Cronitor dashboard for each entry in the specified crontab. The command string will be used as the monitor name.
     ... Adds Cronitor integration to your crontab and outputs to stdout
 
-Example with customized monitor names:
+Example using interactive mode to customize monitor names:
+  $ cronitor discover /path/to/crontab --interactive"
+    ... Will prompt for each line in your crontab, allowing you to use the auto-generated name or provide your own
+
+Example using exclusion text to customize monitor names:
   $ cronitor discover /path/to/crontab -e "/var/app/code/path/" -e "/var/app/bin/"
     ... Updates previously discovered monitors or creates new monitors, excluding the provided snippets from the monitor name.
     ... Adds Cronitor integration to your crontab and outputs to stdout
@@ -127,17 +135,20 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 
 		// Read crontabLines into map of Monitor structs
 		monitors := map[string]*Monitor{}
+		allNameCandidates := map[string]bool{}
+
 		for _, line := range crontabLines {
 			if !line.IsMonitorable() {
 				continue
 			}
 
 			rules := []Rule{createRule(line.CronExpression)}
-			name := createName(line.CommandToRun, line.RunAs, line.IsAutoDiscoverCommand())
+			name := createDefaultName(line.CommandToRun, line.RunAs, line.LineNumber, line.IsAutoDiscoverCommand(), effectiveHostname(), excludeFromName, allNameCandidates)
 			key := createKey(line.CommandToRun, line.CronExpression, line.RunAs, line.IsAutoDiscoverCommand())
 			tags := createTags()
 
 			line.Mon = Monitor{
+				"",
 				name,
 				key,
 				rules,
@@ -146,6 +157,39 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 				line.Code,
 				timezone.Name,
 				createNote(line.LineNumber, line.IsAutoDiscoverCommand()),
+			}
+
+			if interactiveMode {
+				// For each line in the crontab that is monitorable, prompt for name
+				fmt.Println("\n" + line.FullLine)
+				defaultName := line.Mon.DefaultName
+				for {
+					prompt := promptui.Prompt{
+						Label: "Unique name",
+						Default: defaultName,
+						Validate: validateNameFormat,
+						AllowEdit: defaultName != line.Mon.DefaultName,
+					}
+
+					if result, err := prompt.Run(); err == nil {
+						if err := validateNameUniqueness(result); err != nil {
+							fmt.Println("Error: You are already using this name. Choose a unique name.\n")
+							defaultName = result
+							continue
+						}
+
+						if result != line.Mon.DefaultName {
+							line.Mon.Name = result
+						}
+					} else if err == promptui.ErrInterrupt {
+						fmt.Println("Exited by user signal")
+						os.Exit(-1)
+					} else {
+						fmt.Println("Error: " + err.Error() + "\n")
+					}
+
+					break
+				}
 			}
 
 			monitors[key] = &line.Mon
@@ -387,7 +431,7 @@ func createNote(LineNumber int, IsAutoDiscoverCommand bool) string {
 	return fmt.Sprintf("Discovered in %s:%d", getCrontabPath(), LineNumber)
 }
 
-func createName(CommandToRun string, RunAs string, IsAutoDiscoverCommand bool) string {
+func createDefaultName(CommandToRun string, RunAs string, LineNumber int, IsAutoDiscoverCommand bool, effectiveHostname string, excludeFromName []string, allNameCandidates map[string]bool) string {
 	excludeFromName = append(excludeFromName, "2>&1")
 	excludeFromName = append(excludeFromName, "/bin/bash -l -c")
 	excludeFromName = append(excludeFromName, "/bin/bash -lc")
@@ -399,41 +443,54 @@ func createName(CommandToRun string, RunAs string, IsAutoDiscoverCommand bool) s
 	excludeFromName = append(excludeFromName, "\\")
 
 	if IsAutoDiscoverCommand {
-		return truncateString(fmt.Sprintf("[%s] Auto discover %s", effectiveHostname(), strings.TrimSpace(crontabPath)), 100)
+		return truncateString(fmt.Sprintf("[%s] Auto discover %s", effectiveHostname, strings.TrimSpace(crontabPath)), maxNameLen)
 	}
 
 	// Remove output redirection
-	redirectAppendPosition := strings.Index(CommandToRun, ">>")
-	redirectPosition := strings.Index(CommandToRun, ">")
-	if redirectAppendPosition > 0 {
-		CommandToRun = CommandToRun[:redirectAppendPosition]
-	} else if redirectPosition > 0 {
-		CommandToRun = CommandToRun[:redirectPosition]
+	for _, redirectionOperator := range []string{" 2>", ">>", ">"} {
+		if operatorPosition := strings.Index(CommandToRun, redirectionOperator) ; operatorPosition > 0 {
+			CommandToRun = CommandToRun[:operatorPosition]
+			break
+		}
 	}
 
 	// Remove exclusion text
 	for _, substr := range excludeFromName {
 		CommandToRun = strings.Replace(CommandToRun, substr, "", -1)
 	}
-	CommandToRun = strings.TrimSpace(CommandToRun)
 
-	if len(RunAs) > 0 {
-		CommandToRun = fmt.Sprintf("%s %s", RunAs, CommandToRun)
+	CommandToRun = strings.Join(strings.Fields(CommandToRun), " ")
+
+	// Assemble the candidate name.
+	// Ensure we don't produce dupe names if the user has same command on multiple lines.
+	formattedRunAs := ""
+	if RunAs != "" {
+		formattedRunAs = fmt.Sprintf("%s ", RunAs)
 	}
 
-	// Assemble the name and return if short
-	maxNameLen := 100
-	formattedHostname := fmt.Sprintf("[%s] ", effectiveHostname())
-	if maxNameLen >= len(formattedHostname + CommandToRun) {
-		return formattedHostname + CommandToRun
+	formattedHostname := ""
+	if effectiveHostname != "" {
+		formattedHostname = fmt.Sprintf("[%s] ", effectiveHostname)
 	}
 
-	// Truncation necessary; Keep the first and last portion of the command
-	commandPrefixLen := 20
-	commandSuffixLen := maxNameLen - len(formattedHostname) - commandPrefixLen
-	formattedCommandToRun := fmt.Sprintf("%s...%s", strings.TrimSpace(CommandToRun[:commandPrefixLen]), strings.TrimSpace(CommandToRun[len(CommandToRun) - commandSuffixLen + 3:]))
+	candidate := formattedHostname + formattedRunAs + CommandToRun
 
-	return fmt.Sprintf("%s%s", formattedHostname, formattedCommandToRun)
+	if _, exists := allNameCandidates[candidate]; exists {
+		candidate = fmt.Sprintf("%s L%d", candidate, LineNumber)
+	} else {
+		allNameCandidates[candidate] = true
+	}
+
+	// Return if short, truncate if necessary.
+	if maxNameLen >= len(candidate) {
+		return candidate
+	}
+
+	// Keep the first and last portion of the command
+	separator := "..."
+	commandPrefixLen := 20 + len(formattedHostname) + len(formattedRunAs)
+	commandSuffixLen := maxNameLen - commandPrefixLen - len(separator)
+	return fmt.Sprintf("%s%s%s", strings.TrimSpace(candidate[:commandPrefixLen]), separator, strings.TrimSpace(candidate[len(candidate) - commandSuffixLen:]))
 }
 
 func createKey(CommandToRun string, CronExpression string, RunAs string, IsAutoDiscoverCommand bool) string {
@@ -451,7 +508,9 @@ func createKey(CommandToRun string, CronExpression string, RunAs string, IsAutoD
 		CronExpression = "" // The schedule is randomized for auto discover, so just ignore it
 	}
 
-	data := []byte(fmt.Sprintf("%s-%s-%s-%s", effectiveHostname(), CommandToRun, CronExpression, RunAs))
+	// Always use os.Hostname when creating a key so the key does not change when a user modifies their hostname using param/var
+	hostname, _ = os.Hostname()
+	data := []byte(fmt.Sprintf("%s-%s-%s-%s", hostname, CommandToRun, CronExpression, RunAs))
 	return fmt.Sprintf("%x", sha1.Sum(data))
 }
 
@@ -486,6 +545,34 @@ func sendHttpPut(url string, body string) ([]byte, error) {
 	return contents, nil
 }
 
+func validateNameUniqueness(candidateName string) error {
+	client := &http.Client{}
+	url := fmt.Sprintf("%s/%s", apiUrl(), candidateName)
+	request, err := http.NewRequest("GET", url, strings.NewReader(""))
+	request.SetBasicAuth(viper.GetString(varApiKey), "")
+	request.Header.Add("Content-Type", "application/json")
+	request.Header.Add("User-Agent", userAgent)
+	request.ContentLength = 0
+	response, err := client.Do(request)
+	if err == nil && response.StatusCode == http.StatusOK {
+		return errors.New("name already exists")
+	}
+
+	return nil
+}
+
+func validateNameFormat(candidateName string) error {
+	if candidateName == "" {
+		return errors.New("A unique name is required")
+	}
+
+	if inputLen := len(candidateName); inputLen > maxNameLen {
+		return errors.New(fmt.Sprintf("Name is too long: %d of %d chars", inputLen, maxNameLen))
+	}
+
+	return nil
+}
+
 func randomMinute() int {
 	rand.Seed(time.Now().Unix())
 	return rand.Intn(59)
@@ -512,6 +599,7 @@ func init() {
 	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
 	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
+	discoverCmd.Flags().BoolVarP(&interactiveMode, "interactive", "i", interactiveMode, "Parse crontab line-by-line")
 
 	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Indicates when being run automatcially")
 	discoverCmd.Flags().MarkHidden("auto")
