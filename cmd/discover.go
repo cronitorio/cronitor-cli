@@ -160,12 +160,11 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 			}
 
 			if interactiveMode {
-				// For each line in the crontab that is monitorable, prompt for name
 				fmt.Println("\n" + line.FullLine)
 				defaultName := line.Mon.DefaultName
 				for {
 					prompt := promptui.Prompt{
-						Label: "Unique name",
+						Label: "Monitor name",
 						Default: defaultName,
 						Validate: validateNameFormat,
 						AllowEdit: defaultName != line.Mon.DefaultName,
@@ -173,7 +172,7 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 
 					if result, err := prompt.Run(); err == nil {
 						if err := validateNameUniqueness(result); err != nil {
-							fmt.Println("Error: You are already using this name. Choose a unique name.\n")
+							fmt.Println("Sorry! You are already using this name. Choose a unique name.\n")
 							defaultName = result
 							continue
 						}
@@ -432,7 +431,6 @@ func createNote(LineNumber int, IsAutoDiscoverCommand bool) string {
 }
 
 func createDefaultName(CommandToRun string, RunAs string, LineNumber int, IsAutoDiscoverCommand bool, effectiveHostname string, excludeFromName []string, allNameCandidates map[string]bool) string {
-	excludeFromName = append(excludeFromName, "2>&1")
 	excludeFromName = append(excludeFromName, "/bin/bash -l -c")
 	excludeFromName = append(excludeFromName, "/bin/bash -lc")
 	excludeFromName = append(excludeFromName, "/bin/bash -c -l")
@@ -447,7 +445,7 @@ func createDefaultName(CommandToRun string, RunAs string, LineNumber int, IsAuto
 	}
 
 	// Remove output redirection
-	for _, redirectionOperator := range []string{" 2>", ">>", ">"} {
+	for _, redirectionOperator := range []string{">>", ">"} {
 		if operatorPosition := strings.Index(CommandToRun, redirectionOperator) ; operatorPosition > 0 {
 			CommandToRun = CommandToRun[:operatorPosition]
 			break
@@ -562,6 +560,7 @@ func validateNameUniqueness(candidateName string) error {
 }
 
 func validateNameFormat(candidateName string) error {
+	candidateName = strings.TrimSpace(candidateName)
 	if candidateName == "" {
 		return errors.New("A unique name is required")
 	}
