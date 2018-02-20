@@ -3,7 +3,16 @@ package main
 import (
 	"cronitor/cmd"
 	"os"
+	"github.com/getsentry/raven-go"
 )
+
+var version = "1.11.0"
+
+func init() {
+    raven.SetDSN("***REMOVED***")
+    raven.SetRelease(version)
+    cmd.Version = version
+}
 
 func main() {
 	// Ensure that flags on `exec` commands are not parsed by Cobra
@@ -30,5 +39,5 @@ func main() {
 		os.Args[commandIndex] = "--"
 	}
 
-	cmd.Execute()
+	raven.CapturePanicAndWait(cmd.Execute, nil)
 }

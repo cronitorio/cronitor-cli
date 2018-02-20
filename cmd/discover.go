@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"strconv"
 	"github.com/manifoldco/promptui"
+	"github.com/getsentry/raven-go"
 )
 
 type Rule struct {
@@ -537,6 +538,7 @@ func sendHttpPut(url string, body string) ([]byte, error) {
 	defer response.Body.Close()
 	contents, err := ioutil.ReadAll(response.Body)
 	if err != nil {
+		raven.CaptureErrorAndWait(err, nil)
 		return nil, err
 	}
 

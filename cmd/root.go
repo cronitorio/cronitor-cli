@@ -16,9 +16,11 @@ import (
 	"regexp"
 	"errors"
 	"runtime"
+	"github.com/getsentry/raven-go"
 )
 
-var version = "1.11.0"
+var Version string
+
 var cfgFile string
 var userAgent string
 
@@ -35,7 +37,7 @@ type TimezoneLocationName struct {
 	Name string
 }
 
-var shortDescription = fmt.Sprintf("CronitorCLI version %s", version)
+var shortDescription = fmt.Sprintf("CronitorCLI version %s", Version)
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
@@ -62,7 +64,7 @@ var varExcludeText = "CRONITOR_EXCLUDE_TEXT"
 var varConfig = "CRONITOR_CONFIG"
 
 func init() {
-	userAgent = fmt.Sprintf("CronitorCLI/%s", version)
+	userAgent = fmt.Sprintf("CronitorCLI/%s", Version)
 	cobra.OnInitialize(initConfig)
 
 	// Here you will define your flags and configuration settings.
@@ -94,7 +96,6 @@ func initConfig() {
 	if len(viper.GetString(varConfig)) > 0 {
 		viper.SetConfigFile(viper.GetString(varConfig))
 	} else {
-		// Search config in home directory
 		viper.AddConfigPath(defaultConfigFileDirectory())
 		viper.SetConfigName("cronitor")
 	}
@@ -151,6 +152,8 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 		series = fmt.Sprintf("&series=%s", series)
 	}
 
+	pingSent := false
+	uri := ""
 	for i := 1; i <= 6; i++ {
 		if dev {
 			pingApiHost = "http://dev.cronitor.io"
@@ -160,7 +163,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 			pingApiHost = "https://cronitor.link"
 		}
 
-		uri := fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, pingApiAuthKey, hostname, formattedDuration, series, formattedStatusCode)
+		uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, pingApiAuthKey, hostname, formattedDuration, series, formattedStatusCode)
 		log("Sending ping " + uri)
 
 		request, err := http.NewRequest("GET", uri, nil)
@@ -178,11 +181,16 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 		}
 
 		_, err = ioutil.ReadAll(response.Body)
-		if err == nil && response.StatusCode < 400 {
-			break
-		}
 
 		response.Body.Close()
+		if err == nil && response.StatusCode < 300 {
+			pingSent = true
+			break
+		}
+	}
+
+	if !pingSent {
+		raven.CaptureErrorAndWait(errors.New("Ping failure; retries exhausted: " + uri), nil)
 	}
 }
 
@@ -204,6 +212,7 @@ func sendApiRequest(url string) ([]byte, error) {
 	defer response.Body.Close()
 	contents, err := ioutil.ReadAll(response.Body)
 	if err != nil {
+		raven.CaptureErrorAndWait(err, nil)
 		return nil, err
 	}
 
