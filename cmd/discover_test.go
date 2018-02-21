@@ -92,7 +92,7 @@ func TestCreateDefaultName(t *testing.T) {
 		"[localhost] /var/some/command arg1 arg2"},
 
 		{"output redirection is trimmed from name",
-		"/var/some/command arg1 arg2 2>&1 /dev/null",
+		"/var/some/command arg1 arg2 2>&1 > /dev/null",
 		"",
 		11,
 		false,

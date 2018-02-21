@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"github.com/manifoldco/promptui"
 	"github.com/getsentry/raven-go"
+	"net/url"
 )
 
 type Rule struct {
@@ -31,14 +32,14 @@ type Rule struct {
 }
 
 type Monitor struct {
-	Name  			string   `json:"Name"`
+	Name  			string   `json:"name,omitempty"`
 	DefaultName		string   `json:"defaultName"`
 	Key   			string   `json:"key"`
 	Rules 			[]Rule   `json:"rules"`
 	Tags  			[]string `json:"tags"`
 	Type  			string   `json:"type"`
-	Code			string   `json:"code,omitempty"`
-	Timezone		string	 `json:"timezone,omitempty"`
+	Code				string   `json:"code,omitempty"`
+	Timezone			string	 `json:"timezone,omitempty"`
 	Note  			string   `json:"defaultNote,omitempty"`
 }
 
@@ -144,42 +145,26 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 			}
 
 			rules := []Rule{createRule(line.CronExpression)}
-			name := createDefaultName(line.CommandToRun, line.RunAs, line.LineNumber, line.IsAutoDiscoverCommand(), effectiveHostname(), excludeFromName, allNameCandidates)
-			key := createKey(line.CommandToRun, line.CronExpression, line.RunAs, line.IsAutoDiscoverCommand())
+			defaultName := createDefaultName(line.CommandToRun, line.RunAs, line.LineNumber, line.IsAutoDiscoverCommand(), effectiveHostname(), excludeFromName, allNameCandidates)
+			key := createKey(line.CommandToRun, line.CronExpression, line.RunAs, line.IsAutoDiscoverCommand(), getCrontabPath())
 			tags := createTags()
-
-			line.Mon = Monitor{
-				"",
-				name,
-				key,
-				rules,
-				tags,
-				"heartbeat",
-				line.Code,
-				timezone.Name,
-				createNote(line.LineNumber, line.IsAutoDiscoverCommand()),
-			}
+			name := defaultName
 
 			if interactiveMode {
 				fmt.Println("\n" + line.FullLine)
-				defaultName := line.Mon.DefaultName
 				for {
 					prompt := promptui.Prompt{
 						Label: "Monitor name",
-						Default: defaultName,
+						Default: name,
 						Validate: validateNameFormat,
-						AllowEdit: defaultName != line.Mon.DefaultName,
+						AllowEdit: name != defaultName,
 					}
 
 					if result, err := prompt.Run(); err == nil {
-						if err := validateNameUniqueness(result); err != nil {
+						name = result
+						if err := validateNameUniqueness(result, key); err != nil {
 							fmt.Println("Sorry! You are already using this name. Choose a unique name.\n")
-							defaultName = result
 							continue
-						}
-
-						if result != line.Mon.DefaultName {
-							line.Mon.Name = result
 						}
 					} else if err == promptui.ErrInterrupt {
 						fmt.Println("Exited by user signal")
@@ -191,6 +176,23 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 					break
 				}
 			}
+
+			if name == defaultName {
+				name = ""
+			}
+
+			line.Mon = Monitor{
+				name,
+				defaultName,
+				key,
+				rules,
+				tags,
+				"heartbeat",
+				line.Code,
+				timezone.Name,
+				createNote(line.LineNumber, line.IsAutoDiscoverCommand()),
+			}
+
 
 			monitors[key] = &line.Mon
 		}
@@ -215,7 +217,7 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 			}
 
 			fmt.Println(fmt.Sprintf("Crontab %s updated", crontabPath))
-		} else {
+		} else if !isAutoDiscover {
 			fmt.Println(updatedCrontabLines)
 		}
 	},
@@ -375,7 +377,7 @@ func parseCrontab(lines []string) ([]*Line, *TimezoneLocationName) {
 
 		// If this job is already being wrapped by the Cronitor client, read current code.
 		// Expects a wrapped command to look like: cronitor exec d3x0 /path/to/cmd.sh
-		if len(command) > 1 && command[0] == "cronitor" && command[1] == "exec" {
+		if len(command) > 1 && strings.HasSuffix(command[0], "cronitor") && command[1] == "exec" {
 			line.Code = command[2]
 			command = command[3:]
 		}
@@ -411,6 +413,8 @@ func createAutoDiscoverLine(usesSixFieldCronExpression bool) *Line {
 	commandToRun = strings.Replace(commandToRun, "--save ", "", -1)
 	commandToRun = strings.Replace(commandToRun, "--verbose ", "", -1)
 	commandToRun = strings.Replace(commandToRun, "-v ", "", -1)
+	commandToRun = strings.Replace(commandToRun, "--interactive ", "", -1)
+	commandToRun = strings.Replace(commandToRun, "-i ", "", -1)
 	commandToRun = strings.Replace(commandToRun, crontabPath, getCrontabPath(), -1)
 
 	// Remove existing --auto flag before adding a new one to prevent doubling up
@@ -432,6 +436,7 @@ func createNote(LineNumber int, IsAutoDiscoverCommand bool) string {
 }
 
 func createDefaultName(CommandToRun string, RunAs string, LineNumber int, IsAutoDiscoverCommand bool, effectiveHostname string, excludeFromName []string, allNameCandidates map[string]bool) string {
+	excludeFromName = append(excludeFromName, "2>&1")
 	excludeFromName = append(excludeFromName, "/bin/bash -l -c")
 	excludeFromName = append(excludeFromName, "/bin/bash -lc")
 	excludeFromName = append(excludeFromName, "/bin/bash -c -l")
@@ -447,7 +452,7 @@ func createDefaultName(CommandToRun string, RunAs string, LineNumber int, IsAuto
 
 	// Remove output redirection
 	for _, redirectionOperator := range []string{">>", ">"} {
-		if operatorPosition := strings.Index(CommandToRun, redirectionOperator) ; operatorPosition > 0 {
+		if operatorPosition := strings.LastIndex(CommandToRun, redirectionOperator) ; operatorPosition > 0 {
 			CommandToRun = CommandToRun[:operatorPosition]
 			break
 		}
@@ -492,23 +497,17 @@ func createDefaultName(CommandToRun string, RunAs string, LineNumber int, IsAuto
 	return fmt.Sprintf("%s%s%s", strings.TrimSpace(candidate[:commandPrefixLen]), separator, strings.TrimSpace(candidate[len(candidate) - commandSuffixLen:]))
 }
 
-func createKey(CommandToRun string, CronExpression string, RunAs string, IsAutoDiscoverCommand bool) string {
+func createKey(CommandToRun string, CronExpression string, RunAs string, IsAutoDiscoverCommand bool, crontabPath string) string {
 	if IsAutoDiscoverCommand {
 		// Go out of our way to prevent making a duplicate monitor for an auto-discovery command.
-		// Ensure that tinkering with params does not change key
-		normalizedCommand := []string{}
-		for _, field := range strings.Fields(CommandToRun) {
-			if !strings.HasPrefix(CommandToRun, "-") {
-				normalizedCommand = append(normalizedCommand, field)
-			}
-		}
-
-		CommandToRun = strings.Join(normalizedCommand, " ")
-		CronExpression = "" // The schedule is randomized for auto discover, so just ignore it
+		CommandToRun = "auto discover " + crontabPath
+		RunAs = ""
+		CronExpression = ""
+		log("A-d normalized cmd: " + CommandToRun)
 	}
 
 	// Always use os.Hostname when creating a key so the key does not change when a user modifies their hostname using param/var
-	hostname, _ = os.Hostname()
+	hostname, _ := os.Hostname()
 	data := []byte(fmt.Sprintf("%s-%s-%s-%s", hostname, CommandToRun, CronExpression, RunAs))
 	return fmt.Sprintf("%x", sha1.Sum(data))
 }
@@ -524,7 +523,9 @@ func createRule(cronExpression string) Rule {
 }
 
 func sendHttpPut(url string, body string) ([]byte, error) {
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
 	request, err := http.NewRequest("PUT", url, strings.NewReader(body))
 	request.SetBasicAuth(viper.GetString(varApiKey), "")
 	request.Header.Add("Content-Type", "application/json")
@@ -545,20 +546,37 @@ func sendHttpPut(url string, body string) ([]byte, error) {
 	return contents, nil
 }
 
-func validateNameUniqueness(candidateName string) error {
-	client := &http.Client{}
-	url := fmt.Sprintf("%s/%s", apiUrl(), candidateName)
+func validateNameUniqueness(candidateName string, key string) error {
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+	}
+	url := fmt.Sprintf("%s/%s", apiUrl(), url.QueryEscape(candidateName))
 	request, err := http.NewRequest("GET", url, strings.NewReader(""))
 	request.SetBasicAuth(viper.GetString(varApiKey), "")
 	request.Header.Add("Content-Type", "application/json")
 	request.Header.Add("User-Agent", userAgent)
 	request.ContentLength = 0
 	response, err := client.Do(request)
-	if err == nil && response.StatusCode == http.StatusOK {
-		return errors.New("name already exists")
+	defer response.Body.Close()
+
+	if err != nil || response.StatusCode == http.StatusNotFound {
+		return nil
 	}
 
-	return nil
+	contents, err := ioutil.ReadAll(response.Body)
+
+	responseMonitor := struct{Key string}{}
+	if err = json.Unmarshal(contents, &responseMonitor); err != nil {
+		log("Could not verify uniqueness: " + err.Error())
+		log(string(contents))
+		return nil
+	}
+
+	if responseMonitor.Key == key {
+		return nil
+	}
+
+	return errors.New("name already exists")
 }
 
 func validateNameFormat(candidateName string) error {
