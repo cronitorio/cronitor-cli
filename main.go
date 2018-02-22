@@ -6,12 +6,9 @@ import (
 	"github.com/getsentry/raven-go"
 )
 
-var version = "1.14.0"
-
 func init() {
     raven.SetDSN("***REMOVED***")
-    raven.SetRelease(version)
-    cmd.Version = version
+    raven.SetRelease(cmd.Version)
 }
 
 func main() {

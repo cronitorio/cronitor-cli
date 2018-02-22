@@ -19,7 +19,7 @@ import (
 	"github.com/getsentry/raven-go"
 )
 
-var Version string
+var Version string = "1.15.0"
 
 var cfgFile string
 var userAgent string
@@ -37,13 +37,11 @@ type TimezoneLocationName struct {
 	Name string
 }
 
-var shortDescription = fmt.Sprintf("CronitorCLI version %s", Version)
-
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
 	Use:   "cronitor",
-	Short: shortDescription,
-	Long:  shortDescription + `
+	Short: shortDescription(Version),
+	Long:  shortDescription(Version) + `
 
 Command line tools for Cronitor.io. See https://cronitor.io/docs/using-cronitor-cli for details.`,
 }
@@ -318,4 +316,8 @@ func makeStamp() float64 {
 
 func formatStamp(timestamp float64) string {
 	return strconv.FormatFloat(timestamp, 'f', 3, 64)
+}
+
+func shortDescription(version string) string {
+	return  fmt.Sprintf("CronitorCLI version %s", version)
 }
