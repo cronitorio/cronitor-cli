@@ -75,7 +75,7 @@ var saveCrontabFile bool
 var crontabPath string
 var isUserCrontab bool
 var timezone TimezoneLocationName
-var maxNameLen = 100
+var maxNameLen = 75
 
 var discoverCmd = &cobra.Command{
 	Use:   "discover <optional crontab>",
@@ -116,9 +116,13 @@ In all of these examples, auto discover is enabled by adding 'cronitor discover 
 to Cronitor and alert if you if new jobs are added to your crontab without monitoring."
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		// If this is being run as a cron job it will not have a PS1.
+		// If this is being run from a script, cron, etc, it probably wont have a PS1
 		if os.Getenv("PS1") == "" {
 			isAutoDiscover = true
+		}
+
+		// If this is being run by cronitor exec, don't write anything to stdout
+		if os.Getenv("CRONITOR_EXEC") == "1" {
 			isSilent = true
 		}
 

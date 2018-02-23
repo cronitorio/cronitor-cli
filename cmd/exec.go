@@ -96,6 +96,11 @@ Example with no command output send to Cronitor:
 			execCmd = exec.Command("sh", "-c", subcommand)
 		}
 
+		// Add a custom env variable
+		env := os.Environ()
+		env = append(env, "CRONITOR_EXEC=1")
+		execCmd.Env = env
+
 		// Handle stdin to the subcommand
 		execCmdStdin, _ := execCmd.StdinPipe()
 		defer execCmdStdin.Close()
