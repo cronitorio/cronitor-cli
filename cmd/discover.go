@@ -22,6 +22,7 @@ import (
 	"github.com/manifoldco/promptui"
 	"github.com/getsentry/raven-go"
 	"net/url"
+	"os/user"
 )
 
 type Rule struct {
@@ -66,41 +67,48 @@ func (l Line) IsAutoDiscoverCommand() bool {
 }
 
 var excludeFromName []string
-var interactiveMode bool
+var interactiveMode = true
 var isAutoDiscover bool
+var isSilent bool
 var noAutoDiscover bool
 var saveCrontabFile bool
 var crontabPath string
+var isUserCrontab bool
 var timezone TimezoneLocationName
 var maxNameLen = 100
 
 var discoverCmd = &cobra.Command{
-	Use:   "discover [crontab]",
+	Use:   "discover <optional crontab>",
 	Short: "Attach monitoring to new cron jobs and watch for schedule updates",
 	Long:  `
-Cronitor discover will parse your crontab file and create or update monitors using the Cronitor API.
+Cronitor discover will parse your crontab and create or update monitors using the Cronitor API.
 
 Note: You must supply your Cronitor API key. This can be passed as a flag, environment variable, or saved in your Cronitor configuration file. See 'help configure' for more details.
 
 Example:
+  $ cronitor discover
+	... Read user crontab and step through line by line
+	... Creates monitors on your Cronitor dashboard for each entry in the crontab. The command string will be used as the monitor name.
+	... Makes no changes to your crontab, add a --save param or use "cronitor discover --auto --save" later when you are ready to apply changes.
+
   $ cronitor discover /path/to/crontab
-    ... Creates monitors on your Cronitor dashboard for each entry in the specified crontab. The command string will be used as the monitor name.
-    ... Adds Cronitor integration to your crontab and outputs to stdout
+    ... Instead of the user crontab, provide a crontab file to use
 
-Example using interactive mode to customize monitor names:
-  $ cronitor discover /path/to/crontab --interactive"
-    ... Will prompt for each line in your crontab, allowing you to use the auto-generated name or provide your own
+Example that does not use an interactive shell:
+  $ cronitor discover --auto"
+    ... The only output to stdout will be your crontab file with monitoring, suitable for piplines or writing to another crontab.
 
-Example using exclusion text to customize monitor names:
-  $ cronitor discover /path/to/crontab -e "/var/app/code/path/" -e "/var/app/bin/"
+Example using exclusion text to remove secrets or boilerplate:
+  $ cronitor discover /path/to/crontab -e "secret-token" -e "/var/common/app/path/"
     ... Updates previously discovered monitors or creates new monitors, excluding the provided snippets from the monitor name.
     ... Adds Cronitor integration to your crontab and outputs to stdout
+	... Names you create yourself in "discover" or from the dashboard are unchanged.
 
-  You can run the command as many times as you need with additional exclusion params until the job names on your Cronitor dashboard are clear and readable.
+  You can run the command as many times as you need, accumulating exclusion params until the job names on your Cronitor dashboard are clear and readable.
 
-Example where your Crontab file is updated in place:
+Example where your crontab is updated in place:
   $ cronitor discover /path/to/crontab --save
-    ... Creates or updates monitors
+    ... Steps line by line, creates or updates monitors
     ... Adds Cronitor integration to your crontab and saves the file in place.
 
 
@@ -108,22 +116,23 @@ In all of these examples, auto discover is enabled by adding 'cronitor discover 
 to Cronitor and alert if you if new jobs are added to your crontab without monitoring."
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(viper.GetString(varApiKey)) < 10 {
-			return errors.New("you must provide a valid API key with this command or save a key using 'cronitor configure'")
+		// If this is being run as a cron job it will not have a PS1.
+		if os.Getenv("PS1") == "" {
+			isAutoDiscover = true
+			isSilent = true
 		}
 
-		if len(args) == 0 {
-			return errors.New("you must provide a crontab file")
+		if len(viper.GetString(varApiKey)) < 10 {
+			return errors.New("you must provide a valid API key with this command or save a key using 'cronitor configure'")
 		}
 
 		return nil
 	},
 
 	Run: func(cmd *cobra.Command, args []string) {
-		crontabPath = args[0]
-		crontabStrings, errCode, err := readCrontab(crontabPath)
+		crontabStrings, errCode, err := readCrontab(args)
 		if err != nil {
-			fatal(err.Error(), errCode)
+			fatal("Problem: " + err.Error() + "\n", errCode)
 		}
 
 		crontabLines, parsedTimezoneLocationName := parseCrontab(crontabStrings)
@@ -139,6 +148,17 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 		monitors := map[string]*Monitor{}
 		allNameCandidates := map[string]bool{}
 
+		if !isAutoDiscover {
+			count := 0
+			for _, line := range crontabLines {
+				if line.IsMonitorable() {
+					count++
+				}
+			}
+
+			fmt.Printf("Found %d cron jobs in %s:\n", count, crontabPath)
+		}
+
 		for _, line := range crontabLines {
 			if !line.IsMonitorable() {
 				continue
@@ -150,7 +170,7 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 			tags := createTags()
 			name := defaultName
 
-			if interactiveMode {
+			if !isAutoDiscover {
 				fmt.Println("\n" + line.FullLine)
 				for {
 					prompt := promptui.Prompt{
@@ -204,43 +224,114 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 		}
 
 		// Re-write crontab lines with new/updated monitoring
-		var crontabOutput []string
+		var cl []string
 		for _, line := range crontabLines {
-			crontabOutput = append(crontabOutput, createCrontabLine(line))
+			cl = append(cl, createCrontabLine(line))
 		}
 
-		updatedCrontabLines := strings.Join(crontabOutput, "\n")
+		updatedCrontabLines := strings.Join(cl, "\n") + "\n"
 
-		if saveCrontabFile {
-			if ioutil.WriteFile(crontabPath, []byte(updatedCrontabLines), 0644) != nil {
-				fatal(fmt.Sprintf("The --save option is supplied but the file at %s could not be written; check permissions and try again", crontabPath), 126)
+		if !isSilent {
+			// When running --auto mode, you should be able to pipe or redirect crontab output elsewhere. Skip status-related messages.
+			if !isAutoDiscover {
+				fmt.Println("\n\nCrontab with monitoring:")
 			}
 
-			fmt.Println(fmt.Sprintf("Crontab %s updated", crontabPath))
-		} else if !isAutoDiscover {
 			fmt.Println(updatedCrontabLines)
+
+			if !isAutoDiscover && !saveCrontabFile {
+				saveCommand := strings.Join(os.Args, " ")
+				fmt.Println("\n\nTo install the updated crontab, use:")
+				fmt.Println(fmt.Sprintf("%s --auto --save\n", saveCommand))
+			}
 		}
+
+		if saveCrontabFile {
+			if err := saveCrontab(updatedCrontabLines, isUserCrontab); err == nil && !isSilent {
+				fmt.Println(fmt.Sprintf("Success: %s updated", crontabPath))
+			} else if !isSilent {
+				fatal("Problem: " + err.Error(), 126)
+			}
+		}
+
 	},
 }
 
-func readCrontab(crontabPath string) ([]string, int, error) {
-	if _, err := os.Stat(crontabPath); os.IsNotExist(err) {
-		return nil, 66, errors.New(fmt.Sprintf("the file %s does not exist", crontabPath))
-	}
+func readCrontab(args []string) ([]string, int, error) {
 
-	crontabBytes, err := ioutil.ReadFile(crontabPath)
-	if err != nil {
-		return nil, 126, errors.New(fmt.Sprintf("the crontab file at %s could not be read; check permissions and try again", crontabPath))
-	}
+	var crontabBytes []byte
 
-	// When the save flag is passed, attempt to write the file back to itself to ensure we have proper permissions before going further
-	if saveCrontabFile {
-		if ioutil.WriteFile(crontabPath, crontabBytes, 0644) != nil {
-			return nil, 126, errors.New(fmt.Sprintf("the --save option is supplied but the file at %s could not be written; check permissions and try again", crontabPath))
+	// If no crontab path was provided, attempt to load user crontab
+	if len(args) == 0 {
+		crontabPath = "user crontab"
+		isUserCrontab = true
+		if runtime.GOOS == "windows" {
+			return nil, 126, errors.New("on Windows, a crontab path argument is required")
+		}
+
+		if u, err := user.Current(); err == nil {
+			crontabPath = fmt.Sprintf("user \"%s\" crontab", u.Username)
+		}
+
+		cmd := exec.Command("crontab", "-l")
+		if b, err := cmd.Output(); err == nil {
+			crontabBytes = b
+		} else {
+			return nil, 126, errors.New("your user crontab file doesn't exist or couldn't be read. Try passing a crontab path instead")
+		}
+	} else {
+		crontabPath = args[0]
+		isUserCrontab = false
+		if _, err := os.Stat(crontabPath); os.IsNotExist(err) {
+			return nil, 66, errors.New(fmt.Sprintf("the file %s does not exist", crontabPath))
+		}
+
+		if b, err := ioutil.ReadFile(crontabPath); err == nil {
+			crontabBytes = b
+		} else {
+			return nil, 126, errors.New(fmt.Sprintf("the crontab file at %s could not be read; check permissions and try again", crontabPath))
+		}
+
+		// When the save flag is passed, attempt to write the file back to itself to ensure we have proper permissions before going further
+		if saveCrontabFile {
+			if ioutil.WriteFile(crontabPath, crontabBytes, 0644) != nil {
+				return nil, 126, errors.New(fmt.Sprintf("the --save option is supplied but the file at %s could not be written; check permissions and try again", crontabPath))
+			}
 		}
 	}
 
+	if len(crontabBytes) == 0 {
+		return nil, 126, errors.New("the crontab file is empty")
+	}
+
 	return strings.Split(string(crontabBytes), "\n"), 0, nil
+}
+
+func saveCrontab(crontabLines string, isUserCrontab bool) error {
+	if crontabLines == "" {
+		// Shouldn't be possible..
+		return errors.New("the --save option is supplied but updated crontab file is empty")
+	}
+
+	if isUserCrontab {
+		cmd := exec.Command("crontab", "-")
+
+		// crontab will use whatever $EDITOR is set. Temporarily just cat it out.
+		cmd.Env = []string{"EDITOR=/bin/cat"}
+		cmdStdin, _ := cmd.StdinPipe()
+		cmdStdin.Write([]byte(crontabLines))
+		cmdStdin.Close()
+		if _, err := cmd.Output(); err != nil {
+			return errors.New("The --save option is supplied but crontab update failed: " + err.Error())
+		}
+
+	} else {
+		if ioutil.WriteFile(crontabPath, []byte(crontabLines), 0644) != nil {
+			return errors.New(fmt.Sprintf("The --save option is supplied but the file at %s could not be written; check permissions and try again", crontabPath))
+		}
+	}
+
+	return nil
 }
 
 func putMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
@@ -424,6 +515,7 @@ func createAutoDiscoverLine(usesSixFieldCronExpression bool) *Line {
 	line := Line{}
 	line.CronExpression = cronExpression
 	line.CommandToRun = commandToRun
+	line.FullLine = fmt.Sprintf("%s %s", line.CronExpression, line.CommandToRun)
 	return &line
 }
 
@@ -432,7 +524,7 @@ func createNote(LineNumber int, IsAutoDiscoverCommand bool) string {
 		return fmt.Sprintf("Watching for schedule changes and new entries in %s", crontabPath)
 	}
 
-	return fmt.Sprintf("Discovered in %s:%d", getCrontabPath(), LineNumber)
+	return fmt.Sprintf("Discovered in %s L%d", getCrontabPath(), LineNumber)
 }
 
 func createDefaultName(CommandToRun string, RunAs string, LineNumber int, IsAutoDiscoverCommand bool, effectiveHostname string, excludeFromName []string, allNameCandidates map[string]bool) string {
@@ -503,7 +595,6 @@ func createKey(CommandToRun string, CronExpression string, RunAs string, IsAutoD
 		CommandToRun = "auto discover " + crontabPath
 		RunAs = ""
 		CronExpression = ""
-		log("A-d normalized cmd: " + CommandToRun)
 	}
 
 	// Always use os.Hostname when creating a key so the key does not change when a user modifies their hostname using param/var
@@ -557,11 +648,12 @@ func validateNameUniqueness(candidateName string, key string) error {
 	request.Header.Add("User-Agent", userAgent)
 	request.ContentLength = 0
 	response, err := client.Do(request)
-	defer response.Body.Close()
 
 	if err != nil || response.StatusCode == http.StatusNotFound {
 		return nil
 	}
+
+	defer response.Body.Close()
 
 	contents, err := ioutil.ReadAll(response.Body)
 
@@ -598,6 +690,10 @@ func randomMinute() int {
 }
 
 func getCrontabPath() string {
+	if isUserCrontab {
+		return crontabPath
+	}
+
 	if absoluteCronPath, err := filepath.Abs(crontabPath); err == nil {
 		return absoluteCronPath
 	}
