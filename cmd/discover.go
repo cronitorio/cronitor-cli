@@ -62,7 +62,7 @@ func (l Line) IsMonitorable() bool {
 }
 
 func (l Line) IsAutoDiscoverCommand() bool {
-	matched, _ := regexp.MatchString(".+discover[[:space:]]+--auto.+", strings.ToLower(l.CommandToRun))
+	matched, _ := regexp.MatchString(".+discover[[:space:]]+--auto.*", strings.ToLower(l.CommandToRun))
 	return matched
 }
 
@@ -87,29 +87,29 @@ Note: You must supply your Cronitor API key. This can be passed as a flag, envir
 
 Example:
   $ cronitor discover
-	... Read user crontab and step through line by line
-	... Creates monitors on your Cronitor dashboard for each entry in the crontab. The command string will be used as the monitor name.
-	... Makes no changes to your crontab, add a --save param or use "cronitor discover --auto --save" later when you are ready to apply changes.
+      > Read user crontab and step through line by line
+      > Creates monitors on your Cronitor dashboard for each entry in the crontab. The command string will be used as the monitor name.
+      > Makes no changes to your crontab, add a --save param or use "cronitor discover --auto --save" later when you are ready to apply changes.
 
   $ cronitor discover /path/to/crontab
-    ... Instead of the user crontab, provide a crontab file to use
+      > Instead of the user crontab, provide a crontab file to use
 
 Example that does not use an interactive shell:
   $ cronitor discover --auto"
-    ... The only output to stdout will be your crontab file with monitoring, suitable for piplines or writing to another crontab.
+      > The only output to stdout will be your crontab file with monitoring, suitable for piplines or writing to another crontab.
 
 Example using exclusion text to remove secrets or boilerplate:
   $ cronitor discover /path/to/crontab -e "secret-token" -e "/var/common/app/path/"
-    ... Updates previously discovered monitors or creates new monitors, excluding the provided snippets from the monitor name.
-    ... Adds Cronitor integration to your crontab and outputs to stdout
-	... Names you create yourself in "discover" or from the dashboard are unchanged.
+      > Updates previously discovered monitors or creates new monitors, excluding the provided snippets from the monitor name.
+      > Adds Cronitor integration to your crontab and outputs to stdout
+      > Names you create yourself in "discover" or from the dashboard are unchanged.
 
   You can run the command as many times as you need, accumulating exclusion params until the job names on your Cronitor dashboard are clear and readable.
 
 Example where your crontab is updated in place:
   $ cronitor discover /path/to/crontab --save
-    ... Steps line by line, creates or updates monitors
-    ... Adds Cronitor integration to your crontab and saves the file in place.
+      > Steps line by line, creates or updates monitors
+      > Adds Cronitor integration to your crontab and saves the file in place.
 
 
 In all of these examples, auto discover is enabled by adding 'cronitor discover --auto' to your crontab as an hourly task. Auto discover will push schedule changes
@@ -123,6 +123,7 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 
 		// If this is being run by cronitor exec, don't write anything to stdout
 		if os.Getenv("CRONITOR_EXEC") == "1" {
+			isAutoDiscover = true
 			isSilent = true
 		}
 
@@ -505,15 +506,15 @@ func createAutoDiscoverLine(usesSixFieldCronExpression bool) *Line {
 
 	// Normalize the command so it can be run reliably from crontab.
 	commandToRun := strings.Join(os.Args, " ")
-	commandToRun = strings.Replace(commandToRun, "--save ", "", -1)
-	commandToRun = strings.Replace(commandToRun, "--verbose ", "", -1)
-	commandToRun = strings.Replace(commandToRun, "-v ", "", -1)
-	commandToRun = strings.Replace(commandToRun, "--interactive ", "", -1)
-	commandToRun = strings.Replace(commandToRun, "-i ", "", -1)
+	commandToRun = strings.Replace(commandToRun, "--save", "", -1)
+	commandToRun = strings.Replace(commandToRun, "--verbose", "", -1)
+	commandToRun = strings.Replace(commandToRun, "-v", "", -1)
+	commandToRun = strings.Replace(commandToRun, "--interactive", "", -1)
+	commandToRun = strings.Replace(commandToRun, "-i", "", -1)
 	commandToRun = strings.Replace(commandToRun, crontabPath, getCrontabPath(), -1)
 
 	// Remove existing --auto flag before adding a new one to prevent doubling up
-	commandToRun = strings.Replace(commandToRun, "--auto ", "", -1)
+	commandToRun = strings.Replace(commandToRun, "--auto", "", -1)
 	commandToRun = strings.Replace(commandToRun, " discover ", " discover --auto ", -1)
 
 	line := Line{}
