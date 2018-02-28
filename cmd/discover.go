@@ -39,9 +39,10 @@ type Monitor struct {
 	Rules 			[]Rule   `json:"rules"`
 	Tags  			[]string `json:"tags"`
 	Type  			string   `json:"type"`
-	Code				string   `json:"code,omitempty"`
-	Timezone			string	 `json:"timezone,omitempty"`
+	Code			string   `json:"code,omitempty"`
+	Timezone		string	 `json:"timezone,omitempty"`
 	Note  			string   `json:"defaultNote,omitempty"`
+	Notifications	map[string][]string `json:"notifications,omitempty"`
 }
 
 type Line struct {
@@ -76,6 +77,7 @@ var crontabPath string
 var isUserCrontab bool
 var timezone TimezoneLocationName
 var maxNameLen = 75
+var notificationList string
 
 var discoverCmd = &cobra.Command{
 	Use:   "discover <optional crontab>",
@@ -206,6 +208,11 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 				name = ""
 			}
 
+			notificationListMap := map[string][]string{}
+			if notificationList != "" {
+				notificationListMap = map[string][]string{"templates": {notificationList}}
+			}
+
 			line.Mon = Monitor{
 				name,
 				defaultName,
@@ -216,6 +223,7 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 				line.Code,
 				timezone.Name,
 				createNote(line.LineNumber, line.IsAutoDiscoverCommand()),
+				notificationListMap,
 			}
 
 
@@ -719,6 +727,7 @@ func init() {
 	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
 	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
+	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")
 
 	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Do not use an interactive shell. Write updated crontab to stdout.")
 }

@@ -452,4 +452,16 @@ if ../cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c11
     else echo "${TEST}.. OK"
 fi
 
+TEST="Discover omits 'notifications' if notification-list not specificed"
+if ../cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e | grep -q "notifications"
+    then echo "${TEST}.. FAIL"  # Note reversed order here...
+    else echo "${TEST}.. OK"
+fi
+
+TEST="Discover includes custom notification-list"
+if ../cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e --notification-list test-list-name | grep -q "test-list-name"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
 echo ""
