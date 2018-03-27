@@ -628,7 +628,7 @@ func createRule(cronExpression string) Rule {
 
 func sendHttpPut(url string, body string) ([]byte, error) {
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: 120 * time.Second,
 	}
 	request, err := http.NewRequest("PUT", url, strings.NewReader(body))
 	request.SetBasicAuth(viper.GetString(varApiKey), "")
