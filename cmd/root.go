@@ -19,7 +19,7 @@ import (
 	"github.com/getsentry/raven-go"
 )
 
-var Version string = "17.1"
+var Version string = "17.2"
 
 var cfgFile string
 var userAgent string
