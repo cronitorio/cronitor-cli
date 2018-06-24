@@ -140,7 +140,7 @@ Example with no command output send to Cronitor:
 			go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, &wg)
 		}
 
-		fmt.Println(string(outputForStdout))
+		fmt.Print(string(outputForStdout))
 		wg.Wait()
 	},
 }
