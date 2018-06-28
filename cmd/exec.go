@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"io/ioutil"
 	"regexp"
+	"os/signal"
+	"bytes"
 )
 
 var monitorCode string
@@ -23,14 +25,14 @@ var execCmd = &cobra.Command{
 	Long:  `
 The supplied command will be executed and Cronitor will be notified of success or failure.
 
-NB: Arguments supplied after the unique monitor code are treated as part of the command to execute. Flags intended for the 'exec' command must be passed before the monitor code.
+Note: Arguments supplied after the unique monitor code are treated as part of the command to execute. Flags intended for the 'exec' command must be passed before the monitor code.
 
 Example:
   $ cronitor exec d3x0c1 /path/to/command.sh --command-param argument1 argument2
   This command will ping your Cronitor monitor d3x0c1 and execute the command '/path/to/command.sh --command-param argument1 argument2'
 
 Example with no command output send to Cronitor:
-  By default, stdout and stderr messages are sent to Cronitor when your job completes. To prevent any stdout output from being sent to cronitor, use the --no-stdout flag:
+  By default, stdout and stderr messages are sent to Cronitor when your job completes. To prevent any output from being sent to cronitor, use the --no-stdout flag:
   $ cronitor exec --no-stdout d3x0c1 /path/to/command.sh --command-param argument1 argument2`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		// We need to use raw os.Args so we can pass the wrapped command through unparsed
@@ -87,19 +89,7 @@ Example with no command output send to Cronitor:
 
 		log(fmt.Sprintf("Running subcommand: %s", subcommand))
 
-		var outputForStdout []byte
-		var err error
-		var execCmd *exec.Cmd
-		if runtime.GOOS == "windows" {
-			execCmd = exec.Command("cmd", "/c", subcommand)
-		} else {
-			execCmd = exec.Command("sh", "-c", subcommand)
-		}
-
-		// Add a custom env variable
-		env := os.Environ()
-		env = append(env, "CRONITOR_EXEC=1")
-		execCmd.Env = env
+		execCmd := makeSubcommandExec(subcommand)
 
 		// Handle stdin to the subcommand
 		execCmdStdin, _ := execCmd.StdinPipe()
@@ -109,43 +99,94 @@ Example with no command output send to Cronitor:
 			execCmdStdin.Write(execStdIn)
 		}
 
-		// Handle stdout from subcommand
-		outputForStdout, err = execCmd.CombinedOutput()
-		outputForPing := outputForStdout
-		if noStdoutPassthru {
-			outputForPing = []byte{}
-		}
+		// Combine stdout and stderr from the command into a single buffer which we'll return as stdout
+		// Alternatively we could pass stderr from the subcommand but I've chosen to only use it for CronitorCLI errors at the moment
+		var combinedOutput bytes.Buffer
+		execCmd.Stdout = &combinedOutput
+		execCmd.Stderr = &combinedOutput
 
-		endTime := makeStamp()
-		duration := endTime - startTime
-		exitCode := 0
-		if err == nil {
-			wg.Add(1)
-			go sendPing("complete", monitorCode, string(outputForPing), formattedStartTime, endTime, &duration, &exitCode, &wg)
-		} else {
-			wg.Add(1)
-			message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), outputForPing))
-
-			// This works on both Unix and Windows. Although package syscall is generally platform dependent, WaitStatus is
-			// defined for both Unix and Windows and in both cases has an ExitStatus() method with the same signature.
-			// https://stackoverflow.com/questions/10385551/get-exit-code-go
-			if exiterr, ok := err.(*exec.ExitError); ok {
-				if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-					exitCode = status.ExitStatus()
-				} else {
-					exitCode = 1
-				}
+		// Invoke subcommand and send a message when it's done
+		waitCh := make(chan error, 1)
+		go func() {
+			defer close(waitCh)
+			if err := execCmd.Start(); err != nil {
+			    waitCh <- err
+			} else {
+				waitCh <- execCmd.Wait()
 			}
+		}()
 
-			go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, &wg)
+		// Relay incoming signals to the subprocess
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan)
+
+		for {
+			select {
+			case sig := <-sigChan:
+				log(fmt.Sprintf("Signal rec'd: %s", sig))
+				if err := execCmd.Process.Signal(sig); err != nil {
+					log(fmt.Sprintf("Error relaying signal %s: %s", sig, err))
+				}
+			case err := <-waitCh:
+				// Handle stdout from subcommand
+				outputForStdout := combinedOutput.Bytes()
+				outputForPing := outputForStdout
+				if noStdoutPassthru {
+					outputForPing = []byte{}
+				}
+
+				endTime := makeStamp()
+				duration := endTime - startTime
+				exitCode := 0
+				if err == nil {
+					wg.Add(1)
+					go sendPing("complete", monitorCode, string(outputForPing), formattedStartTime, endTime, &duration, &exitCode, &wg)
+				} else {
+					wg.Add(1)
+					message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), outputForPing))
+
+					// This works on both Unix and Windows (syscall.WaitStatus is cross platform).
+					// Cribbed from aws-vault.
+					if exiterr, ok := err.(*exec.ExitError); ok {
+						if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+							exitCode = status.ExitStatus()
+						} else {
+							exitCode = 1
+						}
+					}
+
+					go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, &wg)
+				}
+
+				fmt.Print(string(outputForStdout))
+				wg.Wait()
+				os.Exit(exitCode)
+			}
 		}
 
-		fmt.Print(string(outputForStdout))
-		wg.Wait()
+
+
 	},
 }
 
 func init() {
 	RootCmd.AddCommand(execCmd)
 	execCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
+}
+
+func makeSubcommandEnv() []string {
+	env := os.Environ()
+	return append(env, "CRONITOR_EXEC=1")
+}
+
+func makeSubcommandExec(subcommand string) *exec.Cmd {
+	var execCmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		execCmd = exec.Command("cmd", "/c", subcommand)
+	} else {
+		execCmd = exec.Command("sh", "-c", subcommand)
+	}
+
+	execCmd.Env = makeSubcommandEnv()
+	return execCmd
 }

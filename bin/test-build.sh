@@ -290,6 +290,7 @@ if ../cronitor $CRONITOR_ARGS --log $LOGFILE exec d3x0c1 ./success.sh xyz | grep
     else echo "${TEST}.. FAIL"
 fi
 
+
 # Production integration test
 rm -f $LOGFILE
 TEST="Exec integration test"
