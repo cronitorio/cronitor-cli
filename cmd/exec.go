@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"os/signal"
 	"bytes"
+	"bufio"
+	"io"
 )
 
 var monitorCode string
@@ -94,7 +96,7 @@ Example with no command output send to Cronitor:
 		// Handle stdin to the subcommand
 		execCmdStdin, _ := execCmd.StdinPipe()
 		defer execCmdStdin.Close()
-		if stdinStat, _ := os.Stdin.Stat(); stdinStat.Size() > 0 {
+		if stdinStat, err := os.Stdin.Stat(); err == nil && stdinStat.Size() > 0 {
 			execStdIn, _ := ioutil.ReadAll(os.Stdin)
 			execCmdStdin.Write(execStdIn)
 		}
@@ -102,8 +104,13 @@ Example with no command output send to Cronitor:
 		// Combine stdout and stderr from the command into a single buffer which we'll return as stdout
 		// Alternatively we could pass stderr from the subcommand but I've chosen to only use it for CronitorCLI errors at the moment
 		var combinedOutput bytes.Buffer
-		execCmd.Stdout = &combinedOutput
-		execCmd.Stderr = &combinedOutput
+		if stdoutPipe, err := execCmd.StdoutPipe(); err == nil {
+			streamAndAggregateOutput(&stdoutPipe, &combinedOutput)
+		}
+
+		if stderrPipe, err := execCmd.StderrPipe(); err == nil {
+			streamAndAggregateOutput(&stderrPipe, &combinedOutput)
+		}
 
 		// Invoke subcommand and send a message when it's done
 		waitCh := make(chan error, 1)
@@ -158,7 +165,6 @@ Example with no command output send to Cronitor:
 					go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, &wg)
 				}
 
-				fmt.Print(string(outputForStdout))
 				wg.Wait()
 				os.Exit(exitCode)
 			}
@@ -189,4 +195,15 @@ func makeSubcommandExec(subcommand string) *exec.Cmd {
 
 	execCmd.Env = makeSubcommandEnv()
 	return execCmd
+}
+
+func streamAndAggregateOutput(pipe *io.ReadCloser, outputBuffer *bytes.Buffer) {
+	scanner := bufio.NewScanner(*pipe)
+	go func() {
+		for scanner.Scan() {
+			fmt.Printf(scanner.Text())
+			outputBuffer.Write(scanner.Bytes())
+		}
+	}()
+
 }

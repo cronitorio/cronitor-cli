@@ -291,6 +291,15 @@ if ../cronitor $CRONITOR_ARGS --log $LOGFILE exec d3x0c1 ./success.sh xyz | grep
 fi
 
 
+rm -f $LOGFILE
+TEST="Exec passes exitcode through to caller"
+../cronitor $CRONITOR_ARGS --log $LOGFILE exec d3x0c1 ./fail.sh
+if [ $? -eq 123 ]
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+
 # Production integration test
 rm -f $LOGFILE
 TEST="Exec integration test"
