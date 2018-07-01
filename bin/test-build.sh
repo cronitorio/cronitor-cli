@@ -28,15 +28,6 @@ cd - > /dev/null
 # CONFIGURE TESTS
 #################
 echo ""
-
-
-rm -f $LOGFILE
-TEST="Exec passes signals to subcommand"
-if ../cronitor $CRONITOR_ARGS --log $LOGFILE exec d3x0c1 ./success.sh xyz | grep -q xyz
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
-
 rm -f $LOGFILE
 TEST="Configure uses log file from env var"
 CRONITOR_LOG=$LOGFILE ../cronitor $CRONITOR_ARGS ping d3x0c1 --run
