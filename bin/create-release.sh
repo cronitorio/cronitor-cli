@@ -14,4 +14,5 @@ equinox release \
  --signing-key=../equinox.key \
  --app="app_itoJoCoW8dr" \
  --token="***REMOVED***" \
+ --channel="alpha" \
 cronitor

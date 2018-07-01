@@ -29,6 +29,14 @@ cd - > /dev/null
 #################
 echo ""
 
+
+rm -f $LOGFILE
+TEST="Exec passes signals to subcommand"
+if ../cronitor $CRONITOR_ARGS --log $LOGFILE exec d3x0c1 ./success.sh xyz | grep -q xyz
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
 rm -f $LOGFILE
 TEST="Configure uses log file from env var"
 CRONITOR_LOG=$LOGFILE ../cronitor $CRONITOR_ARGS ping d3x0c1 --run
@@ -293,7 +301,7 @@ fi
 
 rm -f $LOGFILE
 TEST="Exec passes exitcode through to caller"
-../cronitor $CRONITOR_ARGS --log $LOGFILE exec d3x0c1 ./fail.sh
+../cronitor $CRONITOR_ARGS --log $LOGFILE exec d3x0c1 ./fail.sh > /dev/null
 if [ $? -eq 123 ]
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
@@ -388,10 +396,11 @@ fi
 
 rm -f $LOGFILE
 TEST="Discover is silent when being run under exec"
-if ../cronitor $CRONITOR_ARGS exec d3x0c1 cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e| grep -v "slave_status.sh"
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
+if [[ $(../cronitor $CRONITOR_ARGS exec d3x0c1 cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e | wc -c) -ne 0 ]];
+    then echo "${TEST}.. FAIL"
+    else echo "${TEST}.. OK"
 fi
+
 
 rm -f $LOGFILE
 TEST="Discover correctly parses crontab with username"
