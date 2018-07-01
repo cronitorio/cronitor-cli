@@ -19,6 +19,7 @@ import (
 	"io"
 )
 
+
 var monitorCode string
 var commandParts []string
 var execCmd = &cobra.Command{
@@ -104,12 +105,13 @@ Example with no command output send to Cronitor:
 		// Combine stdout and stderr from the command into a single buffer which we'll return as stdout
 		// Alternatively we could pass stderr from the subcommand but I've chosen to only use it for CronitorCLI errors at the moment
 		var combinedOutput bytes.Buffer
+		var maxBufferSize = 2000
 		if stdoutPipe, err := execCmd.StdoutPipe(); err == nil {
-			streamAndAggregateOutput(&stdoutPipe, &combinedOutput)
+			streamAndAggregateOutput(&stdoutPipe, &combinedOutput, maxBufferSize)
 		}
 
 		if stderrPipe, err := execCmd.StderrPipe(); err == nil {
-			streamAndAggregateOutput(&stderrPipe, &combinedOutput)
+			streamAndAggregateOutput(&stderrPipe, &combinedOutput, maxBufferSize)
 		}
 
 		// Invoke subcommand and send a message when it's done
@@ -130,9 +132,8 @@ Example with no command output send to Cronitor:
 		for {
 			select {
 			case sig := <-sigChan:
-				log(fmt.Sprintf("Signal rec'd: %s", sig))
 				if err := execCmd.Process.Signal(sig); err != nil {
-					log(fmt.Sprintf("Error relaying signal %s: %s", sig, err))
+					// Ignoring because the only time I've seen an err is when child process has already exited after kill was sent to pgroup
 				}
 			case err := <-waitCh:
 				// Handle stdout from subcommand
@@ -170,8 +171,6 @@ Example with no command output send to Cronitor:
 			}
 		}
 
-
-
 	},
 }
 
@@ -197,13 +196,15 @@ func makeSubcommandExec(subcommand string) *exec.Cmd {
 	return execCmd
 }
 
-func streamAndAggregateOutput(pipe *io.ReadCloser, outputBuffer *bytes.Buffer) {
+func streamAndAggregateOutput(pipe *io.ReadCloser, outputBuffer *bytes.Buffer, maxOutputBufferSize int) {
 	scanner := bufio.NewScanner(*pipe)
 	go func() {
 		for scanner.Scan() {
 			fmt.Printf(scanner.Text())
-			outputBuffer.Write(scanner.Bytes())
+			// Ideally we would keep the last n bytes of output but this is a lot easier and acceptable trade off for now..
+			if len(scanner.Bytes()) + outputBuffer.Len() <= maxOutputBufferSize {
+				outputBuffer.Write(scanner.Bytes())
+			}
 		}
 	}()
-
 }
