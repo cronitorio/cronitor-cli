@@ -2,7 +2,7 @@ SCRIPT_DIR=$( cd $(dirname $0) ; pwd -P )
 cd $SCRIPT_DIR
 
 if [ -z "$1" ]
-  then echo "Usage: create-release.sh <version number>" && exit 1
+  then echo "Usage: release-alpha.sh <version number>" && exit 1
 fi
 
 git tag $1
