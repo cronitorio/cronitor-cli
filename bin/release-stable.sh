@@ -9,4 +9,4 @@ equinox publish \
  --token="***REMOVED***" \
  --app="app_itoJoCoW8dr" \
  --channel="stable" \
- --version="$1"
+ --release="$1"
