@@ -20,7 +20,7 @@ import (
 	"math/rand"
 )
 
-var Version string = "18.1"
+var Version string = "18.2"
 
 var cfgFile string
 var userAgent string
