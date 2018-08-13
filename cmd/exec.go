@@ -51,7 +51,6 @@ Example with no command output send to Cronitor:
 
 			// After finding "exec" we are looking for a monitor code
 			if foundExec && !foundCode {
-				log(fmt.Sprintf("Parsing exec looking for code: '%s'", arg))
 				if ret := monitorCodeRegex.FindStringSubmatch(strings.TrimSpace(arg)); ret != nil {
 					monitorCode = arg
 					foundCode = true
@@ -60,7 +59,6 @@ Example with no command output send to Cronitor:
 				continue
 			}
 
-			log(fmt.Sprintf("Parsing command looking for exec: %s", arg))
 			if strings.ToLower(arg) == "exec" {
 				foundExec = true
 				continue
@@ -137,7 +135,7 @@ Example with no command output send to Cronitor:
 				}
 			case err := <-waitCh:
 				// Handle stdout from subcommand
-				outputForStdout := combinedOutput.Bytes()
+				outputForStdout := bytes.TrimRight(combinedOutput.Bytes(), "\n")
 				outputForPing := outputForStdout
 				if noStdoutPassthru {
 					outputForPing = []byte{}
@@ -203,7 +201,7 @@ func streamAndAggregateOutput(pipe *io.ReadCloser, outputBuffer *bytes.Buffer, m
 			fmt.Println(scanner.Text())
 			// Ideally we would keep the last n bytes of output but this is a lot easier and acceptable trade off for now..
 			if len(scanner.Bytes()) + outputBuffer.Len() <= maxOutputBufferSize {
-				outputBuffer.Write(scanner.Bytes())
+				outputBuffer.Write(append(scanner.Bytes(), "\n"...))
 			}
 		}
 	}()
