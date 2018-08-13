@@ -17,6 +17,7 @@ import (
 	"errors"
 	"runtime"
 	"github.com/getsentry/raven-go"
+	"math/rand"
 )
 
 var Version string = "18.1"
@@ -161,6 +162,11 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 			pingApiHost = "https://cronitor.link"
 		}
 
+		// After 2 failed attempts, take a brief random break before trying again
+		if i > 2 {
+			time.Sleep(time.Second * time.Duration(float32(i) * 1.5 * rand.Float32()))
+		}
+
 		uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, pingApiAuthKey, hostname, formattedDuration, series, formattedStatusCode)
 		log("Sending ping " + uri)
 
@@ -170,11 +176,6 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 
 		if err != nil {
 			log(err.Error())
-
-			// After 3 failed attempts, begin to sleep between tries
-			if i > 2 {
-				time.Sleep(time.Second * 2)
-			}
 			continue
 		}
 
