@@ -102,7 +102,7 @@ Example with no command output send to Cronitor:
 			execCmdStdin.Write(execStdIn)
 		}
 
-		// Combine stdout and stderr from the command into a single buffer which we'll return as stdout
+		// Combine stdout and stderr from the command into a single buffer which we'll stream as stdout
 		// Alternatively we could pass stderr from the subcommand but I've chosen to only use it for CronitorCLI errors at the moment
 		var combinedOutput bytes.Buffer
 		var maxBufferSize = 2000
@@ -200,7 +200,7 @@ func streamAndAggregateOutput(pipe *io.ReadCloser, outputBuffer *bytes.Buffer, m
 	scanner := bufio.NewScanner(*pipe)
 	go func() {
 		for scanner.Scan() {
-			fmt.Printf(scanner.Text())
+			fmt.Println(scanner.Text())
 			// Ideally we would keep the last n bytes of output but this is a lot easier and acceptable trade off for now..
 			if len(scanner.Bytes()) + outputBuffer.Len() <= maxOutputBufferSize {
 				outputBuffer.Write(scanner.Bytes())

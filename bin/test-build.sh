@@ -289,6 +289,14 @@ if ../cronitor $CRONITOR_ARGS --log $LOGFILE exec d3x0c1 ./success.sh xyz | grep
     else echo "${TEST}.. FAIL"
 fi
 
+rm -f $LOGFILE
+TEST="Exec passes stdout through to caller with newline chars intact"
+output="$(../cronitor exec d3x0c1 ./success.sh xyz)"
+output_lines=`echo "${output}" | wc -l | cut -d'/' -f1 | awk '{$1=$1};1'`
+if [ ${output_lines} -eq "1" ]
+    then echo "${TEST}.. FAIL"
+    else echo "${TEST}.. OK"
+fi
 
 rm -f $LOGFILE
 TEST="Exec passes exitcode through to caller"
