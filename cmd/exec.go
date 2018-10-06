@@ -106,10 +106,7 @@ Example with no command output send to Cronitor:
 		var maxBufferSize = 2000
 		if stdoutPipe, err := execCmd.StdoutPipe(); err == nil {
 			streamAndAggregateOutput(&stdoutPipe, &combinedOutput, maxBufferSize)
-		}
-
-		if stderrPipe, err := execCmd.StderrPipe(); err == nil {
-			streamAndAggregateOutput(&stderrPipe, &combinedOutput, maxBufferSize)
+			execCmd.Stderr = execCmd.Stdout
 		}
 
 		// Invoke subcommand and send a message when it's done
@@ -199,7 +196,7 @@ func streamAndAggregateOutput(pipe *io.ReadCloser, outputBuffer *bytes.Buffer, m
 	go func() {
 		for scanner.Scan() {
 			fmt.Println(scanner.Text())
-			// Ideally we would keep the last n bytes of output but this is a lot easier and acceptable trade off for now..
+			// Ideally we would keep the last n bytes of output but keeping first n bytes easier and acceptable trade off for now..
 			if len(scanner.Bytes()) + outputBuffer.Len() <= maxOutputBufferSize {
 				outputBuffer.Write(append(scanner.Bytes(), "\n"...))
 			}
