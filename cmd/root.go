@@ -18,9 +18,10 @@ import (
 	"runtime"
 	"github.com/getsentry/raven-go"
 	"math/rand"
+	"cronitor/lib"
 )
 
-var Version string = "18.2"
+var Version string = "19.0"
 
 var cfgFile string
 var userAgent string
@@ -33,10 +34,6 @@ var hostname string
 var pingApiKey string
 var verbose bool
 var noStdoutPassthru bool
-
-type TimezoneLocationName struct {
-	Name string
-}
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
@@ -227,14 +224,14 @@ func effectiveHostname() string {
 	return hostname
 }
 
-func effectiveTimezoneLocationName() TimezoneLocationName {
+func effectiveTimezoneLocationName() lib.TimezoneLocationName {
 	// First, check if a TZ or CRON_TZ environemnt variable is set -- Diff var used by diff distros
 	if locale, isSetFlag := os.LookupEnv("TZ"); isSetFlag {
-		return TimezoneLocationName{locale}
+		return lib.TimezoneLocationName{locale}
 	}
 
 	if locale, isSetFlag := os.LookupEnv("CRON_TZ"); isSetFlag {
-		return TimezoneLocationName{locale}
+		return lib.TimezoneLocationName{locale}
 	}
 
 	// Attempt to parse timedatectl (should work on FreeBSD, many linux distros)
@@ -242,24 +239,28 @@ func effectiveTimezoneLocationName() TimezoneLocationName {
 		outputString := strings.Replace(string(output), "Time zone", "Timezone", -1)
 		r := regexp.MustCompile(`(?m:Timezone:\s+(\S+).+$)`)
 		if ret := r.FindStringSubmatch(outputString); ret != nil && len(ret) > 1 {
-			return TimezoneLocationName{ret[1]}
+			return lib.TimezoneLocationName{ret[1]}
 		}
 	}
 
 	// If /etc/localtime is a symlink, check what it is linking to
 	if localtimeFile, err := os.Lstat("/etc/localtime"); err == nil && localtimeFile.Mode() & os.ModeSymlink == os.ModeSymlink {
 		if symlink, _ := os.Readlink("/etc/localtime"); len(symlink) > 0 {
+			if strings.Contains(symlink, "UTC") {
+				return lib.TimezoneLocationName{"UTC"}
+			}
+
 			symlinkParts := strings.Split(symlink, "/")
-			return TimezoneLocationName{strings.Join(symlinkParts[len(symlinkParts)-2:], "/")}
+			return lib.TimezoneLocationName{strings.Join(symlinkParts[len(symlinkParts)-2:], "/")}
 		}
 	}
 
 	// If we happen to have an /etc/timezone, no guarantee it's used, but read that
 	if locale, err := ioutil.ReadFile("/etc/timezone"); err == nil {
-		return TimezoneLocationName{string(locale)}
+		return lib.TimezoneLocationName{string(locale)}
 	}
 
-	return TimezoneLocationName{""}
+	return lib.TimezoneLocationName{""}
 }
 
 func apiUrl() string {
