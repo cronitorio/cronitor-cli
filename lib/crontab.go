@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strconv"
 	"errors"
+	"crypto/sha1"
+	"log"
 )
 
 type TimezoneLocationName struct {
@@ -28,7 +30,7 @@ type Crontab struct {
 	UsesSixFieldExpressions 	bool
 }
 
-func (c Crontab) Parse(noAutoDiscover bool) (error, int) {
+func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 	lines, errCode, err := c.load()
 	if err != nil {
 		return err, errCode
@@ -115,7 +117,7 @@ func (c Crontab) Parse(noAutoDiscover bool) (error, int) {
 
 	// If we do not have an auto-discover line but we should, add one now
 	if autoDiscoverLine == nil && !noAutoDiscover {
-		c.Lines = append(c.Lines, createAutoDiscoverLine(&c))
+		c.Lines = append(c.Lines, createAutoDiscoverLine(c))
 	}
 
 	return nil, 0
@@ -131,7 +133,6 @@ func (c Crontab) Write() string {
 }
 
 func (c Crontab) Save(crontabLines string) error {
-
 	if crontabLines == "" {
 		return errors.New("the --save option is supplied but updated crontab file is empty")
 	}
@@ -269,6 +270,25 @@ func (l Line) Write() string {
 	return strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)
 }
 
+func (l Line) Key(CanonicalPath string) string {
+	var CommandToRun, RunAs, CronExpression string
+	if l.IsAutoDiscoverCommand() {
+		// Go out of our way to prevent making a duplicate monitor for an auto-discovery command.
+		CommandToRun = "auto discover " + CanonicalPath
+		RunAs = ""
+		CronExpression = ""
+	} else {
+		CommandToRun = l.CommandToRun
+		RunAs = l.RunAs
+		CronExpression = l.CronExpression
+	}
+
+	// Always use os.Hostname when creating a key so the key does not change when a user modifies their hostname using param/var
+	hostname, _ := os.Hostname()
+	data := []byte(fmt.Sprintf("%s-%s-%s-%s", hostname, CommandToRun, CronExpression, RunAs))
+	return fmt.Sprintf("%x", sha1.Sum(data))
+}
+
 
 func createAutoDiscoverLine(crontab *Crontab) *Line {
 	cronExpression := fmt.Sprintf("%d * * * *", randomMinute())
@@ -283,7 +303,9 @@ func createAutoDiscoverLine(crontab *Crontab) *Line {
 	commandToRun = strings.Replace(commandToRun, "-v", "", -1)
 	commandToRun = strings.Replace(commandToRun, "--interactive", "", -1)
 	commandToRun = strings.Replace(commandToRun, "-i", "", -1)
-	commandToRun = strings.Replace(commandToRun, crontab.Filename, crontab.CanonicalName(), -1)
+	if len(crontab.Filename) > 0 {
+		commandToRun = strings.Replace(commandToRun, crontab.Filename, crontab.CanonicalName(), -1)
+	}
 
 	// Remove existing --auto flag before adding a new one to prevent doubling up
 	commandToRun = strings.Replace(commandToRun, "--auto", "", -1)
@@ -303,3 +325,17 @@ func isSixFieldCronExpression(splitLine []string) bool {
 	return matchDigitOrWildcard || matchDayOfWeekStringRange || matchDayOfWeekStringList
 }
 
+func EnumerateCrontabFiles() []string {
+	dropInDir := "/etc/cron.d"
+	files, err := ioutil.ReadDir(dropInDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var fileList []string
+	for _, f := range files {
+		fileList = append(fileList, filepath.Join(dropInDir, f.Name()))
+	}
+
+	return fileList
+}

@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 	"errors"
 	"net/http"
-	"crypto/sha1"
 	"os"
 	"github.com/spf13/viper"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"net/url"
 	"os/user"
 	"cronitor/lib"
+	"github.com/fatih/color"
 )
 
 var excludeFromName []string
@@ -31,6 +31,10 @@ var isUserCrontab bool
 var timezone lib.TimezoneLocationName
 var maxNameLen = 75
 var notificationList string
+
+var TextHeadline = color.New(color.FgHiGreen, color.Bold)
+var TextEmphasize = color.New(color.FgHiWhite, color.Underline)
+var TextWarning = color.New(color.FgHiYellow, color.Bold)
 
 var discoverCmd = &cobra.Command{
 	Use:   "discover <optional crontab>",
@@ -90,149 +94,182 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 	},
 
 	Run: func(cmd *cobra.Command, args []string) {
-		var filename string
-		if len(args) == 0 {
-			filename = ""
-		} else {
-			filename = args[0]
-		}
-
 		var username string
 		if u, err := user.Current(); err == nil {
 			username = u.Username
 		}
 
-		crontab := lib.Crontab{
-			User: username,
-			IsUserCrontab: len(args) == 0,
-			Filename: filename,
-			MutateAndSave: saveCrontabFile,
-		}
-
-		if err, errCode := crontab.Parse(noAutoDiscover); err != nil {
-			fatal("Problem: " + err.Error() + "\n", errCode)
-		}
-
-		// If a timezone env var is set in the crontab it takes precedence over system tz
-		if crontab.TimezoneLocationName != nil {
-			timezone = *crontab.TimezoneLocationName
+		count := 0
+		if len(args) > 0 {
+			processCrontab(username, args[0])
 		} else {
-			timezone = effectiveTimezoneLocationName()
-		}
+			// Process the user crontab and then enumerate crontabs in the drop-in directory
+			if processCrontab(username, "") {
+				count++
+			}
 
-		// Read crontabLines into map of Monitor structs
-		monitors := map[string]*lib.Monitor{}
-		allNameCandidates := map[string]bool{}
+			dropInFiles := lib.EnumerateCrontabFiles()
+			for _, crontabFile := range dropInFiles {
+				if count > 0 {
+					fmt.Println()
+				}
 
-		if !isAutoDiscover {
-			count := 0
-			for _, line := range crontab.Lines {
-				if line.IsMonitorable() {
+				if processCrontab(username, crontabFile) {
 					count++
 				}
 			}
-
-			fmt.Printf("Found %d cron jobs in %s:\n", count, crontab.DisplayName())
 		}
 
-		for _, line := range crontab.Lines {
-			if !line.IsMonitorable() {
-				continue
-			}
+		if !isAutoDiscover && !saveCrontabFile {
+			saveCommand := strings.Join(os.Args, " ")
+			fmt.Println("\n")
 
-			rules := []lib.Rule{createRule(line.CronExpression)}
-			defaultName := createDefaultName(line.CommandToRun, line.RunAs, line.LineNumber, line.IsAutoDiscoverCommand(), effectiveHostname(), excludeFromName, allNameCandidates)
-			key := createKey(line.CommandToRun, line.CronExpression, line.RunAs, line.IsAutoDiscoverCommand(), crontab.CanonicalName())
-			tags := createTags()
-			name := defaultName
-
-			if !isAutoDiscover {
-				fmt.Println("\n" + line.FullLine)
-				for {
-					prompt := promptui.Prompt{
-						Label: "Monitor name",
-						Default: name,
-						Validate: validateNameFormat,
-						AllowEdit: name != defaultName,
-					}
-
-					if result, err := prompt.Run(); err == nil {
-						name = result
-						if err := validateNameUniqueness(result, key); err != nil {
-							fmt.Println("Sorry! You are already using this name. Choose a unique name.\n")
-							continue
-						}
-					} else if err == promptui.ErrInterrupt {
-						fmt.Println("Exited by user signal")
-						os.Exit(-1)
-					} else {
-						fmt.Println("Error: " + err.Error() + "\n")
-					}
-
-					break
-				}
-			}
-
-			if name == defaultName {
-				name = ""
-			}
-
-			notificationListMap := map[string][]string{}
-			if notificationList != "" {
-				notificationListMap = map[string][]string{"templates": {notificationList}}
-			}
-
-			line.Mon = lib.Monitor{
-				Name: name,
-				DefaultName: defaultName,
-				Key: key,
-				Rules: rules,
-				Tags: tags,
-				Type: "heartbeat",
-				Code: line.Code,
-				Timezone: timezone.Name,
-				Note: createNote(line.LineNumber, line.IsAutoDiscoverCommand(), crontab.CanonicalName()),
-				Notifications: notificationListMap,
-				NoStdoutPassthru: noStdoutPassthru,
-			}
-
-			monitors[key] = &line.Mon
-		}
-
-		// Put monitors to Cronitor API
-		var err error
-		monitors, err = putMonitors(monitors)
-		if err != nil {
-			fatal(err.Error(), 1)
-		}
-
-		// Re-write crontab lines with new/updated monitoring
-		updatedCrontabLines := crontab.Write()
-
-		if !isSilent {
-			// When running --auto mode, you should be able to pipe or redirect crontab output elsewhere. Skip status-related messages.
-			if !isAutoDiscover {
-				fmt.Println("\n\nCrontab with monitoring:")
-			}
-
-			fmt.Println(updatedCrontabLines)
-
-			if !isAutoDiscover && !saveCrontabFile {
-				saveCommand := strings.Join(os.Args, " ")
-				fmt.Println("\n\nTo install the updated crontab, use:")
+			if count > 0 {
+				TextHeadline.Println("► To install the updated crontab(s), run:")
 				fmt.Println(fmt.Sprintf("%s --auto --save\n", saveCommand))
 			}
 		}
+	},
+}
 
-		if saveCrontabFile {
-			if err := crontab.Save(updatedCrontabLines); err == nil && !isSilent {
-				fmt.Println(fmt.Sprintf("Success: %s updated", crontabPath))
-			} else if !isSilent {
-				fatal("Problem: " + err.Error(), 126)
+func processCrontab(username string, filename string) bool {
+	crontab := &lib.Crontab{
+		User:          username,
+		IsUserCrontab: filename == "",
+		Filename:      filename,
+		MutateAndSave: saveCrontabFile,
+	}
+
+	if err, errCode := crontab.Parse(noAutoDiscover); err != nil {
+		fatal("Problem: "+err.Error()+"\n", errCode)
+	}
+
+	// If a timezone env var is set in the crontab it takes precedence over system tz
+	if crontab.TimezoneLocationName != nil {
+		timezone = *crontab.TimezoneLocationName
+	} else {
+		timezone = effectiveTimezoneLocationName()
+	}
+
+	// Read crontabLines into map of Monitor structs
+	monitors := map[string]*lib.Monitor{}
+	allNameCandidates := map[string]bool{}
+
+	if !isAutoDiscover {
+		count := 0
+		for _, line := range crontab.Lines {
+			if line.IsMonitorable() {
+				count++
 			}
 		}
 
-	},
+		if count == 0 {
+			TextWarning.Printf("► No cron jobs found in %s or /etc/cron.d", crontab.DisplayName())
+			return false // Sorry about returning in some random spot, this could use some refactoring
+		} else {
+			label := "jobs"
+			if count == 1 {
+				label = "job"
+			}
+			TextHeadline.Printf("► Found %d cron %s in %s:", count, label, crontab.DisplayName())
+			fmt.Println()
+		}
+	}
+
+	for _, line := range crontab.Lines {
+		if !line.IsMonitorable() {
+			continue
+		}
+
+		rules := []lib.Rule{createRule(line.CronExpression)}
+		defaultName := createDefaultName(line.CommandToRun, line.RunAs, line.LineNumber, line.IsAutoDiscoverCommand(), effectiveHostname(), excludeFromName, allNameCandidates)
+		key := line.Key(crontab.CanonicalName())
+		tags := createTags()
+		name := defaultName
+
+		if !isAutoDiscover {
+			fmt.Println("\n" + line.FullLine)
+			for {
+				prompt := promptui.Prompt{
+					Label:     "Monitor name",
+					Default:   name,
+					Validate:  validateNameFormat,
+					AllowEdit: name != defaultName,
+				}
+
+				if result, err := prompt.Run(); err == nil {
+					name = result
+					if err := validateNameUniqueness(result, key); err != nil {
+						fmt.Println("Sorry! You are already using this name. Choose a unique name.\n")
+						continue
+					}
+				} else if err == promptui.ErrInterrupt {
+					fmt.Println("Exited by user signal")
+					os.Exit(-1)
+				} else {
+					fmt.Println("Error: " + err.Error() + "\n")
+				}
+
+				break
+			}
+		}
+
+		if name == defaultName {
+			name = ""
+		}
+
+		notificationListMap := map[string][]string{}
+		if notificationList != "" {
+			notificationListMap = map[string][]string{"templates": {notificationList}}
+		}
+
+		line.Mon = lib.Monitor{
+			Name:             name,
+			DefaultName:      defaultName,
+			Key:              key,
+			Rules:            rules,
+			Tags:             tags,
+			Type:             "heartbeat",
+			Code:             line.Code,
+			Timezone:         timezone.Name,
+			Note:             createNote(line.LineNumber, line.IsAutoDiscoverCommand(), crontab.CanonicalName()),
+			Notifications:    notificationListMap,
+			NoStdoutPassthru: noStdoutPassthru,
+		}
+
+		monitors[key] = &line.Mon
+	}
+
+	// Put monitors to Cronitor API
+	var err error
+	monitors, err = putMonitors(monitors)
+	if err != nil {
+		fatal(err.Error(), 1)
+	}
+
+	// Re-write crontab lines with new/updated monitoring
+	updatedCrontabLines := crontab.Write()
+
+	if !isSilent {
+		// When running --auto mode, you should be able to pipe or redirect crontab output elsewhere. Skip status-related messages.
+		if !isAutoDiscover {
+			fmt.Println("")
+			TextEmphasize.Println("Crontab with monitoring:")
+			fmt.Println()
+		}
+
+		fmt.Println(updatedCrontabLines)
+	}
+
+	if saveCrontabFile {
+		if err := crontab.Save(updatedCrontabLines); err == nil && !isSilent {
+			fmt.Println(fmt.Sprintf("Success: %s updated", crontabPath))
+		} else if !isSilent {
+			fatal("Problem: "+err.Error(), 126)
+		}
+	}
+
+	return len(monitors) > 0
 }
 
 func putMonitors(monitors map[string]*lib.Monitor) (map[string]*lib.Monitor, error) {
@@ -351,19 +388,6 @@ func createDefaultName(CommandToRun string, RunAs string, LineNumber int, IsAuto
 	return fmt.Sprintf("%s%s%s", strings.TrimSpace(candidate[:commandPrefixLen]), separator, strings.TrimSpace(candidate[len(candidate) - commandSuffixLen:]))
 }
 
-func createKey(CommandToRun string, CronExpression string, RunAs string, IsAutoDiscoverCommand bool, crontabPath string) string {
-	if IsAutoDiscoverCommand {
-		// Go out of our way to prevent making a duplicate monitor for an auto-discovery command.
-		CommandToRun = "auto discover " + crontabPath
-		RunAs = ""
-		CronExpression = ""
-	}
-
-	// Always use os.Hostname when creating a key so the key does not change when a user modifies their hostname using param/var
-	hostname, _ := os.Hostname()
-	data := []byte(fmt.Sprintf("%s-%s-%s-%s", hostname, CommandToRun, CronExpression, RunAs))
-	return fmt.Sprintf("%x", sha1.Sum(data))
-}
 
 func createTags() []string {
 	var tags []string
