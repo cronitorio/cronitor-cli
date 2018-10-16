@@ -16,6 +16,8 @@ import (
 	"log"
 )
 
+const DROP_IN_DIRECTORY = "/etc/cron.d"
+
 type TimezoneLocationName struct {
 	Name string
 }
@@ -26,7 +28,6 @@ type Crontab struct {
 	Filename             		string
 	Lines                		[]*Line
 	TimezoneLocationName 		*TimezoneLocationName
-	MutateAndSave 			bool
 	UsesSixFieldExpressions 	bool
 }
 
@@ -129,7 +130,7 @@ func (c Crontab) Write() string {
 		cl = append(cl, line.Write())
 	}
 
-	return strings.Join(cl, "\n") + "\n"
+	return strings.Join(cl, "\n")
 }
 
 func (c Crontab) Save(crontabLines string) error {
@@ -181,6 +182,20 @@ func (c Crontab) CanonicalName() string {
 	return c.DisplayName()
 }
 
+func (c Crontab) IsWritable() bool {
+	if c.IsUserCrontab {
+		return true
+	}
+
+	file, err := os.OpenFile(c.Filename, os.O_WRONLY, 0666)
+	defer file.Close()
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+
 func (c Crontab) load() ([]string, int, error) {
 
 	var crontabBytes []byte
@@ -191,10 +206,14 @@ func (c Crontab) load() ([]string, int, error) {
 		}
 
 		cmd := exec.Command("crontab", "-l")
-		if b, err := cmd.Output(); err == nil {
+		if b, err := cmd.CombinedOutput(); err == nil {
 			crontabBytes = b
 		} else {
-			return nil, 126, errors.New("your user crontab file doesn't exist or couldn't be read. Try passing a crontab path instead")
+			if strings.Contains(string(b), "no crontab") {
+				return nil, 126, errors.New("no crontab for this user")
+			} else {
+				return nil, 126, errors.New("user crontab couldn't be read")
+			}
 		}
 	} else {
 		if _, err := os.Stat(c.Filename); os.IsNotExist(err) {
@@ -205,13 +224,6 @@ func (c Crontab) load() ([]string, int, error) {
 			crontabBytes = b
 		} else {
 			return nil, 126, errors.New(fmt.Sprintf("the crontab file at %s could not be read; check permissions and try again", c.Filename))
-		}
-
-		// When the save flag is passed, attempt to write the file back to itself to ensure we have proper permissions before going further
-		if c.MutateAndSave {
-			if ioutil.WriteFile(c.Filename, crontabBytes, 0644) != nil {
-				return nil, 126, errors.New(fmt.Sprintf("the --save option is supplied but the file at %s is not writeable; check permissions and try again", c.Filename))
-			}
 		}
 	}
 
@@ -325,17 +337,24 @@ func isSixFieldCronExpression(splitLine []string) bool {
 	return matchDigitOrWildcard || matchDayOfWeekStringRange || matchDayOfWeekStringList
 }
 
-func EnumerateCrontabFiles() []string {
-	dropInDir := "/etc/cron.d"
-	files, err := ioutil.ReadDir(dropInDir)
+func EnumerateCrontabFiles(dirToEnumerate string) []string {
+	files, err := ioutil.ReadDir(dirToEnumerate)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	var fileList []string
 	for _, f := range files {
-		fileList = append(fileList, filepath.Join(dropInDir, f.Name()))
+		fileList = append(fileList, filepath.Join(dirToEnumerate, f.Name()))
 	}
 
 	return fileList
+}
+
+func CrontabFactory(username, filename string) *Crontab {
+	return &Crontab{
+		User:          username,
+		IsUserCrontab: filename == "",
+		Filename:      filename,
+	}
 }

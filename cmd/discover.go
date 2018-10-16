@@ -20,24 +20,18 @@ import (
 	"github.com/fatih/color"
 )
 
+var importedCrontabs = 0
 var excludeFromName []string
-var interactiveMode = true
 var isAutoDiscover bool
 var isSilent bool
 var noAutoDiscover bool
 var saveCrontabFile bool
-var crontabPath string
-var isUserCrontab bool
 var timezone lib.TimezoneLocationName
 var maxNameLen = 75
 var notificationList string
 
-var TextHeadline = color.New(color.FgHiGreen, color.Bold)
-var TextEmphasize = color.New(color.FgHiWhite, color.Underline)
-var TextWarning = color.New(color.FgHiYellow, color.Bold)
-
 var discoverCmd = &cobra.Command{
-	Use:   "discover <optional crontab>",
+	Use:   "discover <optional path>",
 	Short: "Attach monitoring to new cron jobs and watch for schedule updates",
 	Long:  `
 Cronitor discover will parse your crontab and create or update monitors using the Cronitor API.
@@ -51,7 +45,7 @@ Example:
       > Makes no changes to your crontab, add a --save param or use "cronitor discover --auto --save" later when you are ready to apply changes.
 
   $ cronitor discover /path/to/crontab
-      > Instead of the user crontab, provide a crontab file to use
+      > Instead of the user crontab, provide a crontab file (or directory of crontabs) to use
 
 Example that does not use an interactive shell:
   $ cronitor discover --auto"
@@ -99,49 +93,109 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 			username = u.Username
 		}
 
-		count := 0
 		if len(args) > 0 {
-			processCrontab(username, args[0])
+			// A supplied argument can be a specific file or a directory
+			if isPathToDirectory(args[0]) {
+				processDirectory(username, args[0])
+			} else {
+				processCrontab(lib.CrontabFactory(username, args[0]))
+			}
 		} else {
-			// Process the user crontab and then enumerate crontabs in the drop-in directory
-			if processCrontab(username, "") {
-				count++
+			// Without a supplied argument look at the user crontab and the system drop-in directory
+			if processCrontab(lib.CrontabFactory(username, "")) {
+				importedCrontabs++
 			}
 
-			dropInFiles := lib.EnumerateCrontabFiles()
-			for _, crontabFile := range dropInFiles {
-				if count > 0 {
-					fmt.Println()
-				}
-
-				if processCrontab(username, crontabFile) {
-					count++
-				}
+			// Only iterate through the drop-in directory when running in interactive mode
+			if !isAutoDiscover {
+				processDirectory(username, lib.DROP_IN_DIRECTORY)
 			}
 		}
 
 		if !isAutoDiscover && !saveCrontabFile {
 			saveCommand := strings.Join(os.Args, " ")
-			fmt.Println("\n")
+			fmt.Println()
 
-			if count > 0 {
-				TextHeadline.Println("► To install the updated crontab(s), run:")
+			label := "crontabs"
+			if importedCrontabs == 1 {
+				label = "crontab"
+			}
+
+			if importedCrontabs > 0 {
+				printSuccessText(fmt.Sprintf("► To install the updated %s, run:", label))
 				fmt.Println(fmt.Sprintf("%s --auto --save\n", saveCommand))
 			}
 		}
+
+		printSuccessText("✔ Discover complete")
 	},
 }
 
-func processCrontab(username string, filename string) bool {
-	crontab := &lib.Crontab{
-		User:          username,
-		IsUserCrontab: filename == "",
-		Filename:      filename,
-		MutateAndSave: saveCrontabFile,
+func processDirectory(username, directory string) {
+	// Look for crontab files in the system drop-in directory but only prompt to import them
+	// if the directory is writable for this user.
+	files := lib.EnumerateCrontabFiles(directory)
+	if len(files) > 0 {
+		testCrontab := lib.CrontabFactory(username, files[0])
+		if !testCrontab.IsWritable() {
+			return
+		}
+
+		label := "crontabs"
+		if len(files) == 1 {
+			label = "crontab"
+		}
+
+		printSuccessText(fmt.Sprintf("\n► Found %d %s in directory %s", len(files), label, directory))
+
+		var result string
+		var err error = nil
+
+		if !isAutoDiscover {
+			prompt := promptui.Prompt{
+				Label: fmt.Sprintf("Would you like to import cron jobs from %s", directory),
+				IsConfirm: true,
+			}
+
+			result, err = prompt.Run()
+
+			if err == promptui.ErrInterrupt {
+				printErrorText("Exited by user signal")
+				os.Exit(-1)
+			} else if err == promptui.ErrAbort {
+				printWarningText(fmt.Sprintf("✔ Skipping %s", directory))
+			} else if err != nil {
+				printErrorText("Error: " + err.Error() + "\n")
+			}
+		}
+
+		if isAutoDiscover || result == "y" {
+			for _, crontabFile := range files {
+				if importedCrontabs > 0 {
+					fmt.Println()
+				}
+
+				if processCrontab(lib.CrontabFactory(username, crontabFile)) {
+					importedCrontabs++
+				}
+			}
+		}
+	}
+}
+
+func processCrontab(crontab *lib.Crontab) bool {
+	printSuccessText(fmt.Sprintf("► Reading %s", crontab.DisplayName()))
+
+	// Before going further, ensure we aren't going to run into permissions problems writing the crontab, when applicable
+	if saveCrontabFile && !crontab.IsWritable() {
+		printWarningText(fmt.Sprintf("► The --save option is supplied but the file at %s is not writeable. Skipping.", crontab.DisplayName()))
+		return false
 	}
 
-	if err, errCode := crontab.Parse(noAutoDiscover); err != nil {
-		fatal("Problem: "+err.Error()+"\n", errCode)
+	if err, _ := crontab.Parse(noAutoDiscover); err != nil {
+		printWarningText(fmt.Sprintf("► Skipping: %s", err.Error()))
+		fmt.Println()
+		return false
 	}
 
 	// If a timezone env var is set in the crontab it takes precedence over system tz
@@ -158,21 +212,20 @@ func processCrontab(username string, filename string) bool {
 	if !isAutoDiscover {
 		count := 0
 		for _, line := range crontab.Lines {
-			if line.IsMonitorable() {
+			if line.IsMonitorable() && !line.IsAutoDiscoverCommand() {
 				count++
 			}
 		}
 
 		if count == 0 {
-			TextWarning.Printf("► No cron jobs found in %s or /etc/cron.d", crontab.DisplayName())
+			printWarningText("► No cron jobs found. Skipping.")
 			return false // Sorry about returning in some random spot, this could use some refactoring
 		} else {
 			label := "jobs"
 			if count == 1 {
 				label = "job"
 			}
-			TextHeadline.Printf("► Found %d cron %s in %s:", count, label, crontab.DisplayName())
-			fmt.Println()
+			printSuccessText(fmt.Sprintf("► Found %d cron %s:", count, label))
 		}
 	}
 
@@ -182,12 +235,12 @@ func processCrontab(username string, filename string) bool {
 		}
 
 		rules := []lib.Rule{createRule(line.CronExpression)}
-		defaultName := createDefaultName(line.CommandToRun, line.RunAs, line.LineNumber, line.IsAutoDiscoverCommand(), effectiveHostname(), excludeFromName, allNameCandidates)
+		defaultName := createDefaultName(line, crontab, effectiveHostname(), excludeFromName, allNameCandidates)
 		key := line.Key(crontab.CanonicalName())
 		tags := createTags()
 		name := defaultName
 
-		if !isAutoDiscover {
+		if !isAutoDiscover && !line.IsAutoDiscoverCommand() {
 			fmt.Println("\n" + line.FullLine)
 			for {
 				prompt := promptui.Prompt{
@@ -232,13 +285,19 @@ func processCrontab(username string, filename string) bool {
 			Type:             "heartbeat",
 			Code:             line.Code,
 			Timezone:         timezone.Name,
-			Note:             createNote(line.LineNumber, line.IsAutoDiscoverCommand(), crontab.CanonicalName()),
+			Note:             createNote(line, crontab),
 			Notifications:    notificationListMap,
 			NoStdoutPassthru: noStdoutPassthru,
 		}
 
 		monitors[key] = &line.Mon
 	}
+
+	if !isAutoDiscover {
+		fmt.Println()
+		printSuccessText("✔ Sending updated crontab to Cronitor:")
+	}
+
 
 	// Put monitors to Cronitor API
 	var err error
@@ -252,20 +311,28 @@ func processCrontab(username string, filename string) bool {
 
 	if !isSilent {
 		// When running --auto mode, you should be able to pipe or redirect crontab output elsewhere. Skip status-related messages.
+		fmt.Print(updatedCrontabLines)
+
 		if !isAutoDiscover {
-			fmt.Println("")
-			TextEmphasize.Println("Crontab with monitoring:")
-			fmt.Println()
+			fmt.Println("\n")
+			printSuccessText("✔ Import successful")
 		}
 
-		fmt.Println(updatedCrontabLines)
+		if !isAutoDiscover {
+			fmt.Println()
+		}
 	}
 
 	if saveCrontabFile {
-		if err := crontab.Save(updatedCrontabLines); err == nil && !isSilent {
-			fmt.Println(fmt.Sprintf("Success: %s updated", crontabPath))
-		} else if !isSilent {
-			fatal("Problem: "+err.Error(), 126)
+		if err := crontab.Save(updatedCrontabLines); err == nil {
+			if !isSilent {
+				printSuccessText("✔ Crontab save successful")
+			}
+		} else {
+			if !isSilent {
+				printErrorText("Problem saving crontab: " + err.Error())
+			}
+			return false
 		}
 	}
 
@@ -318,15 +385,15 @@ func putMonitors(monitors map[string]*lib.Monitor) (map[string]*lib.Monitor, err
 	return monitors, nil
 }
 
-func createNote(LineNumber int, IsAutoDiscoverCommand bool, CanonicalName string) string {
-	if IsAutoDiscoverCommand {
-		return fmt.Sprintf("Watching for schedule changes and new entries in %s", crontabPath)
+func createNote(line *lib.Line, crontab *lib.Crontab) string {
+	if line.IsAutoDiscoverCommand() {
+		return fmt.Sprintf("Watching for schedule changes and new entries in %s", crontab.DisplayName())
 	}
 
-	return fmt.Sprintf("Discovered in %s L%d", CanonicalName, LineNumber)
+	return fmt.Sprintf("Discovered in %s L%d", crontab.DisplayName(), line.LineNumber)
 }
 
-func createDefaultName(CommandToRun string, RunAs string, LineNumber int, IsAutoDiscoverCommand bool, effectiveHostname string, excludeFromName []string, allNameCandidates map[string]bool) string {
+func createDefaultName(line *lib.Line, crontab *lib.Crontab, effectiveHostname string, excludeFromName []string, allNameCandidates map[string]bool) string {
 	excludeFromName = append(excludeFromName, "2>&1")
 	excludeFromName = append(excludeFromName, "/bin/bash -l -c")
 	excludeFromName = append(excludeFromName, "/bin/bash -lc")
@@ -337,13 +404,14 @@ func createDefaultName(CommandToRun string, RunAs string, LineNumber int, IsAuto
 	excludeFromName = append(excludeFromName, "\"")
 	excludeFromName = append(excludeFromName, "\\")
 
-	if IsAutoDiscoverCommand {
-		return truncateString(fmt.Sprintf("[%s] Auto discover %s", effectiveHostname, strings.TrimSpace(crontabPath)), maxNameLen)
+	if line.IsAutoDiscoverCommand() {
+		return truncateString(fmt.Sprintf("[%s] Auto discover %s", effectiveHostname, strings.TrimSpace(crontab.DisplayName())), maxNameLen)
 	}
 
 	// Remove output redirection
+	CommandToRun := line.CommandToRun
 	for _, redirectionOperator := range []string{">>", ">"} {
-		if operatorPosition := strings.LastIndex(CommandToRun, redirectionOperator) ; operatorPosition > 0 {
+		if operatorPosition := strings.LastIndex(line.CommandToRun, redirectionOperator) ; operatorPosition > 0 {
 			CommandToRun = CommandToRun[:operatorPosition]
 			break
 		}
@@ -359,8 +427,8 @@ func createDefaultName(CommandToRun string, RunAs string, LineNumber int, IsAuto
 	// Assemble the candidate name.
 	// Ensure we don't produce dupe names if the user has same command on multiple lines.
 	formattedRunAs := ""
-	if RunAs != "" {
-		formattedRunAs = fmt.Sprintf("%s ", RunAs)
+	if line.RunAs != "" {
+		formattedRunAs = fmt.Sprintf("%s ", line.RunAs)
 	}
 
 	formattedHostname := ""
@@ -371,7 +439,7 @@ func createDefaultName(CommandToRun string, RunAs string, LineNumber int, IsAuto
 	candidate := formattedHostname + formattedRunAs + CommandToRun
 
 	if _, exists := allNameCandidates[candidate]; exists {
-		candidate = fmt.Sprintf("%s L%d", candidate, LineNumber)
+		candidate = fmt.Sprintf("%s L%d", candidate, line.LineNumber)
 	} else {
 		allNameCandidates[candidate] = true
 	}
@@ -387,7 +455,6 @@ func createDefaultName(CommandToRun string, RunAs string, LineNumber int, IsAuto
 	commandSuffixLen := maxNameLen - commandPrefixLen - len(separator)
 	return fmt.Sprintf("%s%s%s", strings.TrimSpace(candidate[:commandPrefixLen]), separator, strings.TrimSpace(candidate[len(candidate) - commandSuffixLen:]))
 }
-
 
 func createTags() []string {
 	var tags []string
@@ -468,6 +535,39 @@ func validateNameFormat(candidateName string) error {
 	}
 
 	return nil
+}
+
+func printSuccessText(message string) {
+	if isAutoDiscover {
+		log(message)
+	} else {
+		color.New(color.FgHiGreen).Println(message)
+	}
+}
+
+func printWarningText(message string) {
+	if isAutoDiscover {
+		log(message)
+	} else {
+		color.New(color.FgHiYellow).Println(message)
+	}
+}
+
+func printErrorText(message string) {
+	if isAutoDiscover {
+		log(message)
+	} else {
+		color.New(color.FgHiRed, color.Bold).Println(message)
+	}
+}
+
+func isPathToDirectory(path string) bool {
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	return fileInfo.Mode().IsDir()
 }
 
 func init() {
