@@ -25,6 +25,7 @@ type TimezoneLocationName struct {
 type Crontab struct {
 	User                 		string
 	IsUserCrontab        		bool
+	IsSaved						bool
 	Filename             		string
 	Lines                		[]*Line
 	TimezoneLocationName 		*TimezoneLocationName
@@ -155,6 +156,7 @@ func (c Crontab) Save(crontabLines string) error {
 		}
 	}
 
+	c.IsSaved = true
 	return nil
 }
 

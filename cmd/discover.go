@@ -26,6 +26,7 @@ var isAutoDiscover bool
 var isSilent bool
 var noAutoDiscover bool
 var saveCrontabFile bool
+var hasUnsavedCrontab bool
 var timezone lib.TimezoneLocationName
 var maxNameLen = 75
 var notificationList string
@@ -98,6 +99,7 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 			if isPathToDirectory(args[0]) {
 				processDirectory(username, args[0])
 			} else {
+
 				processCrontab(lib.CrontabFactory(username, args[0]))
 			}
 		} else {
@@ -112,9 +114,8 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 			}
 		}
 
-		if !isAutoDiscover && !saveCrontabFile {
+		if !isAutoDiscover && hasUnsavedCrontab {
 			saveCommand := strings.Join(os.Args, " ")
-			fmt.Println()
 
 			label := "crontabs"
 			if importedCrontabs == 1 {
@@ -122,7 +123,7 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 			}
 
 			if importedCrontabs > 0 {
-				printSuccessText(fmt.Sprintf("► To install the updated %s, run:", label))
+				printSuccessText(fmt.Sprintf("► To save the updated %s, run:", label))
 				fmt.Println(fmt.Sprintf("%s --auto --save\n", saveCommand))
 			}
 		}
@@ -311,22 +312,44 @@ func processCrontab(crontab *lib.Crontab) bool {
 
 	if !isSilent {
 		// When running --auto mode, you should be able to pipe or redirect crontab output elsewhere. Skip status-related messages.
-		fmt.Print(updatedCrontabLines)
-
-		if !isAutoDiscover {
-			fmt.Println("\n")
-			printSuccessText("✔ Import successful")
-		}
+		fmt.Println(strings.TrimSpace(updatedCrontabLines))
 
 		if !isAutoDiscover {
 			fmt.Println()
+			printSuccessText("✔ Import successful")
 		}
 	}
 
+	var saveThisCrontab = false
 	if saveCrontabFile {
+		saveThisCrontab = true
+	} else {
+		if !isAutoDiscover && crontab.IsWritable() {
+			fmt.Println()
+			prompt := promptui.Prompt{
+				Label:     fmt.Sprintf("Save updated crontab to finish integration"),
+				IsConfirm: true,
+			}
+
+			result, err := prompt.Run()
+
+			if err == promptui.ErrInterrupt {
+				printErrorText("Exited by user signal")
+				os.Exit(-1)
+			} else if err == promptui.ErrAbort {
+				printWarningText(fmt.Sprintf("► Saving skipped. Cronitor integration will not be complete until the updated crontab is saved"))
+			} else if err != nil {
+				printErrorText("Error: " + err.Error() + "\n")
+			} else {
+				saveThisCrontab = result == "y"
+			}
+		}
+	}
+
+	if saveThisCrontab {
 		if err := crontab.Save(updatedCrontabLines); err == nil {
 			if !isSilent {
-				printSuccessText("✔ Crontab save successful")
+				printSuccessText("✔ Save successful")
 			}
 		} else {
 			if !isSilent {
@@ -334,6 +357,12 @@ func processCrontab(crontab *lib.Crontab) bool {
 			}
 			return false
 		}
+	} else {
+		hasUnsavedCrontab = true
+	}
+
+	if !isAutoDiscover {
+		fmt.Println()
 	}
 
 	return len(monitors) > 0
