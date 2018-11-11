@@ -323,7 +323,7 @@ func createAutoDiscoverLine(crontab *Crontab) *Line {
 
 	// Remove existing --auto flag before adding a new one to prevent doubling up
 	commandToRun = strings.Replace(commandToRun, "--auto", "", -1)
-	commandToRun = strings.Replace(commandToRun, " discover ", " discover --auto ", -1)
+	commandToRun = strings.Replace(commandToRun, " discover", " discover --auto ", -1)
 
 	line := Line{}
 	line.CronExpression = cronExpression
