@@ -10,7 +10,7 @@ git push --tags
 
 equinox release \
  --version="$1" \
- --platforms="darwin_amd64 linux_amd64 windows_amd64" \
+ --platforms="darwin_amd64 linux_amd64 linux_386 windows_amd64" \
  --signing-key=../equinox.key \
  --app="app_itoJoCoW8dr" \
  --token="***REMOVED***" \

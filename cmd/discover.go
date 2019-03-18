@@ -34,7 +34,7 @@ var notificationList string
 var discoverCmd = &cobra.Command{
 	Use:   "discover <optional path>",
 	Short: "Attach monitoring to new cron jobs and watch for schedule updates",
-	Long:  `
+	Long: `
 Cronitor discover will parse your crontab and create or update monitors using the Cronitor API.
 
 Note: You must supply your Cronitor API key. This can be passed as a flag, environment variable, or saved in your Cronitor configuration file. See 'help configure' for more details.
@@ -70,10 +70,6 @@ In all of these examples, auto discover is enabled by adding 'cronitor discover 
 to Cronitor and alert if you if new jobs are added to your crontab without monitoring."
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		// If this is being run from a script, cron, etc, it probably wont have a PS1
-		if os.Getenv("PS1") == "" {
-			isAutoDiscover = true
-		}
 
 		// If this is being run by cronitor exec, don't write anything to stdout
 		if os.Getenv("CRONITOR_EXEC") == "1" {
@@ -154,7 +150,7 @@ func processDirectory(username, directory string) {
 
 		if !isAutoDiscover {
 			prompt := promptui.Prompt{
-				Label: fmt.Sprintf("Would you like to import cron jobs from %s", directory),
+				Label:     fmt.Sprintf("Would you like to import cron jobs from %s", directory),
 				IsConfirm: true,
 			}
 
@@ -299,7 +295,6 @@ func processCrontab(crontab *lib.Crontab) bool {
 		printSuccessText("✔ Sending updated crontab to Cronitor:")
 	}
 
-
 	// Put monitors to Cronitor API
 	var err error
 	monitors, err = putMonitors(monitors)
@@ -428,6 +423,7 @@ func createDefaultName(line *lib.Line, crontab *lib.Crontab, effectiveHostname s
 	excludeFromName = append(excludeFromName, "/bin/bash -lc")
 	excludeFromName = append(excludeFromName, "/bin/bash -c -l")
 	excludeFromName = append(excludeFromName, "/bin/bash -cl")
+	excludeFromName = append(excludeFromName, "/dev/null")
 
 	excludeFromName = append(excludeFromName, "'")
 	excludeFromName = append(excludeFromName, "\"")
@@ -440,7 +436,7 @@ func createDefaultName(line *lib.Line, crontab *lib.Crontab, effectiveHostname s
 	// Remove output redirection
 	CommandToRun := line.CommandToRun
 	for _, redirectionOperator := range []string{">>", ">"} {
-		if operatorPosition := strings.LastIndex(line.CommandToRun, redirectionOperator) ; operatorPosition > 0 {
+		if operatorPosition := strings.LastIndex(line.CommandToRun, redirectionOperator); operatorPosition > 0 {
 			CommandToRun = CommandToRun[:operatorPosition]
 			break
 		}
@@ -456,10 +452,10 @@ func createDefaultName(line *lib.Line, crontab *lib.Crontab, effectiveHostname s
 	// Assemble the candidate name.
 	// Ensure we don't produce dupe names if the user has same command on multiple lines.
 	formattedRunAs := ""
+	lineNumSuffix := fmt.Sprintf(" L%d", line.LineNumber)
 	if line.RunAs != "" {
 		formattedRunAs = fmt.Sprintf("%s ", line.RunAs)
 	}
-
 	formattedHostname := ""
 	if effectiveHostname != "" {
 		formattedHostname = fmt.Sprintf("[%s] ", effectiveHostname)
@@ -468,7 +464,7 @@ func createDefaultName(line *lib.Line, crontab *lib.Crontab, effectiveHostname s
 	candidate := formattedHostname + formattedRunAs + CommandToRun
 
 	if _, exists := allNameCandidates[candidate]; exists {
-		candidate = fmt.Sprintf("%s L%d", candidate, line.LineNumber)
+		candidate = fmt.Sprintf("%s%s", candidate, lineNumSuffix)
 	} else {
 		allNameCandidates[candidate] = true
 	}
@@ -480,9 +476,14 @@ func createDefaultName(line *lib.Line, crontab *lib.Crontab, effectiveHostname s
 
 	// Keep the first and last portion of the command
 	separator := "..."
+
 	commandPrefixLen := 20 + len(formattedHostname) + len(formattedRunAs)
-	commandSuffixLen := maxNameLen - commandPrefixLen - len(separator)
-	return fmt.Sprintf("%s%s%s", strings.TrimSpace(candidate[:commandPrefixLen]), separator, strings.TrimSpace(candidate[len(candidate) - commandSuffixLen:]))
+	commandSuffixLen := maxNameLen - len(lineNumSuffix) - commandPrefixLen - len(separator)
+	return fmt.Sprintf(
+		"%s%s%s%s",
+		strings.TrimSpace(candidate[:commandPrefixLen]),
+		separator,
+		strings.TrimSpace(candidate[len(candidate)-commandSuffixLen:]), lineNumSuffix)
 }
 
 func createTags() []string {
@@ -539,7 +540,7 @@ func validateNameUniqueness(candidateName string, key string) error {
 
 	contents, err := ioutil.ReadAll(response.Body)
 
-	responseMonitor := struct{Key string}{}
+	responseMonitor := struct{ Key string }{}
 	if err = json.Unmarshal(contents, &responseMonitor); err != nil {
 		log("Could not verify uniqueness: " + err.Error())
 		log(string(contents))

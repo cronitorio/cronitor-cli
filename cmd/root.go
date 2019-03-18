@@ -107,7 +107,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	defer group.Done()
 
 	Client := &http.Client{
-		Timeout: time.Second * 7,
+		Timeout: time.Second * 10,
 	}
 
 	hostname := effectiveHostname()
