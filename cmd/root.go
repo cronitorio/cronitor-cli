@@ -21,7 +21,7 @@ import (
 	"cronitor/lib"
 )
 
-var Version string = "21.0"
+var Version string = "21.1"
 
 var cfgFile string
 var userAgent string
