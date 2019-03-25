@@ -17,7 +17,6 @@ import (
 	"net/url"
 	"os/user"
 	"cronitor/lib"
-	"github.com/fatih/color"
 )
 
 var importedCrontabs = 0
@@ -565,39 +564,6 @@ func validateNameFormat(candidateName string) error {
 	}
 
 	return nil
-}
-
-func printSuccessText(message string) {
-	if isAutoDiscover {
-		log(message)
-	} else {
-		color.New(color.FgHiGreen).Println(message)
-	}
-}
-
-func printWarningText(message string) {
-	if isAutoDiscover {
-		log(message)
-	} else {
-		color.New(color.FgHiYellow).Println(message)
-	}
-}
-
-func printErrorText(message string) {
-	if isAutoDiscover {
-		log(message)
-	} else {
-		color.New(color.FgHiRed, color.Bold).Println(message)
-	}
-}
-
-func isPathToDirectory(path string) bool {
-	fileInfo, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-
-	return fileInfo.Mode().IsDir()
 }
 
 func init() {

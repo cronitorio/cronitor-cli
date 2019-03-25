@@ -19,6 +19,8 @@ import (
 	"github.com/getsentry/raven-go"
 	"math/rand"
 	"cronitor/lib"
+	"github.com/fatih/color"
+
 )
 
 var Version string = "21.1"
@@ -285,6 +287,39 @@ func truncateString(s string, length int) string {
 	}
 
 	return s[:length]
+}
+
+func printSuccessText(message string) {
+	if isAutoDiscover {
+		log(message)
+	} else {
+		color.New(color.FgHiGreen).Println(message)
+	}
+}
+
+func printWarningText(message string) {
+	if isAutoDiscover {
+		log(message)
+	} else {
+		color.New(color.FgHiYellow).Println(message)
+	}
+}
+
+func printErrorText(message string) {
+	if isAutoDiscover {
+		log(message)
+	} else {
+		color.New(color.FgHiRed, color.Bold).Println(message)
+	}
+}
+
+func isPathToDirectory(path string) bool {
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	return fileInfo.Mode().IsDir()
 }
 
 func log(msg string) {
