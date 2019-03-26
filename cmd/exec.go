@@ -80,93 +80,109 @@ Example with no command output send to Cronitor:
 	},
 
 	Run: func(cmd *cobra.Command, args []string) {
-		var wg sync.WaitGroup
-		wg.Add(1)
-
-		startTime := makeStamp()
-		formattedStartTime := formatStamp(startTime)
 		subcommand := shellquote.Join(commandParts...)
+		os.Exit(RunCommand(subcommand, true, true))
+	},
+}
+
+func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) int {
+	var wg sync.WaitGroup
+
+	startTime := makeStamp()
+	formattedStartTime := formatStamp(startTime)
+
+	if withMonitoring {
+		wg.Add(1)
 		go sendPing("run", monitorCode, subcommand, formattedStartTime, startTime, nil, nil, &wg)
+	}
 
-		log(fmt.Sprintf("Running subcommand: %s", subcommand))
+	log(fmt.Sprintf("Running subcommand: %s", subcommand))
 
-		execCmd := makeSubcommandExec(subcommand)
+	execCmd := makeSubcommandExec(subcommand)
+	if withEnvironment {
+		execCmd.Env = makeSubcommandEnv()
+	} else {
+		execCmd.Env = []string{}
+	}
 
-		// Handle stdin to the subcommand
-		execCmdStdin, _ := execCmd.StdinPipe()
-		defer execCmdStdin.Close()
-		if stdinStat, err := os.Stdin.Stat(); err == nil && stdinStat.Size() > 0 {
-			execStdIn, _ := ioutil.ReadAll(os.Stdin)
-			execCmdStdin.Write(execStdIn)
+	// Handle stdin to the subcommand
+	execCmdStdin, _ := execCmd.StdinPipe()
+	defer execCmdStdin.Close()
+	if stdinStat, err := os.Stdin.Stat(); err == nil && stdinStat.Size() > 0 {
+		execStdIn, _ := ioutil.ReadAll(os.Stdin)
+		execCmdStdin.Write(execStdIn)
+	}
+
+	// Combine stdout and stderr from the command into a single buffer which we'll stream as stdout
+	// Alternatively we could pass stderr from the subcommand but I've chosen to only use it for CronitorCLI errors at the moment
+	var combinedOutput bytes.Buffer
+	var maxBufferSize = 2000
+	if stdoutPipe, err := execCmd.StdoutPipe(); err == nil {
+		streamAndAggregateOutput(&stdoutPipe, &combinedOutput, maxBufferSize)
+		execCmd.Stderr = execCmd.Stdout
+	}
+
+	// Invoke subcommand and send a message when it's done
+	waitCh := make(chan error, 1)
+	go func() {
+		defer close(waitCh)
+		if err := execCmd.Start(); err != nil {
+		    waitCh <- err
+		} else {
+			waitCh <- execCmd.Wait()
 		}
+	}()
 
-		// Combine stdout and stderr from the command into a single buffer which we'll stream as stdout
-		// Alternatively we could pass stderr from the subcommand but I've chosen to only use it for CronitorCLI errors at the moment
-		var combinedOutput bytes.Buffer
-		var maxBufferSize = 2000
-		if stdoutPipe, err := execCmd.StdoutPipe(); err == nil {
-			streamAndAggregateOutput(&stdoutPipe, &combinedOutput, maxBufferSize)
-			execCmd.Stderr = execCmd.Stdout
-		}
+	// Relay incoming signals to the subprocess
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan)
 
-		// Invoke subcommand and send a message when it's done
-		waitCh := make(chan error, 1)
-		go func() {
-			defer close(waitCh)
-			if err := execCmd.Start(); err != nil {
-			    waitCh <- err
-			} else {
-				waitCh <- execCmd.Wait()
+	for {
+		select {
+		case sig := <-sigChan:
+			if err := execCmd.Process.Signal(sig); err != nil {
+				// Ignoring because the only time I've seen an err is when child process has already exited after kill was sent to pgroup
 			}
-		}()
+		case err := <-waitCh:
+			// Handle stdout from subcommand
+			outputForStdout := bytes.TrimRight(combinedOutput.Bytes(), "\n")
+			outputForPing := outputForStdout
+			if noStdoutPassthru {
+				outputForPing = []byte{}
+			}
 
-		// Relay incoming signals to the subprocess
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan)
-
-		for {
-			select {
-			case sig := <-sigChan:
-				if err := execCmd.Process.Signal(sig); err != nil {
-					// Ignoring because the only time I've seen an err is when child process has already exited after kill was sent to pgroup
-				}
-			case err := <-waitCh:
-				// Handle stdout from subcommand
-				outputForStdout := bytes.TrimRight(combinedOutput.Bytes(), "\n")
-				outputForPing := outputForStdout
-				if noStdoutPassthru {
-					outputForPing = []byte{}
-				}
-
-				endTime := makeStamp()
-				duration := endTime - startTime
-				exitCode := 0
-				if err == nil {
+			endTime := makeStamp()
+			duration := endTime - startTime
+			exitCode := 0
+			if err == nil {
+				if withMonitoring {
 					wg.Add(1)
 					go sendPing("complete", monitorCode, string(outputForPing), formattedStartTime, endTime, &duration, &exitCode, &wg)
-				} else {
-					wg.Add(1)
-					message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), outputForPing))
+				}
+			} else {
+				message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), outputForPing))
 
-					// This works on both Unix and Windows (syscall.WaitStatus is cross platform).
-					// Cribbed from aws-vault.
-					if exiterr, ok := err.(*exec.ExitError); ok {
-						if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-							exitCode = status.ExitStatus()
-						} else {
-							exitCode = 1
-						}
+				// This works on both Unix and Windows (syscall.WaitStatus is cross platform).
+				// Cribbed from aws-vault.
+				if exiterr, ok := err.(*exec.ExitError); ok {
+					if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+						exitCode = status.ExitStatus()
+					} else {
+						exitCode = 1
 					}
-
-					go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, &wg)
 				}
 
-				wg.Wait()
-				os.Exit(exitCode)
+				if withMonitoring {
+					wg.Add(1)
+					go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, &wg)
+				}
 			}
-		}
 
-	},
+			wg.Wait()
+			return exitCode
+		}
+	}
+
 }
 
 func init() {
@@ -187,7 +203,6 @@ func makeSubcommandExec(subcommand string) *exec.Cmd {
 		execCmd = exec.Command("sh", "-c", subcommand)
 	}
 
-	execCmd.Env = makeSubcommandEnv()
 	return execCmd
 }
 

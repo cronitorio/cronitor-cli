@@ -362,3 +362,23 @@ func CrontabFactory(username, filename string) *Crontab {
 		Filename:      filename,
 	}
 }
+
+func ReadCrontabsInDirectory(username, directory string, crontabs []*Crontab) []*Crontab {
+	files := EnumerateCrontabFiles(directory)
+	if len(files) > 0 {
+		for _, crontabFile := range files {
+			crontab := CrontabFactory(username, crontabFile)
+			crontab.Parse(true)
+			crontabs = append(crontabs, crontab)
+		}
+	}
+
+	return crontabs
+}
+
+func ReadCrontabFromFile(username, filename string, crontabs []*Crontab) []*Crontab {
+	crontab := CrontabFactory(username, filename)
+	crontab.Parse(true)
+	crontabs = append(crontabs, crontab)
+	return crontabs
+}

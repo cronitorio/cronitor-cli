@@ -4,25 +4,24 @@ import (
 	"fmt"
 	"github.com/spf13/cobra"
 	"os"
+	"github.com/manifoldco/promptui"
 	"os/user"
 	"cronitor/lib"
-	"github.com/olekukonko/tablewriter"
+	"strings"
 )
 
-var listCmd = &cobra.Command{
-	Use:   "list <optional path>",
-	Short: "List all cron jobs found on the server",
+var promptCmd = &cobra.Command{
+	Use:   "prompt",
+	Short: "Run scripts from a cron-like crommand prompt",
 	Long: `
 Cronitor discover will parse your crontab and create or update monitors using the Cronitor API.
 
-Note: You must supply your Cronitor API key. This can be passed as a flag, environment variable, or saved in your Cronitor configuration file. See 'help configure' for more details.
-
 Example:
-  $ cronitor test
+  $ cronitor select
       > List cron jobs in your user crontab and system directory
       > Optionally, execute a job and view its output
 
-  $ cronitor test /path/to/crontab
+  $ cronitor select /path/to/crontab
       > Instead of the user crontab, list the jobs in a provided a crontab file (or directory of crontabs)
 
 	`,
@@ -64,32 +63,51 @@ Example:
 				continue
 			}
 
-			table := tablewriter.NewWriter(os.Stdout)
-			table.SetHeader([]string{"Schedule", "Command", "Monitoring"})
-			table.SetAutoWrapText(false)
-			table.SetHeaderAlignment(3)
-
 			for _, line := range crontab.Lines {
 				if len(line.CommandToRun) == 0 {
 					continue
 				}
 
-				monitoring := "None"
-				if len(line.Code) > 0 || line.HasLegacyIntegration() {
-					monitoring = "✔ Ok"
-				}
-
-				table.Append([]string{line.CronExpression, line.CommandToRun, monitoring})
 				commands = append(commands, line.CommandToRun)
 			}
-
-			printSuccessText(fmt.Sprintf("► Reading %s", crontab.DisplayName()))
-			table.Render()
-			fmt.Println()
 		}
+
+		for {
+			prompt := promptui.Prompt{
+				Label:     "$",
+			}
+
+			if result, err := prompt.Run(); err == nil {
+
+				if strings.TrimSpace(result) == "exit" {
+					os.Exit(0)
+				} else if result != "" {
+					printSuccessText("► Running command: " + result)
+					fmt.Println()
+					exitCode := RunCommand(result, false,false)
+
+					if exitCode == 0 {
+						printSuccessText("✔ Success")
+					} else {
+						printErrorText(fmt.Sprintf("✗ Exit code %d", exitCode))
+					}
+
+					fmt.Println()
+				}
+
+			} else if err == promptui.ErrInterrupt {
+				fmt.Println("Exited by user signal")
+				os.Exit(-1)
+			} else {
+				fmt.Println("Error: " + err.Error() + "\n")
+			}
+
+			break
+		}
+
 	},
 }
 
 func init() {
-	RootCmd.AddCommand(listCmd)
+	RootCmd.AddCommand(promptCmd)
 }
