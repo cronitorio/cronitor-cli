@@ -36,5 +36,6 @@ func main() {
 		os.Args[commandIndex] = "--"
 	}
 
-	raven.CapturePanicAndWait(cmd.Execute, nil)
+	cmd.Execute()
+	//raven.CapturePanicAndWait(cmd.Execute, nil)
 }

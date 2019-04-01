@@ -11,18 +11,15 @@ import (
 
 var listCmd = &cobra.Command{
 	Use:   "list <optional path>",
-	Short: "List all cron jobs found on the server",
+	Short: "Search for and list all cron jobs",
 	Long: `
-Cronitor discover will parse your crontab and create or update monitors using the Cronitor API.
-
-Note: You must supply your Cronitor API key. This can be passed as a flag, environment variable, or saved in your Cronitor configuration file. See 'help configure' for more details.
+Cronitor list scans your system (or your supplied path) for cron jobs and displays them in an easy to read table
 
 Example:
-  $ cronitor test
+  $ cronitor list
       > List cron jobs in your user crontab and system directory
-      > Optionally, execute a job and view its output
 
-  $ cronitor test /path/to/crontab
+  $ cronitor list /path/to/crontab
       > Instead of the user crontab, list the jobs in a provided a crontab file (or directory of crontabs)
 
 	`,
@@ -65,7 +62,7 @@ Example:
 			}
 
 			table := tablewriter.NewWriter(os.Stdout)
-			table.SetHeader([]string{"Schedule", "Command", "Monitoring"})
+			table.SetHeader([]string{"Schedule", "Command"})
 			table.SetAutoWrapText(false)
 			table.SetHeaderAlignment(3)
 
@@ -74,12 +71,7 @@ Example:
 					continue
 				}
 
-				monitoring := "None"
-				if len(line.Code) > 0 || line.HasLegacyIntegration() {
-					monitoring = "✔ Ok"
-				}
-
-				table.Append([]string{line.CronExpression, line.CommandToRun, monitoring})
+				table.Append([]string{line.CronExpression, line.CommandToRun})
 				commands = append(commands, line.CommandToRun)
 			}
 

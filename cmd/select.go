@@ -13,7 +13,7 @@ var selectCmd = &cobra.Command{
 	Use:   "select <optional path>",
 	Short: "Select a cron job to run interactively",
 	Long: `
-Cronitor discover will parse your crontab and create or update monitors using the Cronitor API.
+Cronitor select starts by scanning your system (or your supplied path) for cron jobs. Use your arrow keys to select and execute a job from the list.
 
 Example:
   $ cronitor select
@@ -21,13 +21,9 @@ Example:
       > Optionally, execute a job and view its output
 
   $ cronitor select /path/to/crontab
-      > Instead of the user crontab, list the jobs in a provided a crontab file (or directory of crontabs)
+      > Instead of the user crontab, select from the jobs in a provided a crontab file (or directory of crontabs)
 
 	`,
-	Args: func(cmd *cobra.Command, args []string) error {
-
-		return nil
-	},
 
 	Run: func(cmd *cobra.Command, args []string) {
 		var username string
@@ -37,6 +33,7 @@ Example:
 
 		crontabs := []*lib.Crontab{}
 		commands := []string{}
+		monitorCodes := map[string]string{}
 
 		if len(args) > 0 {
 			// A supplied argument can be a specific file or a directory
@@ -68,6 +65,9 @@ Example:
 				}
 
 				commands = append(commands, line.CommandToRun)
+				if len(line.Code) > 0 {
+					monitorCodes[line.CommandToRun] = line.Code
+				}
 			}
 		}
 
@@ -79,9 +79,14 @@ Example:
 
 		if _, result, err := prompt.Run(); err == nil {
 			if result != "" {
+
+				if _, exists := monitorCodes[result]; exists {
+					monitorCode = monitorCodes[result]
+				}
+
 				printSuccessText("► Running command: " + result)
 				fmt.Println()
-				exitCode := RunCommand(result, false,false)
+				exitCode := RunCommand(result, false, len(monitorCode) > 0)
 
 				if exitCode == 0 {
 					printSuccessText("✔ Success")
