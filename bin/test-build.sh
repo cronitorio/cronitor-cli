@@ -491,3 +491,22 @@ if echo "$OUTPUT" | grep -q "every_minute" && echo "$OUTPUT" | grep -q "top_of_h
 fi
 
 echo ""
+
+#################
+# LIST TESTS
+#################
+echo ""
+
+rm -f $LOGFILE
+TEST="List reads crontab and writes table"
+if ../cronitor $CRONITOR_ARGS list ../fixtures/crontab.txt | grep -q "babylist_web"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $LOGFILE
+TEST="List reads crontab and formats table correctly"
+if ../cronitor $CRONITOR_ARGS list ../fixtures/crontab.txt | grep -q "\-----"
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
