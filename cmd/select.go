@@ -17,11 +17,12 @@ Cronitor select starts by scanning your system (or your supplied path) for cron 
 
 Example:
   $ cronitor select
-      > List cron jobs in your user crontab and system directory
+      > List cron jobs in your user crontab, system crontab and crontab drop-in directory
       > Optionally, execute a job and view its output
 
   $ cronitor select /path/to/crontab
-      > Instead of the user crontab, select from the jobs in a provided a crontab file (or directory of crontabs)
+      > List cron jobs found in the provided path
+      > Optionally, execute a job and view its output
 	`,
 
 	Run: func(cmd *cobra.Command, args []string) {
@@ -42,8 +43,9 @@ Example:
 				crontabs = lib.ReadCrontabFromFile(username, args[0], crontabs)
 			}
 		} else {
-			// Without a supplied argument look at the user crontab and the system drop-in directory
+			// Without a supplied argument look at the user crontab, system crontab and the system drop-in directory
 			crontabs = lib.ReadCrontabFromFile(username, "", crontabs)
+			crontabs = lib.ReadCrontabFromFile(username, lib.SYSTEM_CRONTAB, crontabs)
 			crontabs = lib.ReadCrontabsInDirectory(username, lib.DROP_IN_DIRECTORY, crontabs)
 		}
 

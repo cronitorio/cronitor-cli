@@ -98,8 +98,12 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 				processCrontab(lib.CrontabFactory(username, args[0]))
 			}
 		} else {
-			// Without a supplied argument look at the user crontab and the system drop-in directory
+			// Without a supplied argument look at the user crontab, the system crontab and the system drop-in directory
 			if processCrontab(lib.CrontabFactory(username, "")) {
+				importedCrontabs++
+			}
+
+			if processCrontab(lib.CrontabFactory(username, lib.SYSTEM_CRONTAB)) {
 				importedCrontabs++
 			}
 
@@ -180,6 +184,11 @@ func processDirectory(username, directory string) {
 }
 
 func processCrontab(crontab *lib.Crontab) bool {
+
+	if !crontab.Exists() {
+		return false
+	}
+
 	printSuccessText(fmt.Sprintf("► Reading %s", crontab.DisplayName()))
 
 	// Before going further, ensure we aren't going to run into permissions problems writing the crontab, when applicable
@@ -317,8 +326,8 @@ func processCrontab(crontab *lib.Crontab) bool {
 	var saveThisCrontab = false
 	if saveCrontabFile {
 		saveThisCrontab = true
-	} else {
-		if !isAutoDiscover && crontab.IsWritable() {
+	} else if !isAutoDiscover {
+		if crontab.IsWritable() {
 			fmt.Println()
 			prompt := promptui.Prompt{
 				Label:     fmt.Sprintf("Save updated crontab to finish integration"),
@@ -337,6 +346,8 @@ func processCrontab(crontab *lib.Crontab) bool {
 			} else {
 				saveThisCrontab = result == "y"
 			}
+		} else {
+			printWarningText(fmt.Sprintf("► Saving skipped. You do not have permission to update this crontab file."))
 		}
 	}
 

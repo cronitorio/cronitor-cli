@@ -13,10 +13,10 @@ import (
 	"strconv"
 	"errors"
 	"crypto/sha1"
-	"log"
 )
 
 const DROP_IN_DIRECTORY = "/etc/cron.d"
+const SYSTEM_CRONTAB = "/etc/crontab"
 
 type TimezoneLocationName struct {
 	Name string
@@ -197,6 +197,21 @@ func (c Crontab) IsWritable() bool {
 	return true
 }
 
+func (c Crontab) Exists() bool {
+
+	if c.Filename != "" {
+		if _, err := os.Stat(c.Filename); os.IsNotExist(err) {
+		  return false
+		}
+	} else {
+		cmd := exec.Command("crontab", "-l")
+		if _, err := cmd.CombinedOutput(); err != nil {
+			return false
+		}
+	}
+
+	return true
+}
 
 func (c Crontab) load() ([]string, int, error) {
 
@@ -342,12 +357,12 @@ func isSixFieldCronExpression(splitLine []string) bool {
 }
 
 func EnumerateCrontabFiles(dirToEnumerate string) []string {
+	var fileList []string
 	files, err := ioutil.ReadDir(dirToEnumerate)
 	if err != nil {
-		log.Fatal(err)
+		return fileList
 	}
 
-	var fileList []string
 	for _, f := range files {
 		fileList = append(fileList, filepath.Join(dirToEnumerate, f.Name()))
 	}
@@ -377,6 +392,10 @@ func ReadCrontabsInDirectory(username, directory string, crontabs []*Crontab) []
 }
 
 func ReadCrontabFromFile(username, filename string, crontabs []*Crontab) []*Crontab {
+	if _, err := os.Stat(filename); filename != "" && os.IsNotExist(err) {
+	  return crontabs
+	}
+
 	crontab := CrontabFactory(username, filename)
 	crontab.Parse(true)
 	crontabs = append(crontabs, crontab)

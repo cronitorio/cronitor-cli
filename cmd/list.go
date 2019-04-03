@@ -13,11 +13,11 @@ var listCmd = &cobra.Command{
 	Use:   "list <optional path>",
 	Short: "Search for and list all cron jobs",
 	Long: `
-Cronitor list scans your system (or your supplied path) for cron jobs and displays them in an easy to read table
+Cronitor list scans for cron jobs and displays them in an easy to read table
 
 Example:
   $ cronitor list
-      > List cron jobs in your user crontab and system directory
+      > List all cron jobs in your user crontab and system directory
 
   $ cronitor list /path/to/crontab
       > Instead of the user crontab, list the jobs in a provided a crontab file (or directory of crontabs)
@@ -44,8 +44,9 @@ Example:
 				crontabs = lib.ReadCrontabFromFile(username, args[0], crontabs)
 			}
 		} else {
-			// Without a supplied argument look at the user crontab and the system drop-in directory
+			// Without a supplied argument look at the user crontab, system crontab, and the system drop-in directory
 			crontabs = lib.ReadCrontabFromFile(username, "", crontabs)
+			crontabs = lib.ReadCrontabFromFile(username, lib.SYSTEM_CRONTAB, crontabs)
 			crontabs = lib.ReadCrontabsInDirectory(username, lib.DROP_IN_DIRECTORY, crontabs)
 		}
 
