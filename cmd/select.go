@@ -22,7 +22,6 @@ Example:
 
   $ cronitor select /path/to/crontab
       > Instead of the user crontab, select from the jobs in a provided a crontab file (or directory of crontabs)
-
 	`,
 
 	Run: func(cmd *cobra.Command, args []string) {
@@ -38,9 +37,9 @@ Example:
 		if len(args) > 0 {
 			// A supplied argument can be a specific file or a directory
 			if isPathToDirectory(args[0]) {
-				crontabs = lib.ReadCrontabsInDirectory(username, lib.DROP_IN_DIRECTORY, crontabs)
+				crontabs = lib.ReadCrontabsInDirectory(username, args[0], crontabs)
 			} else {
-				crontabs = lib.ReadCrontabFromFile(username, "", crontabs)
+				crontabs = lib.ReadCrontabFromFile(username, args[0], crontabs)
 			}
 		} else {
 			// Without a supplied argument look at the user crontab and the system drop-in directory
@@ -76,7 +75,6 @@ Example:
 			Items: unique(commands),
 			Size: 20,
 		}
-
 		if _, result, err := prompt.Run(); err == nil {
 			if result != "" {
 
@@ -86,12 +84,16 @@ Example:
 
 				printSuccessText("► Running command: " + result)
 				fmt.Println()
+
+				startTime := makeStamp()
 				exitCode := RunCommand(result, false, len(monitorCode) > 0)
+				duration := formatStamp(makeStamp() - startTime)
 
 				if exitCode == 0 {
-					printSuccessText("✔ Success")
+					fmt.Println()
+					printSuccessText(fmt.Sprintf("✔ Command successful    Elasped time %ss", duration))
 				} else {
-					printErrorText(fmt.Sprintf("✗ Exit code %d", exitCode))
+					printErrorText(fmt.Sprintf("✗ Command failed    Elapsed time %ss    Exit code %d", duration, exitCode))
 				}
 
 				fmt.Println()
@@ -99,7 +101,8 @@ Example:
 				printSuccessText("✔ Done")
 			}
 		} else if err == promptui.ErrInterrupt {
-			printSuccessText("✔ Done")
+			fmt.Println("Exited by user signal")
+			os.Exit(-1)
 			os.Exit(-1)
 		} else {
 			fmt.Println("Error: " + err.Error() + "\n")
@@ -122,3 +125,4 @@ func unique(strings []string) []string {
     }
     return list
 }
+

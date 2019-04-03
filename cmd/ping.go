@@ -13,7 +13,7 @@ var msg string
 
 var pingCmd = &cobra.Command{
 	Use:   "ping <code>",
-	Short: "Send a single ping to the selected endpoint",
+	Short: "Send a single ping to the selected monitoring endpoint",
 	Long:  `
 Ping the specified monitor to report current status.
 

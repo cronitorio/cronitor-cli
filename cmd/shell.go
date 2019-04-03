@@ -17,7 +17,6 @@ Cronitor shell allows you to run commands like cron does. Commands run from the 
 Example:
   $ cronitor shell
   ~ $ <enter any command here>
-
 	`,
 
 	Run: func(cmd *cobra.Command, args []string) {
@@ -25,7 +24,7 @@ Example:
 		templates := &promptui.PromptTemplates{
 			Prompt:  "{{ . }} ",
 			Valid:   "{{ . }} ",
-			Invalid:   "{{ . | red }} ",
+			Invalid: "{{ . | red }} ",
 			Success: "{{ . }} ",
 		}
 
@@ -52,7 +51,7 @@ Example:
 
 					if exitCode == 0 {
 						fmt.Println()
-						printSuccessText(fmt.Sprintf("✔ Command sucessful    Elasped time %ss", duration))
+						printSuccessText(fmt.Sprintf("✔ Command successful    Elasped time %ss", duration))
 					} else {
 						printErrorText(fmt.Sprintf("✗ Command failed    Elapsed time %ss    Exit code %d", duration, exitCode))
 					}
