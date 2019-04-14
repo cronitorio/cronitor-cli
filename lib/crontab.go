@@ -82,7 +82,7 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 		// Try to determine if the command begins with a "run as" user designation. This is required for system-level crontabs.
 		// Basically, just see if the first word of the command is a valid user name. This is how vixie cron does it.
 		// https://github.com/rhuitl/uClinux/blob/master/user/vixie-cron/entry.c#L224
-		if runtime.GOOS != "windows" && len(command) > 1 && strings.HasPrefix(c.Filename, "/etc/") {
+		if runtime.GOOS != "windows" && len(command) > 1 && !c.IsUserCrontab {
 			idOrError, _ := exec.Command("id", "-u", command[0]).CombinedOutput()
 			if _, err := strconv.Atoi(strings.TrimSpace(string(idOrError))); err == nil {
 				runAs = command[0]
