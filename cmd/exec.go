@@ -118,7 +118,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 	var combinedOutput bytes.Buffer
 	var maxBufferSize = 2000
 	if stdoutPipe, err := execCmd.StdoutPipe(); err == nil {
-		streamAndAggregateOutput(&stdoutPipe, &combinedOutput, maxBufferSize)
+		streamAndAggregateOutput(&stdoutPipe, &combinedOutput, maxBufferSize, &wg)
 		execCmd.Stderr = execCmd.Stdout
 	}
 
@@ -215,8 +215,9 @@ func makeSubcommandExec(subcommand string) *exec.Cmd {
 	return execCmd
 }
 
-func streamAndAggregateOutput(pipe *io.ReadCloser, outputBuffer *bytes.Buffer, maxOutputBufferSize int) {
+func streamAndAggregateOutput(pipe *io.ReadCloser, outputBuffer *bytes.Buffer, maxOutputBufferSize int, wg *sync.WaitGroup) {
 	scanner := bufio.NewScanner(*pipe)
+	wg.Add(1)
 	go func() {
 		for scanner.Scan() {
 			fmt.Println(scanner.Text())
@@ -225,5 +226,7 @@ func streamAndAggregateOutput(pipe *io.ReadCloser, outputBuffer *bytes.Buffer, m
 				outputBuffer.Write(append(scanner.Bytes(), "\n"...))
 			}
 		}
+
+		wg.Done()
 	}()
 }
