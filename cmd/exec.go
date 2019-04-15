@@ -86,14 +86,15 @@ Example with no command output send to Cronitor:
 }
 
 func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) int {
-	var wg sync.WaitGroup
+	var pingWaitGroup sync.WaitGroup
+	var outputWaitGroup sync.WaitGroup
 
 	startTime := makeStamp()
 	formattedStartTime := formatStamp(startTime)
 
 	if withMonitoring {
-		wg.Add(1)
-		go sendPing("run", monitorCode, subcommand, formattedStartTime, startTime, nil, nil, &wg)
+		pingWaitGroup.Add(1)
+		go sendPing("run", monitorCode, subcommand, formattedStartTime, startTime, nil, nil, &pingWaitGroup)
 	}
 
 	log(fmt.Sprintf("Running subcommand: %s", subcommand))
@@ -118,7 +119,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 	var combinedOutput bytes.Buffer
 	var maxBufferSize = 2000
 	if stdoutPipe, err := execCmd.StdoutPipe(); err == nil {
-		streamAndAggregateOutput(&stdoutPipe, &combinedOutput, maxBufferSize, &wg)
+		streamAndAggregateOutput(&stdoutPipe, &combinedOutput, maxBufferSize, &outputWaitGroup)
 		execCmd.Stderr = execCmd.Stdout
 	}
 
@@ -144,6 +145,8 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 				// Ignoring because the only time I've seen an err is when child process has already exited after kill was sent to pgroup
 			}
 		case err := <-waitCh:
+			outputWaitGroup.Wait()
+
 			// Handle stdout from subcommand
 			outputForStdout := bytes.TrimRight(combinedOutput.Bytes(), "\n")
 			outputForPing := outputForStdout
@@ -156,8 +159,8 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 			exitCode := 0
 			if err == nil {
 				if withMonitoring {
-					wg.Add(1)
-					go sendPing("complete", monitorCode, string(outputForPing), formattedStartTime, endTime, &duration, &exitCode, &wg)
+					pingWaitGroup.Add(1)
+					go sendPing("complete", monitorCode, string(outputForPing), formattedStartTime, endTime, &duration, &exitCode, &pingWaitGroup)
 				}
 			} else {
 				message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), outputForPing))
@@ -173,12 +176,12 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 				}
 
 				if withMonitoring {
-					wg.Add(1)
-					go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, &wg)
+					pingWaitGroup.Add(1)
+					go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, &pingWaitGroup)
 				}
 			}
 
-			wg.Wait()
+			pingWaitGroup.Wait()
 			return exitCode
 		}
 	}
