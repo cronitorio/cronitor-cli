@@ -86,15 +86,15 @@ Example with no command output send to Cronitor:
 }
 
 func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) int {
-	var pingWaitGroup sync.WaitGroup
+	var monitoringWaitGroup sync.WaitGroup
 	var outputWaitGroup sync.WaitGroup
 
 	startTime := makeStamp()
 	formattedStartTime := formatStamp(startTime)
 
 	if withMonitoring {
-		pingWaitGroup.Add(1)
-		go sendPing("run", monitorCode, subcommand, formattedStartTime, startTime, nil, nil, &pingWaitGroup)
+		monitoringWaitGroup.Add(1)
+		go sendPing("run", monitorCode, subcommand, formattedStartTime, startTime, nil, nil, &monitoringWaitGroup)
 	}
 
 	log(fmt.Sprintf("Running subcommand: %s", subcommand))
@@ -148,8 +148,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 			outputWaitGroup.Wait()
 
 			// Handle stdout from subcommand
-			outputForStdout := bytes.TrimRight(combinedOutput.Bytes(), "\n")
-			outputForPing := outputForStdout
+			outputForPing := bytes.TrimRight(combinedOutput.Bytes(), "\n")
 			if noStdoutPassthru {
 				outputForPing = []byte{}
 			}
@@ -159,8 +158,8 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 			exitCode := 0
 			if err == nil {
 				if withMonitoring {
-					pingWaitGroup.Add(1)
-					go sendPing("complete", monitorCode, string(outputForPing), formattedStartTime, endTime, &duration, &exitCode, &pingWaitGroup)
+					monitoringWaitGroup.Add(1)
+					go sendPing("complete", monitorCode, string(outputForPing), formattedStartTime, endTime, &duration, &exitCode, &monitoringWaitGroup)
 				}
 			} else {
 				message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), outputForPing))
@@ -176,12 +175,12 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 				}
 
 				if withMonitoring {
-					pingWaitGroup.Add(1)
-					go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, &pingWaitGroup)
+					monitoringWaitGroup.Add(1)
+					go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, &monitoringWaitGroup)
 				}
 			}
 
-			pingWaitGroup.Wait()
+			monitoringWaitGroup.Wait()
 			return exitCode
 		}
 	}
@@ -222,6 +221,7 @@ func streamAndAggregateOutput(pipe *io.ReadCloser, outputBuffer *bytes.Buffer, m
 	scanner := bufio.NewScanner(*pipe)
 	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for scanner.Scan() {
 			fmt.Println(scanner.Text())
 			// Ideally we would keep the last n bytes of output but keeping first n bytes easier and acceptable trade off for now..
@@ -229,7 +229,5 @@ func streamAndAggregateOutput(pipe *io.ReadCloser, outputBuffer *bytes.Buffer, m
 				outputBuffer.Write(append(scanner.Bytes(), "\n"...))
 			}
 		}
-
-		wg.Done()
 	}()
 }
