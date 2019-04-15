@@ -100,9 +100,9 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 
 	execCmd := makeSubcommandExec(subcommand)
 	if withEnvironment {
-		execCmd.Env = makeSubcommandEnv()
+		execCmd.Env = makeSubcommandEnv(os.Environ())
 	} else {
-		execCmd.Env = []string{}
+		execCmd.Env = makeSubcommandEnv([]string{})
 	}
 
 	// Handle stdin to the subcommand
@@ -190,9 +190,18 @@ func init() {
 	execCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
 }
 
-func makeSubcommandEnv() []string {
-	env := os.Environ()
-	return append(env, "CRONITOR_EXEC=1")
+func makeSubcommandEnv(env []string) []string {
+	env = append(env, "CRONITOR_EXEC=1")
+
+	if homeValue, hasHome := os.LookupEnv("HOME") ; hasHome {
+		env = append(env, "HOME=" + homeValue)
+	}
+
+	if pathDirs, hasPath := os.LookupEnv("PATH") ; hasPath {
+		env = append(env, "PATH=" + pathDirs)
+	}
+
+	return env
 }
 
 func makeSubcommandExec(subcommand string) *exec.Cmd {
