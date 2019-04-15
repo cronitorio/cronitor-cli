@@ -51,7 +51,7 @@ Example:
 
 					if exitCode == 0 {
 						fmt.Println()
-						printSuccessText(fmt.Sprintf("✔ Command successful    Elasped time %ss", duration))
+						printSuccessText(fmt.Sprintf("✔ Command successful    Elapsed time %ss", duration))
 					} else {
 						printErrorText(fmt.Sprintf("✗ Command failed    Elapsed time %ss    Exit code %d", duration, exitCode))
 					}
