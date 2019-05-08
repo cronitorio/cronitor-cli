@@ -439,8 +439,17 @@ func createDefaultName(line *lib.Line, crontab *lib.Crontab, effectiveHostname s
 	excludeFromName = append(excludeFromName, "\"")
 	excludeFromName = append(excludeFromName, "\\")
 
+	// Limit the visible hostname portion to 21 chars
+	formattedHostname := ""
+	if effectiveHostname != "" {
+		if len(effectiveHostname) > 21 {
+			effectiveHostname = fmt.Sprintf("%s...%s", effectiveHostname[:9], effectiveHostname[len(effectiveHostname)-9:])
+		}
+		formattedHostname = fmt.Sprintf("[%s] ", effectiveHostname)
+	}
+
 	if line.IsAutoDiscoverCommand() {
-		return truncateString(fmt.Sprintf("[%s] Auto discover %s", effectiveHostname, strings.TrimSpace(crontab.DisplayName())), maxNameLen)
+		return truncateString(fmt.Sprintf("%sAuto discover %s", formattedHostname, strings.TrimSpace(crontab.DisplayName())), maxNameLen)
 	}
 
 	// Remove output redirection
@@ -465,10 +474,6 @@ func createDefaultName(line *lib.Line, crontab *lib.Crontab, effectiveHostname s
 	lineNumSuffix := fmt.Sprintf(" L%d", line.LineNumber)
 	if line.RunAs != "" {
 		formattedRunAs = fmt.Sprintf("%s ", line.RunAs)
-	}
-	formattedHostname := ""
-	if effectiveHostname != "" {
-		formattedHostname = fmt.Sprintf("[%s] ", effectiveHostname)
 	}
 
 	candidate := formattedHostname + formattedRunAs + CommandToRun
