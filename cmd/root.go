@@ -169,7 +169,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 		uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, pingApiAuthKey, hostname, formattedDuration, series, formattedStatusCode)
 		log("Sending ping " + uri)
 
-		request, err := http.NewRequest("GET", uri, nil)
+		request, _ := http.NewRequest("GET", uri, nil)
 		request.Header.Add("User-Agent", userAgent)
 		response, err := Client.Do(request)
 
@@ -179,9 +179,16 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 		}
 
 		_, err = ioutil.ReadAll(response.Body)
-
 		response.Body.Close()
-		if err == nil && response.StatusCode < 300 {
+
+		// Any 2xx is considered a successful response
+		if response.StatusCode >= 200 && response.StatusCode < 300 {
+			pingSent = true
+			break
+		}
+
+		// Backoff on any 4xx request, e.g. 429 Too Many Requests
+		if response.StatusCode >= 400 && response.StatusCode < 500 {
 			pingSent = true
 			break
 		}
