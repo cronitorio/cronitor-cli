@@ -17,7 +17,9 @@ func main() {
 	commandIndex := 0
 	argsEscaped := false
 	for idx, arg := range os.Args {
-		if arg == "exec" {
+		if arg == "exec" && commandIndex == 0 {
+			// The first "exec" we come across is the one we care about.
+			// After we find it we continue looking at the rest of the args but we have our commandIndex set
 			commandIndex = idx + 2
 		}
 
