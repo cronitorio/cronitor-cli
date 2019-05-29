@@ -268,15 +268,21 @@ type Line struct {
 }
 
 func (l Line) IsMonitorable() bool {
-	return len(l.CronExpression) > 0 && len(l.CommandToRun) > 0 && !l.HasLegacyIntegration()
+	// Users don't want to see "plumbing" cron jobs on their dashboard...
+	return len(l.CronExpression) > 0 && len(l.CommandToRun) > 0 && !l.IsMetaCronJob() && !l.HasLegacyIntegration()
 }
 
 func (l Line) IsAutoDiscoverCommand() bool {
 	matched, _ := regexp.MatchString(".+discover[[:space:]]+--auto.*", strings.ToLower(l.CommandToRun))
 	return matched
 }
+
 func (l Line) HasLegacyIntegration() bool {
 	return strings.Contains(l.CommandToRun, "cronitor.io") || strings.Contains(l.CommandToRun, "cronitor.link")
+}
+
+func (l Line) IsMetaCronJob() bool {
+	return strings.Contains(l.CommandToRun, "cron.hourly") || strings.Contains(l.CommandToRun, "cron.daily") || strings.Contains(l.CommandToRun, "cron.weekly") || strings.Contains(l.CommandToRun, "cron.monthly")
 }
 
 func (l Line) Write() string {

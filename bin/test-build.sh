@@ -453,6 +453,18 @@ if grep "slave_status.sh" $TMPFILE | grep -q "cronitor exec"
 fi
 rm -f $TMPFILE
 
+rm -f $LOGFILE
+
+TEST="Discover ignores meta crontab entries"
+TMPFILE="/tmp/crontab.txt"
+cp ../fixtures/metacrontab.txt $TMPFILE
+../cronitor $CRONITOR_ARGS discover --auto $TMPFILE -k 53b6c114717140cf896899060bcc9d7e --save > /dev/null
+if grep "cron.hourly" $TMPFILE | grep -q "cronitor exec"
+    then echo "${TEST}.. FAIL"
+    else echo "${TEST}.. OK"
+fi
+rm -f $TMPFILE
+
 TEST="Discover adds auto-discover"
 if ../cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e | grep "cronitor" | grep -q "discover"
     then echo "${TEST}.. OK"
