@@ -296,28 +296,61 @@ func truncateString(s string, length int) string {
 	return s[:length]
 }
 
-func printSuccessText(message string) {
-	if isAutoDiscover {
+func printSuccessText(message string, indent bool) {
+	if isAutoDiscover || isSilent {
 		log(message)
 	} else {
-		color.New(color.FgHiGreen).Println(message)
+		color := color.New(color.FgHiGreen)
+
+		if indent {
+			color.Println(fmt.Sprintf(" |--► %s", message))
+		} else {
+			color.Println(fmt.Sprintf("----► %s", message))
+		}
 	}
 }
 
-func printWarningText(message string) {
-	if isAutoDiscover {
+func printDoneText(message string, indent bool) {
+	if isAutoDiscover || isSilent {
 		log(message)
 	} else {
-		color.New(color.FgHiYellow).Println(message)
+		printSuccessText(message + " ✔", indent)
 	}
 }
 
-func printErrorText(message string) {
-	if isAutoDiscover {
+func printWarningText(message string, indent bool) {
+	if isAutoDiscover || isSilent {
 		log(message)
 	} else {
-		color.New(color.FgHiRed, color.Bold).Println(message)
+		color := color.New(color.FgHiYellow)
+
+		if indent {
+			color.Println(fmt.Sprintf(" |--► %s", message))
+		} else {
+			color.Println(fmt.Sprintf("----► %s", message))
+		}
 	}
+}
+
+func printErrorText(message string, indent bool) {
+	if isAutoDiscover || isSilent {
+		log(message)
+	} else {
+		red := color.New(color.FgHiRed)
+		if indent {
+			red.Println(fmt.Sprintf(" |--► %s", message))
+		} else {
+			red.Println(fmt.Sprintf("----► %s", message))
+		}
+	}
+}
+
+func printLn() {
+	if isAutoDiscover || isSilent {
+		return
+	}
+
+	fmt.Println()
 }
 
 func isPathToDirectory(path string) bool {

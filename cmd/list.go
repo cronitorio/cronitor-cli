@@ -51,7 +51,7 @@ Example:
 		}
 
 		if len(crontabs) == 0 {
-			printWarningText("No crontab files found")
+			printWarningText("No crontab files found", false)
 			return
 		}
 
@@ -77,7 +77,7 @@ Example:
 				commands = append(commands, line.CommandToRun)
 			}
 
-			printSuccessText(fmt.Sprintf("► Reading %s", crontab.DisplayName()))
+			printSuccessText(fmt.Sprintf("Checking %s", crontab.DisplayName()), false)
 			table.Render()
 			fmt.Println()
 		}

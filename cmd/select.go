@@ -50,7 +50,7 @@ Example:
 		}
 
 		if len(crontabs) == 0 {
-			printWarningText("No crontab files found")
+			printWarningText("No crontab files found", false)
 			return
 		}
 
@@ -84,7 +84,7 @@ Example:
 					monitorCode = monitorCodes[result]
 				}
 
-				printSuccessText("► Running command: " + result)
+				printSuccessText("Running command: " + result, false)
 				fmt.Println()
 
 				startTime := makeStamp()
@@ -93,14 +93,14 @@ Example:
 
 				if exitCode == 0 {
 					fmt.Println()
-					printSuccessText(fmt.Sprintf("✔ Command successful    Elapsed time %ss", duration))
+					printSuccessText(fmt.Sprintf("✔ Command successful    Elapsed time %ss", duration), false)
 				} else {
-					printErrorText(fmt.Sprintf("✗ Command failed    Elapsed time %ss    Exit code %d", duration, exitCode))
+					printErrorText(fmt.Sprintf("✗ Command failed    Elapsed time %ss    Exit code %d", duration, exitCode), false)
 				}
 
 				fmt.Println()
 			} else {
-				printSuccessText("✔ Done")
+				printDoneText("Done", false)
 			}
 		} else if err == promptui.ErrInterrupt {
 			fmt.Println("Exited by user signal")

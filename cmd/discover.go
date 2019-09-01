@@ -25,7 +25,7 @@ var isAutoDiscover bool
 var isSilent bool
 var noAutoDiscover bool
 var saveCrontabFile bool
-var hasUnsavedCrontab bool
+var dryRun bool
 var timezone lib.TimezoneLocationName
 var maxNameLen = 75
 var notificationList string
@@ -113,21 +113,17 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 			}
 		}
 
-		if !isAutoDiscover && hasUnsavedCrontab {
+		printDoneText("Discover complete", false)
+		if dryRun {
 			saveCommand := strings.Join(os.Args, " ")
-
-			label := "crontabs"
-			if importedCrontabs == 1 {
-				label = "crontab"
-			}
+			saveCommand = strings.Replace(saveCommand, " --dry-run", "", -1)
 
 			if importedCrontabs > 0 {
-				printSuccessText(fmt.Sprintf("► To save the updated %s, run:", label))
-				fmt.Println(fmt.Sprintf("%s --auto --save\n", saveCommand))
+				printWarningText("Reminder: This is a DRY-RUN. Integration is not complete.", true)
+				printWarningText("To complete integration, run:", true)
+				fmt.Println(fmt.Sprintf("     %s --auto\n", saveCommand))
 			}
 		}
-
-		printSuccessText("✔ Discover complete")
 	},
 }
 
@@ -141,65 +137,44 @@ func processDirectory(username, directory string) {
 			return
 		}
 
-		label := "crontabs"
+		label := "files"
 		if len(files) == 1 {
-			label = "crontab"
+			label = "file"
 		}
 
-		printSuccessText(fmt.Sprintf("\n► Found %d %s in directory %s", len(files), label, directory))
+		printSuccessText(fmt.Sprintf("Found %d crontab %s in directory %s", len(files), label, directory), false)
 
-		var result string
-		var err error = nil
-
-		if !isAutoDiscover {
-			prompt := promptui.Prompt{
-				Label:     fmt.Sprintf("Would you like to import cron jobs from %s", directory),
-				IsConfirm: true,
+		for _, crontabFile := range files {
+			if importedCrontabs > 0 {
+				printLn()
 			}
 
-			result, err = prompt.Run()
-
-			if err == promptui.ErrInterrupt {
-				printErrorText("Exited by user signal")
-				os.Exit(-1)
-			} else if err == promptui.ErrAbort {
-				printWarningText(fmt.Sprintf("✔ Skipping %s", directory))
-			} else if err != nil {
-				printErrorText("Error: " + err.Error() + "\n")
-			}
-		}
-
-		if isAutoDiscover || result == "y" {
-			for _, crontabFile := range files {
-				if importedCrontabs > 0 {
-					fmt.Println()
-				}
-
-				if processCrontab(lib.CrontabFactory(username, crontabFile)) {
-					importedCrontabs++
-				}
+			if processCrontab(lib.CrontabFactory(username, crontabFile)) {
+				importedCrontabs++
 			}
 		}
 	}
 }
 
 func processCrontab(crontab *lib.Crontab) bool {
+	defer printLn()
+	printSuccessText(fmt.Sprintf("Checking %s", crontab.DisplayName()), false)
 
 	if !crontab.Exists() {
+		printErrorText(fmt.Sprintf("This crontab does not exist. Skipping."), true)
 		return false
 	}
 
-	printSuccessText(fmt.Sprintf("► Reading %s", crontab.DisplayName()))
+	// This will mostly happen when the crontab is empty
+	if err, _ := crontab.Parse(noAutoDiscover); err != nil {
+		printWarningText(fmt.Sprintf("This crontab is empty. Skipping."), true)
+		log(fmt.Sprintf("Skipping %s: %s", crontab.DisplayName(), err.Error()))
+		return false
+	}
 
 	// Before going further, ensure we aren't going to run into permissions problems writing the crontab, when applicable
-	if saveCrontabFile && !crontab.IsWritable() {
-		printWarningText(fmt.Sprintf("► The --save option is supplied but the file at %s is not writeable. Skipping.", crontab.DisplayName()))
-		return false
-	}
-
-	if err, _ := crontab.Parse(noAutoDiscover); err != nil {
-		printWarningText(fmt.Sprintf("► Skipping: %s", err.Error()))
-		fmt.Println()
+	if !crontab.IsWritable() {
+		printErrorText(fmt.Sprintf("This crontab is not writeable. Re-run command with sudo. Skipping"), true)
 		return false
 	}
 
@@ -214,6 +189,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 	monitors := map[string]*lib.Monitor{}
 	allNameCandidates := map[string]bool{}
 
+	// This is done entirely so we can print a summary line of cron jobs found in this crontab
 	if !isAutoDiscover {
 		count := 0
 		for _, line := range crontab.Lines {
@@ -222,16 +198,11 @@ func processCrontab(crontab *lib.Crontab) bool {
 			}
 		}
 
-		if count == 0 {
-			printWarningText("► No cron jobs found. Skipping.")
-			return false // Sorry about returning in some random spot, this could use some refactoring
-		} else {
-			label := "jobs"
-			if count == 1 {
-				label = "job"
-			}
-			printSuccessText(fmt.Sprintf("► Found %d cron %s:", count, label))
+		label := "jobs"
+		if count == 1 {
+			label = "job"
 		}
+		printSuccessText(fmt.Sprintf("Found %d cron %s:", count, label), true)
 	}
 
 	for _, line := range crontab.Lines {
@@ -246,26 +217,28 @@ func processCrontab(crontab *lib.Crontab) bool {
 		name := defaultName
 
 		if !isAutoDiscover && !line.IsAutoDiscoverCommand() {
-			fmt.Println("\n" + line.FullLine)
+			fmt.Println(fmt.Sprintf("\n      %s  %s", line.CronExpression, line.CommandToRun))
 			for {
 				prompt := promptui.Prompt{
-					Label:     "Monitor name",
+					Label:     "Job name",
 					Default:   name,
 					Validate:  validateNameFormat,
 					AllowEdit: name != defaultName,
+					Templates: promptTemplates(),
 				}
 
 				if result, err := prompt.Run(); err == nil {
 					name = result
 					if err := validateNameUniqueness(result, key); err != nil {
-						fmt.Println("Sorry! You are already using this name. Choose a unique name.\n")
+						printErrorText("Sorry, you already have a monitor with this name. Enter a unique name", true)
+						printLn()
 						continue
 					}
 				} else if err == promptui.ErrInterrupt {
-					fmt.Println("Exited by user signal")
+					printErrorText("Aborted by ctrl-c", false)
 					os.Exit(-1)
 				} else {
-					fmt.Println("Error: " + err.Error() + "\n")
+					printErrorText("Error: " + err.Error() + "\n", false)
 				}
 
 				break
@@ -298,10 +271,8 @@ func processCrontab(crontab *lib.Crontab) bool {
 		monitors[key] = &line.Mon
 	}
 
-	if !isAutoDiscover {
-		fmt.Println()
-		printSuccessText("✔ Sending updated crontab to Cronitor:")
-	}
+	printLn()
+	printSuccessText("Sending to Cronitor", true)
 
 	// Put monitors to Cronitor API
 	var err error
@@ -313,61 +284,22 @@ func processCrontab(crontab *lib.Crontab) bool {
 	// Re-write crontab lines with new/updated monitoring
 	updatedCrontabLines := crontab.Write()
 
-	if !isSilent {
+	if !isSilent && isAutoDiscover {
 		// When running --auto mode, you should be able to pipe or redirect crontab output elsewhere. Skip status-related messages.
 		fmt.Println(strings.TrimSpace(updatedCrontabLines))
-
-		if !isAutoDiscover {
-			fmt.Println()
-			printSuccessText("✔ Import successful")
-		}
 	}
 
-	var saveThisCrontab = false
-	if saveCrontabFile {
-		saveThisCrontab = true
-	} else if !isAutoDiscover {
-		if crontab.IsWritable() {
-			fmt.Println()
-			prompt := promptui.Prompt{
-				Label:     fmt.Sprintf("Save updated crontab to finish integration"),
-				IsConfirm: true,
-			}
-
-			result, err := prompt.Run()
-
-			if err == promptui.ErrInterrupt {
-				printErrorText("Exited by user signal")
-				os.Exit(-1)
-			} else if err == promptui.ErrAbort {
-				printWarningText(fmt.Sprintf("► Saving skipped. Cronitor integration will not be complete until the updated crontab is saved"))
-			} else if err != nil {
-				printErrorText("Error: " + err.Error() + "\n")
-			} else {
-				saveThisCrontab = result == "y"
-			}
-		} else {
-			printWarningText(fmt.Sprintf("► Saving skipped. You do not have permission to update this crontab file."))
-		}
-	}
-
-	if saveThisCrontab {
+	if !dryRun {
 		if err := crontab.Save(updatedCrontabLines); err == nil {
 			if !isSilent {
-				printSuccessText("✔ Save successful")
+				printDoneText("Crontab integration complete", true)
 			}
 		} else {
 			if !isSilent {
-				printErrorText("Problem saving crontab: " + err.Error())
+				printErrorText("Problem saving crontab: " + err.Error(), true)
 			}
 			return false
 		}
-	} else {
-		hasUnsavedCrontab = true
-	}
-
-	if !isAutoDiscover {
-		fmt.Println()
 	}
 
 	return len(monitors) > 0
@@ -582,13 +514,30 @@ func validateNameFormat(candidateName string) error {
 	return nil
 }
 
+func promptTemplates() *promptui.PromptTemplates {
+	bold := promptui.Styler(promptui.FGBold)
+	faint := promptui.Styler(promptui.FGFaint)
+	return &promptui.PromptTemplates{
+		Prompt:  fmt.Sprintf("      %s {{ . | bold }}%s ", bold(promptui.IconInitial), bold(":")),
+		Valid:   fmt.Sprintf("      %s {{ . | bold }}%s ", bold(promptui.IconGood), bold(":")),
+		Invalid: fmt.Sprintf("      %s {{ . | bold }}%s ", bold(promptui.IconBad), bold(":")),
+		Success: fmt.Sprintf("      {{ . | faint }}%s ", faint(":")),
+		ValidationError:            `      {{ ">>" | red }} {{ . | red }}`,
+	}
+}
+
 func init() {
 	RootCmd.AddCommand(discoverCmd)
 	discoverCmd.Flags().BoolVar(&saveCrontabFile, "save", saveCrontabFile, "Save the updated crontab file")
+	discoverCmd.Flags().BoolVar(&dryRun, "dry-run", dryRun, "Import crontab into Cronitor without adding necessary integration")
 	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
 	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")
 
 	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Do not use an interactive shell. Write updated crontab to stdout.")
+
+	// Since 23.0 save is deprecated
+	discoverCmd.Flags().MarkDeprecated("save", "save will now happen automatically when the --dry-run flag is not used")
+	discoverCmd.Flags().MarkHidden("save")
 }
