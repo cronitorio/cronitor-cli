@@ -128,6 +128,31 @@ func (api CronitorApi) GetMonitors() ([]MonitorSummary, error) {
 	return monitors, nil
 }
 
+func (api CronitorApi) GetRawResponse(url string) ([]byte, error) {
+	client := &http.Client{}
+	request, err := http.NewRequest("GET", url, nil)
+	request.SetBasicAuth(viper.GetString(api.ApiKey), "")
+	request.Header.Add("Content-Type", "application/json")
+	request.Header.Add("User-Agent", api.UserAgent)
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+
+	if response.StatusCode != 200 {
+		return nil, errors.New(fmt.Sprintf("Unexpected %d API response", response.StatusCode))
+	}
+
+	defer response.Body.Close()
+	contents, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		raven.CaptureErrorAndWait(err, nil)
+		return nil, err
+	}
+
+	return contents, nil
+}
+
 func (api CronitorApi) Url() string {
 	if api.IsDev {
 		return "http://dev.cronitor.io/v3/monitors"

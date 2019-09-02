@@ -199,31 +199,6 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	}
 }
 
-func sendApiRequest(url string) ([]byte, error) {
-	client := &http.Client{}
-	request, err := http.NewRequest("GET", url, nil)
-	request.SetBasicAuth(viper.GetString(varApiKey), "")
-	request.Header.Add("Content-Type", "application/json")
-	request.Header.Add("User-Agent", userAgent)
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, err
-	}
-
-	if response.StatusCode != 200 {
-		return nil, errors.New(fmt.Sprintf("Unexpected %d API response", response.StatusCode))
-	}
-
-	defer response.Body.Close()
-	contents, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		raven.CaptureErrorAndWait(err, nil)
-		return nil, err
-	}
-
-	return contents, nil
-}
-
 func effectiveHostname() string {
 	if len(viper.GetString(varHostname)) > 0 {
 		return viper.GetString(varHostname)

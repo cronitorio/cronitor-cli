@@ -50,7 +50,8 @@ Examples:
 			url = url + "/" + args[0]
 		}
 
-		response, err := sendApiRequest(url)
+		// @todo refactor this to use GetMonitors
+		response, err := getCronitorApi().GetRawResponse(url)
 		if err != nil {
 			fatal(fmt.Sprintf("Request to %s failed: %s", url, err), 1)
 		}

@@ -50,7 +50,7 @@ Examples:
 
 	Run: func(cmd *cobra.Command, args []string) {
 		url := createActivityApiUrl(args[0])
-		response, err := sendApiRequest(url)
+		response, err := getCronitorApi().GetRawResponse(url)
 		if err != nil {
 			fatal(fmt.Sprintf("Request to %s failed: %s", url, err), 1)
 		}
