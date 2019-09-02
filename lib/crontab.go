@@ -136,7 +136,7 @@ func (c Crontab) Write() string {
 
 func (c Crontab) Save(crontabLines string) error {
 	if crontabLines == "" {
-		return errors.New("the --save option is supplied but updated crontab file is empty")
+		return errors.New("cannot save crontab, file is empty")
 	}
 
 	if c.IsUserCrontab {
@@ -145,14 +145,14 @@ func (c Crontab) Save(crontabLines string) error {
 		// crontab will use whatever $EDITOR is set. Temporarily just cat it out.
 		cmd.Env = []string{"EDITOR=/bin/cat"}
 		cmdStdin, _ := cmd.StdinPipe()
-		cmdStdin.Write([]byte(crontabLines))
+		cmdStdin.Write([]byte(crontabLines + "\n"))
 		cmdStdin.Close()
-		if _, err := cmd.Output(); err != nil {
-			return errors.New("The --save option is supplied but crontab update failed: " + err.Error())
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return errors.New("cannot write user crontab: " + err.Error() + " " + string(output))
 		}
 	} else {
 		if ioutil.WriteFile(c.Filename, []byte(crontabLines), 0644) != nil {
-			return errors.New(fmt.Sprintf("The --save option is supplied but the file at %s could not be written; check permissions and try again", c.Filename))
+			return errors.New(fmt.Sprintf("cannot write crontab at %s; check permissions and try again", c.Filename))
 		}
 	}
 

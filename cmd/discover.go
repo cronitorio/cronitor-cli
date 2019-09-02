@@ -21,14 +21,28 @@ type ExistingMonitors struct {
 
 func (em ExistingMonitors) HasMonitorByName(name string) bool {
 	for _, value := range em.Monitors {
-		if value.Key == em.CurrentKey {
-			continue
+		if em.CurrentCode != "" {
+			if value.Code == em.CurrentCode {
+				continue
+			}
+		} else {
+			if value.Key == em.CurrentKey {
+				continue
+			}
 		}
 
       	if value.Name == name {
       	    return true
       	}
   }
+
+  // We also need to check if the name has been used in this session but not yet persisted
+  for _, value := range em.Names {
+  		if value == name {
+  			return true
+		}
+  }
+
   return false
 }
 
@@ -170,7 +184,7 @@ func processDirectory(username, directory string) {
 	if len(files) > 0 {
 		testCrontab := lib.CrontabFactory(username, files[0])
 		if !testCrontab.IsWritable() {
-			printErrorText(fmt.Sprintf("Directory %s is not writable. Re-run command with sudo. Skipping.", directory), false)
+			printWarningText(fmt.Sprintf("Directory %s is not writable. Re-run command with sudo. Skipping", directory), false)
 			return
 		}
 
@@ -204,7 +218,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 
 	// Before going further, ensure we aren't going to run into permissions problems writing the crontab later
 	if !crontab.IsWritable() {
-		printErrorText(fmt.Sprintf("This crontab is not writeable. Re-run command with sudo. Skipping"), true)
+		printWarningText(fmt.Sprintf("This crontab is not writeable. Re-run command with sudo. Skipping"), true)
 		return false
 	}
 
