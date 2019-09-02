@@ -119,7 +119,7 @@ to Cronitor."
 
 		// Fetch list of existing monitor names for easy unique name validation and prompt prefill later on
 		existingMonitors.Monitors, _ = getCronitorApi().GetMonitors()
-		
+
 		if len(args) > 0 {
 			// A supplied argument can be a specific file or a directory
 			if isPathToDirectory(args[0]) {
@@ -148,7 +148,7 @@ to Cronitor."
 			if importedCrontabs > 0 {
 				printWarningText("Reminder: This is a DRY-RUN. Integration is not complete.", true)
 				printWarningText("To complete integration, run:", true)
-				fmt.Println(fmt.Sprintf("     %s --auto\n", saveCommand))
+				fmt.Println(fmt.Sprintf("      %s --auto --silent\n", saveCommand))
 			}
 		}
 	},
@@ -458,6 +458,9 @@ func init() {
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")
 	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Do not use an interactive shell. Write updated crontab to stdout.")
+
+	discoverCmd.Flags().BoolVar(&isSilent, "silent", isSilent, "")
+	discoverCmd.Flags().MarkHidden("silent")
 
 	// Since 23.0 save is deprecated
 	discoverCmd.Flags().MarkDeprecated("save", "save will now happen automatically when the --dry-run flag is not used")
