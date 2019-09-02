@@ -2,22 +2,47 @@ package cmd
 
 import (
 	"fmt"
-	"encoding/json"
-	"io/ioutil"
 	"strings"
 	"github.com/spf13/cobra"
 	"errors"
-	"net/http"
 	"os"
 	"github.com/spf13/viper"
-	"time"
-	"bytes"
 	"github.com/manifoldco/promptui"
-	"github.com/getsentry/raven-go"
-	"net/url"
 	"os/user"
 	"cronitor/lib"
 )
+
+type ExistingMonitors struct {
+	Monitors []lib.MonitorSummary
+	Names []string
+	CurrentKey string
+}
+
+func (em ExistingMonitors) HasMonitorByName(name string) bool {
+	for _, value := range em.Monitors {
+		if value.Key == em.CurrentKey {
+			continue
+		}
+
+      	if value.Name == name {
+      	    return true
+      	}
+  }
+  return false
+}
+
+func (em ExistingMonitors) GetNameForCurrentKey() (string, error) {
+	for _, value := range em.Monitors {
+		if value.Key == em.CurrentKey {
+			return value.Name, nil
+		}
+  }
+  return "", errors.New("does not exist")
+}
+
+func (em ExistingMonitors) AddName(name string)  {
+	em.Names = append(em.Names, name)
+}
 
 var importedCrontabs = 0
 var excludeFromName []string
@@ -29,6 +54,7 @@ var dryRun bool
 var timezone lib.TimezoneLocationName
 var maxNameLen = 75
 var notificationList string
+var existingMonitors = ExistingMonitors{}
 
 var discoverCmd = &cobra.Command{
 	Use:   "discover <optional path>",
@@ -42,7 +68,7 @@ Example:
   $ cronitor discover
       > Read user crontab and step through line by line
       > Creates monitors on your Cronitor dashboard for each entry in the crontab. The command string will be used as the monitor name.
-      > Makes no changes to your crontab, add a --save param or use "cronitor discover --auto --save" later when you are ready to apply changes.
+      > Adds Cronitor integration to your crontab
 
   $ cronitor discover /path/to/crontab
       > Instead of the user crontab, provide a crontab file (or directory of crontabs) to use
@@ -59,14 +85,14 @@ Example using exclusion text to remove secrets or boilerplate:
 
   You can run the command as many times as you need, accumulating exclusion params until the job names on your Cronitor dashboard are clear and readable.
 
-Example where your crontab is updated in place:
-  $ cronitor discover /path/to/crontab --save
+Example where you perform a dry-run without any crontab modifications:
+  $ cronitor discover /path/to/crontab --dry-run
       > Steps line by line, creates or updates monitors
-      > Adds Cronitor integration to your crontab and saves the file in place.
+      > Checks permissions to ensure integration can be applied later
 
 
-In all of these examples, auto discover is enabled by adding 'cronitor discover --auto' to your crontab as an hourly task. Auto discover will push schedule changes
-to Cronitor and alert if you if new jobs are added to your crontab without monitoring."
+In all of these examples, auto discover is enabled by adding 'cronitor discover --auto' to your crontab as an hourly task. Auto discover will send job schedule changes
+to Cronitor."
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
 
@@ -89,12 +115,16 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 			username = u.Username
 		}
 
+		printSuccessText("Scanning for cron jobs...", false)
+
+		// Fetch list of existing monitor names for easy unique name validation and prompt prefill later on
+		existingMonitors.Monitors, _ = getCronitorApi().GetMonitors()
+		
 		if len(args) > 0 {
 			// A supplied argument can be a specific file or a directory
 			if isPathToDirectory(args[0]) {
 				processDirectory(username, args[0])
 			} else {
-
 				processCrontab(lib.CrontabFactory(username, args[0]))
 			}
 		} else {
@@ -107,10 +137,7 @@ to Cronitor and alert if you if new jobs are added to your crontab without monit
 				importedCrontabs++
 			}
 
-			// Only iterate through the drop-in directory when running in interactive mode
-			if !isAutoDiscover {
-				processDirectory(username, lib.DROP_IN_DIRECTORY)
-			}
+			processDirectory(username, lib.DROP_IN_DIRECTORY)
 		}
 
 		printDoneText("Discover complete", false)
@@ -134,15 +161,9 @@ func processDirectory(username, directory string) {
 	if len(files) > 0 {
 		testCrontab := lib.CrontabFactory(username, files[0])
 		if !testCrontab.IsWritable() {
+			printErrorText(fmt.Sprintf("Directory %s is not writable. Re-run command with sudo. Skipping.", directory), false)
 			return
 		}
-
-		label := "files"
-		if len(files) == 1 {
-			label = "file"
-		}
-
-		printSuccessText(fmt.Sprintf("Found %d crontab %s in directory %s", len(files), label, directory), false)
 
 		for _, crontabFile := range files {
 			if importedCrontabs > 0 {
@@ -161,13 +182,13 @@ func processCrontab(crontab *lib.Crontab) bool {
 	printSuccessText(fmt.Sprintf("Checking %s", crontab.DisplayName()), false)
 
 	if !crontab.Exists() {
-		printErrorText(fmt.Sprintf("This crontab does not exist. Skipping."), true)
+		printErrorText("This crontab does not exist. Skipping.", true)
 		return false
 	}
 
 	// This will mostly happen when the crontab is empty
 	if err, _ := crontab.Parse(noAutoDiscover); err != nil {
-		printWarningText(fmt.Sprintf("This crontab is empty. Skipping."), true)
+		printWarningText("This crontab is empty. Skipping.", true)
 		log(fmt.Sprintf("Skipping %s: %s", crontab.DisplayName(), err.Error()))
 		return false
 	}
@@ -212,28 +233,29 @@ func processCrontab(crontab *lib.Crontab) bool {
 
 		rules := []lib.Rule{createRule(line.CronExpression)}
 		defaultName := createDefaultName(line, crontab, effectiveHostname(), excludeFromName, allNameCandidates)
-		key := line.Key(crontab.CanonicalName())
 		tags := createTags()
+		key := line.Key(crontab.CanonicalName())
+		existingMonitors.CurrentKey = key
+
+		// If we know this monitor exists already, return the name
 		name := defaultName
+		if existingName, err := existingMonitors.GetNameForCurrentKey(); err == nil {
+			name = existingName
+		}
 
 		if !isAutoDiscover && !line.IsAutoDiscoverCommand() {
-			fmt.Println(fmt.Sprintf("\n      %s  %s", line.CronExpression, line.CommandToRun))
+			fmt.Println(fmt.Sprintf("\n    %s  %s", line.CronExpression, line.CommandToRun))
 			for {
 				prompt := promptui.Prompt{
 					Label:     "Job name",
 					Default:   name,
-					Validate:  validateNameFormat,
+					Validate:  validateName,
 					AllowEdit: name != defaultName,
 					Templates: promptTemplates(),
 				}
 
 				if result, err := prompt.Run(); err == nil {
 					name = result
-					if err := validateNameUniqueness(result, key); err != nil {
-						printErrorText("Sorry, you already have a monitor with this name. Enter a unique name", true)
-						printLn()
-						continue
-					}
 				} else if err == promptui.ErrInterrupt {
 					printErrorText("Aborted by ctrl-c", false)
 					os.Exit(-1)
@@ -244,6 +266,8 @@ func processCrontab(crontab *lib.Crontab) bool {
 				break
 			}
 		}
+
+		existingMonitors.AddName(name)
 
 		if name == defaultName {
 			name = ""
@@ -272,11 +296,10 @@ func processCrontab(crontab *lib.Crontab) bool {
 	}
 
 	printLn()
-	printSuccessText("Sending to Cronitor", true)
+	printDoneText("Sending to Cronitor", true)
 
-	// Put monitors to Cronitor API
 	var err error
-	monitors, err = putMonitors(monitors)
+	monitors, err = getCronitorApi().PutMonitors(monitors)
 	if err != nil {
 		fatal(err.Error(), 1)
 	}
@@ -292,7 +315,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 	if !dryRun {
 		if err := crontab.Save(updatedCrontabLines); err == nil {
 			if !isSilent {
-				printDoneText("Crontab integration complete", true)
+				printDoneText("Integration complete", true)
 			}
 		} else {
 			if !isSilent {
@@ -303,52 +326,6 @@ func processCrontab(crontab *lib.Crontab) bool {
 	}
 
 	return len(monitors) > 0
-}
-
-func putMonitors(monitors map[string]*lib.Monitor) (map[string]*lib.Monitor, error) {
-	url := apiUrl()
-	if isAutoDiscover {
-		url = url + "?auto-discover=1"
-	}
-
-	monitorsArray := make([]lib.Monitor, 0, len(monitors))
-	for _, v := range monitors {
-		monitorsArray = append(monitorsArray, *v)
-	}
-
-	jsonBytes, _ := json.Marshal(monitorsArray)
-	jsonString := string(jsonBytes)
-
-	buf := new(bytes.Buffer)
-	json.Indent(buf, jsonBytes, "", "  ")
-	log("\nRequest:")
-	log(buf.String() + "\n")
-
-	response, err := sendHttpPut(url, jsonString)
-	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Request to %s failed: %s", url, err))
-	}
-
-	buf.Truncate(0)
-	json.Indent(buf, response, "", "  ")
-	log("\nResponse:")
-	log(buf.String() + "\n")
-
-	responseMonitors := []lib.Monitor{}
-	if err = json.Unmarshal(response, &responseMonitors); err != nil {
-		return nil, errors.New(fmt.Sprintf("Error from %s: %s", url, response))
-	}
-
-	for _, value := range responseMonitors {
-		// We only need to update the Monitor struct with a code if this is a new monitor.
-		// For updates the monitor code is sent as well as the key and that takes precedence.
-		if _, ok := monitors[value.Key]; ok {
-			monitors[value.Key].Code = value.Code
-		}
-
-	}
-
-	return monitors, nil
 }
 
 func createNote(line *lib.Line, crontab *lib.Crontab) string {
@@ -443,72 +420,18 @@ func createRule(cronExpression string) lib.Rule {
 	return lib.Rule{"not_on_schedule", cronExpression, "", 0}
 }
 
-func sendHttpPut(url string, body string) ([]byte, error) {
-	client := &http.Client{
-		Timeout: 120 * time.Second,
-	}
-	request, err := http.NewRequest("PUT", url, strings.NewReader(body))
-	request.SetBasicAuth(viper.GetString(varApiKey), "")
-	request.Header.Add("Content-Type", "application/json")
-	request.Header.Add("User-Agent", userAgent)
-	request.ContentLength = int64(len(body))
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, err
-	}
-
-	defer response.Body.Close()
-	contents, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		raven.CaptureErrorAndWait(err, nil)
-		return nil, err
-	}
-
-	return contents, nil
-}
-
-func validateNameUniqueness(candidateName string, key string) error {
-	client := &http.Client{
-		Timeout: 3 * time.Second,
-	}
-	url := fmt.Sprintf("%s/%s", apiUrl(), url.QueryEscape(candidateName))
-	request, err := http.NewRequest("GET", url, strings.NewReader(""))
-	request.SetBasicAuth(viper.GetString(varApiKey), "")
-	request.Header.Add("Content-Type", "application/json")
-	request.Header.Add("User-Agent", userAgent)
-	request.ContentLength = 0
-	response, err := client.Do(request)
-
-	if err != nil || response.StatusCode == http.StatusNotFound {
-		return nil
-	}
-
-	defer response.Body.Close()
-
-	contents, err := ioutil.ReadAll(response.Body)
-
-	responseMonitor := struct{ Key string }{}
-	if err = json.Unmarshal(contents, &responseMonitor); err != nil {
-		log("Could not verify uniqueness: " + err.Error())
-		log(string(contents))
-		return nil
-	}
-
-	if responseMonitor.Key == key {
-		return nil
-	}
-
-	return errors.New("name already exists")
-}
-
-func validateNameFormat(candidateName string) error {
+func validateName(candidateName string) error {
 	candidateName = strings.TrimSpace(candidateName)
 	if candidateName == "" {
 		return errors.New("A unique name is required")
 	}
 
+	if existingMonitors.HasMonitorByName(candidateName) {
+		return errors.New("Sorry, you already have a monitor with this name. A unique name is required")
+	}
+
 	if inputLen := len(candidateName); inputLen > maxNameLen {
-		return errors.New(fmt.Sprintf("Name is too long: %d of %d chars", inputLen, maxNameLen))
+		return errors.New(fmt.Sprintf("Sorry, name is too long: %d of maximum %d chars", inputLen, maxNameLen))
 	}
 
 	return nil
@@ -518,23 +441,22 @@ func promptTemplates() *promptui.PromptTemplates {
 	bold := promptui.Styler(promptui.FGBold)
 	faint := promptui.Styler(promptui.FGFaint)
 	return &promptui.PromptTemplates{
-		Prompt:  fmt.Sprintf("      %s {{ . | bold }}%s ", bold(promptui.IconInitial), bold(":")),
-		Valid:   fmt.Sprintf("      %s {{ . | bold }}%s ", bold(promptui.IconGood), bold(":")),
-		Invalid: fmt.Sprintf("      %s {{ . | bold }}%s ", bold(promptui.IconBad), bold(":")),
-		Success: fmt.Sprintf("      {{ . | faint }}%s ", faint(":")),
-		ValidationError:            `      {{ ">>" | red }} {{ . | red }}`,
+		Prompt:  fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconInitial), bold(":")),
+		Valid:   fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconGood), bold(":")),
+		Invalid: fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconBad), bold(":")),
+		Success: fmt.Sprintf("    {{ . | faint }}%s ", faint(":")),
+		ValidationError:            `    {{ ">>" | red }} {{ . | red }}`,
 	}
 }
 
 func init() {
 	RootCmd.AddCommand(discoverCmd)
 	discoverCmd.Flags().BoolVar(&saveCrontabFile, "save", saveCrontabFile, "Save the updated crontab file")
-	discoverCmd.Flags().BoolVar(&dryRun, "dry-run", dryRun, "Import crontab into Cronitor without adding necessary integration")
-	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
+	discoverCmd.Flags().BoolVar(&dryRun, "dry-run", dryRun, "Import crontab into Cronitor without applying necessary integration")
+	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from auto-generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
 	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")
-
 	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Do not use an interactive shell. Write updated crontab to stdout.")
 
 	// Since 23.0 save is deprecated

@@ -23,7 +23,7 @@ import (
 
 )
 
-var Version string = "22.9"
+var Version string = "23.0"
 
 var cfgFile string
 var userAgent string
@@ -272,14 +272,6 @@ func effectiveTimezoneLocationName() lib.TimezoneLocationName {
 	return lib.TimezoneLocationName{""}
 }
 
-func apiUrl() string {
-	if dev {
-		return "http://dev.cronitor.io/v3/monitors"
-	} else {
-		return "https://cronitor.io/v3/monitors"
-	}
-}
-
 func defaultConfigFileDirectory() string {
 	if runtime.GOOS == "windows" {
 		return fmt.Sprintf("%s\\ProgramData\\Cronitor", os.Getenv("SYSTEMDRIVE"))
@@ -397,4 +389,14 @@ func formatStamp(timestamp float64) string {
 
 func shortDescription(version string) string {
 	return  fmt.Sprintf("CronitorCLI version %s", version)
+}
+
+func getCronitorApi() *lib.CronitorApi {
+	return &lib.CronitorApi{
+		IsDev: dev,
+		IsAutoDiscover: isAutoDiscover,
+		ApiKey: varApiKey,
+		UserAgent: userAgent,
+		Logger: log,
+	}
 }

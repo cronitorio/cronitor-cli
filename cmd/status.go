@@ -45,7 +45,7 @@ Examples:
 	},
 
 	Run: func(cmd *cobra.Command, args []string) {
-		url := apiUrl()
+		url := getCronitorApi().Url()
 		if len(args) > 0 {
 			url = url + "/" + args[0]
 		}

@@ -83,7 +83,7 @@ func createActivityApiUrl(uniqueIdentifier string) string {
 		beforeFilter = fmt.Sprintf("?before=%s", before)
 	}
 
-	return fmt.Sprintf("%s/%s/%s%s", apiUrl(), uniqueIdentifier, endpoint, beforeFilter)
+	return fmt.Sprintf("%s/%s/%s%s", getCronitorApi().Url(), uniqueIdentifier, endpoint, beforeFilter)
 }
 
 func isValidOnlyFilter() bool {
