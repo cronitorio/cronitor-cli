@@ -446,7 +446,7 @@ rm -f $LOGFILE
 TEST="Discover rewrites crontab in place"
 TMPFILE="/tmp/crontab.txt"
 cp ../fixtures/crontab.txt $TMPFILE
-../cronitor $CRONITOR_ARGS discover --auto $TMPFILE -k 53b6c114717140cf896899060bcc9d7e --save > /dev/null
+../cronitor $CRONITOR_ARGS discover --auto $TMPFILE -k 53b6c114717140cf896899060bcc9d7e > /dev/null
 if grep "slave_status.sh" $TMPFILE | grep -q "cronitor exec"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
@@ -458,7 +458,7 @@ rm -f $LOGFILE
 TEST="Discover ignores meta crontab entries"
 TMPFILE="/tmp/crontab.txt"
 cp ../fixtures/metacrontab.txt $TMPFILE
-../cronitor $CRONITOR_ARGS discover --auto $TMPFILE -k 53b6c114717140cf896899060bcc9d7e --save > /dev/null
+../cronitor $CRONITOR_ARGS discover --auto $TMPFILE -k 53b6c114717140cf896899060bcc9d7e > /dev/null
 if grep "cron.hourly" $TMPFILE | grep -q "cronitor exec"
     then echo "${TEST}.. FAIL"
     else echo "${TEST}.. OK"
@@ -478,19 +478,19 @@ if ../cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c11
 fi
 
 TEST="Discover adds no-stdout flag when supplied"
-if ../cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e --no-stdout | grep "cronitor exec" | grep -q "no-stdout"
+if ../cronitor $CRONITOR_ARGS discover --auto -v ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e --no-stdout | grep "cronitor exec" | grep -q "no-stdout"
     then echo "${TEST}.. FAIL"  # Note reversed order here...
     else echo "${TEST}.. OK"
 fi
 
 TEST="Discover omits 'notifications' if notification-list not specificed"
-if ../cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e | grep -q "notifications"
+if ../cronitor $CRONITOR_ARGS discover --auto -v ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e | grep -q "notifications"
     then echo "${TEST}.. FAIL"  # Note reversed order here...
     else echo "${TEST}.. OK"
 fi
 
 TEST="Discover includes custom notification-list"
-if ../cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e --notification-list test-list-name | grep -q "test-list-name"
+if ../cronitor $CRONITOR_ARGS discover --auto -v ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e --notification-list test-list-name | grep -q "test-list-name"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi

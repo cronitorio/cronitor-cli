@@ -16,6 +16,7 @@ type ExistingMonitors struct {
 	Monitors []lib.MonitorSummary
 	Names []string
 	CurrentKey string
+	CurrentCode string
 }
 
 func (em ExistingMonitors) HasMonitorByName(name string) bool {
@@ -31,10 +32,16 @@ func (em ExistingMonitors) HasMonitorByName(name string) bool {
   return false
 }
 
-func (em ExistingMonitors) GetNameForCurrentKey() (string, error) {
+func (em ExistingMonitors) GetNameForCurrent() (string, error) {
 	for _, value := range em.Monitors {
-		if value.Key == em.CurrentKey {
-			return value.Name, nil
+		if em.CurrentCode != "" {
+			if value.Code == em.CurrentCode {
+				return value.Name, nil
+			}
+		} else {
+			if value.Key == em.CurrentKey {
+				return value.Name, nil
+			}
 		}
   }
   return "", errors.New("does not exist")
@@ -74,10 +81,10 @@ Example:
       > Instead of the user crontab, provide a crontab file (or directory of crontabs) to use
 
 Example that does not use an interactive shell:
-  $ cronitor discover --auto"
-      > The only output to stdout will be your crontab file with monitoring, suitable for piplines or writing to another crontab.
+  $ cronitor discover --auto
+      > The only output to stdout will be your updated crontab file, suitable for piplines or writing to another crontab.
 
-Example using exclusion text to remove secrets or boilerplate:
+Example excluding secrets or common text from monitor names:
   $ cronitor discover /path/to/crontab -e "secret-token" -e "/var/common/app/path/"
       > Updates previously discovered monitors or creates new monitors, excluding the provided snippets from the monitor name.
       > Adds Cronitor integration to your crontab and outputs to stdout
@@ -125,7 +132,9 @@ to Cronitor."
 			if isPathToDirectory(args[0]) {
 				processDirectory(username, args[0])
 			} else {
-				processCrontab(lib.CrontabFactory(username, args[0]))
+				if processCrontab(lib.CrontabFactory(username, args[0])) {
+					importedCrontabs++
+				}
 			}
 		} else {
 			// Without a supplied argument look at the user crontab, the system crontab and the system drop-in directory
@@ -193,7 +202,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 		return false
 	}
 
-	// Before going further, ensure we aren't going to run into permissions problems writing the crontab, when applicable
+	// Before going further, ensure we aren't going to run into permissions problems writing the crontab later
 	if !crontab.IsWritable() {
 		printErrorText(fmt.Sprintf("This crontab is not writeable. Re-run command with sudo. Skipping"), true)
 		return false
@@ -206,11 +215,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 		timezone = effectiveTimezoneLocationName()
 	}
 
-	// Read crontabLines into map of Monitor structs
-	monitors := map[string]*lib.Monitor{}
-	allNameCandidates := map[string]bool{}
-
-	// This is done entirely so we can print a summary line of cron jobs found in this crontab
+	// This is done entirely so we can print a summary line with a count of cron jobs found in this crontab
 	if !isAutoDiscover {
 		count := 0
 		for _, line := range crontab.Lines {
@@ -226,6 +231,10 @@ func processCrontab(crontab *lib.Crontab) bool {
 		printSuccessText(fmt.Sprintf("Found %d cron %s:", count, label), true)
 	}
 
+	// Read crontab into map of Monitor structs
+	monitors := map[string]*lib.Monitor{}
+	allNameCandidates := map[string]bool{}
+
 	for _, line := range crontab.Lines {
 		if !line.IsMonitorable() {
 			continue
@@ -235,11 +244,12 @@ func processCrontab(crontab *lib.Crontab) bool {
 		defaultName := createDefaultName(line, crontab, effectiveHostname(), excludeFromName, allNameCandidates)
 		tags := createTags()
 		key := line.Key(crontab.CanonicalName())
-		existingMonitors.CurrentKey = key
+		name := defaultName
 
 		// If we know this monitor exists already, return the name
-		name := defaultName
-		if existingName, err := existingMonitors.GetNameForCurrentKey(); err == nil {
+		existingMonitors.CurrentKey = key
+		existingMonitors.CurrentCode = line.Code
+		if existingName, err := existingMonitors.GetNameForCurrent(); err == nil {
 			name = existingName
 		}
 
