@@ -382,6 +382,11 @@ func EnumerateCrontabFiles(dirToEnumerate string) []string {
 	}
 
 	for _, f := range files {
+		firstChar := string([]rune(f.Name())[0])
+		if firstChar == "." {
+			continue
+		}
+
 		fileList = append(fileList, filepath.Join(dirToEnumerate, f.Name()))
 	}
 
