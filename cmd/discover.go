@@ -158,8 +158,10 @@ to Cronitor."
 				importedCrontabs++
 			}
 
-			if processCrontab(lib.CrontabFactory(username, lib.SYSTEM_CRONTAB)) {
-				importedCrontabs++
+			if systemCrontab := lib.CrontabFactory(username, lib.SYSTEM_CRONTAB) ; systemCrontab.Exists() {
+				if processCrontab(systemCrontab) {
+					importedCrontabs++
+				}
 			}
 
 			processDirectory(username, lib.DROP_IN_DIRECTORY)
@@ -207,7 +209,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 	printSuccessText(fmt.Sprintf("Checking %s", crontab.DisplayName()), false)
 
 	if !crontab.Exists() {
-		printErrorText("This crontab does not exist. Skipping.", true)
+		printWarningText("This crontab does not exist. Skipping.", true)
 		return false
 	}
 
