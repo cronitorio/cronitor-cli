@@ -69,13 +69,15 @@ var importedCrontabs = 0
 var excludeFromName []string
 var isAutoDiscover bool
 var isSilent bool
-var noAutoDiscover bool
 var saveCrontabFile bool
 var dryRun bool
 var timezone lib.TimezoneLocationName
 var maxNameLen = 75
 var notificationList string
 var existingMonitors = ExistingMonitors{}
+
+// To deprecate this feature we are hijacking this flag that will trigger removal of auto-discover lines from existing user's crontabs.
+var noAutoDiscover = true
 
 var discoverCmd = &cobra.Command{
 	Use:   "discover <optional path>",
@@ -489,4 +491,9 @@ func init() {
 	// Since 23.0 save is deprecated
 	discoverCmd.Flags().MarkDeprecated("save", "save will now happen automatically when the --dry-run flag is not used")
 	discoverCmd.Flags().MarkHidden("save")
+
+	// Since 24.0 no auto discover is deprecated
+	discoverCmd.Flags().MarkDeprecated("no-auto-discover", "the auto-discover feature has been removed")
+	discoverCmd.Flags().MarkHidden("no-auto-discover")
+
 }
