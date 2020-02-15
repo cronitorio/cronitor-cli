@@ -218,6 +218,14 @@ if grep -q "arg with space" $LOGFILE
     else echo "${TEST}.. FAIL"
 fi
 
+rm -f $LOGFILE
+TEST="Exec runs command with really complex args"
+../cronitor $CRONITOR_ARGS --log $LOGFILE exec d3x0c1 "cd /tmp && pwd"
+if grep -q "/tmp" $LOGFILE
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
 
 rm -f $LOGFILE
 TEST="Exec sends complete ping on success"
