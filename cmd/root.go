@@ -23,7 +23,7 @@ import (
 
 )
 
-var Version string = "23.0"
+var Version string = "24.0"
 
 var cfgFile string
 var userAgent string
