@@ -1,18 +1,18 @@
 package lib
 
 import (
-	"strings"
-	"runtime"
-	"os/exec"
-	"os"
+	"crypto/sha1"
+	"errors"
 	"fmt"
 	"io/ioutil"
+	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
-	"errors"
-	"crypto/sha1"
+	"strings"
 )
 
 const DROP_IN_DIRECTORY = "/etc/cron.d"
@@ -285,6 +285,10 @@ func (l Line) IsMetaCronJob() bool {
 	return strings.Contains(l.CommandToRun, "cron.hourly") || strings.Contains(l.CommandToRun, "cron.daily") || strings.Contains(l.CommandToRun, "cron.weekly") || strings.Contains(l.CommandToRun, "cron.monthly")
 }
 
+func (l Line) CommandIsComplex() bool {
+	return strings.Contains(l.CommandToRun, ";") || strings.Contains(l.CommandToRun, "|") || strings.Contains(l.CommandToRun, "&&") || strings.Contains(l.CommandToRun, "||")
+}
+
 func (l Line) Write() string {
 	if !l.IsMonitorable() || len(l.Code) > 0 {
 		// If a cronitor integration already existed on the line we have nothing else here to change
@@ -305,7 +309,11 @@ func (l Line) Write() string {
 	}
 
 	if len(l.CommandToRun) > 0 {
-		lineParts = append(lineParts, l.CommandToRun)
+		if l.CommandIsComplex() {
+			lineParts = append(lineParts, "\"" + strings.Replace(l.CommandToRun, "\"", "\\\"", -1) + "\"")
+		} else {
+			lineParts = append(lineParts, l.CommandToRun)
+		}
 	}
 
 	return strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)

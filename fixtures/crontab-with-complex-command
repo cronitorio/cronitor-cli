@@ -1,0 +1,5 @@
+* * * * * cd /tmp ; pwd
+* * * * * cd /tmp && echo "foo bar"
+* * * * * cd /tmp && pwd
+* * * * * true || pwd
+* * * * * pwd | xargs echo
