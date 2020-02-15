@@ -55,7 +55,6 @@ Example with no command output send to Cronitor:
 					monitorCode = arg
 					foundCode = true
 				}
-
 				continue
 			}
 
@@ -80,7 +79,12 @@ Example with no command output send to Cronitor:
 	},
 
 	Run: func(cmd *cobra.Command, args []string) {
-		subcommand := shellquote.Join(commandParts...)
+		var subcommand string
+		if len(commandParts) == 1 {
+			subcommand = commandParts[0]
+		} else {
+			subcommand = shellquote.Join(commandParts...)
+		}
 		os.Exit(RunCommand(subcommand, true, true))
 	},
 }
