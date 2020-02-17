@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"bufio"
 	"io"
+	"time"
 )
 
 
@@ -132,6 +133,10 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 	waitCh := make(chan error, 1)
 	go func() {
 		defer close(waitCh)
+
+		// Brief pause to allow gochannel selects
+		time.Sleep(20 * time.Millisecond)
+
 		if err := execCmd.Start(); err != nil {
 		    waitCh <- err
 		} else {
@@ -172,6 +177,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 				// This works on both Unix and Windows (syscall.WaitStatus is cross platform).
 				// Cribbed from aws-vault.
 				if exiterr, ok := err.(*exec.ExitError); ok {
+
 					if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
 						exitCode = status.ExitStatus()
 					} else {
