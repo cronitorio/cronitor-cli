@@ -8,11 +8,10 @@ cd ../
 go build && echo "Build created.. OK"
 cd - > /dev/null
 
+./test-activity.sh
 ./test-configure.sh
 ./test-discover.sh
 ./test-exec.sh
 ./test-list.sh
 ./test-ping.sh
-./test-select.sh
-./test-shell.sh
 ./test-status.sh
