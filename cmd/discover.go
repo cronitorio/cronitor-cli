@@ -1,21 +1,22 @@
 package cmd
 
 import (
-	"fmt"
-	"strings"
-	"github.com/spf13/cobra"
-	"errors"
-	"os"
-	"github.com/spf13/viper"
-	"github.com/manifoldco/promptui"
-	"os/user"
 	"cronitor/lib"
+	"errors"
+	"fmt"
+	"os"
+	"os/user"
+	"strings"
+
+	"github.com/manifoldco/promptui"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 type ExistingMonitors struct {
-	Monitors []lib.MonitorSummary
-	Names []string
-	CurrentKey string
+	Monitors    []lib.MonitorSummary
+	Names       []string
+	CurrentKey  string
 	CurrentCode string
 }
 
@@ -31,19 +32,19 @@ func (em ExistingMonitors) HasMonitorByName(name string) bool {
 			}
 		}
 
-      	if value.Name == name {
-      	    return true
-      	}
-  }
-
-  // We also need to check if the name has been used in this session but not yet persisted
-  for _, value := range em.Names {
-  		if value == name {
-  			return true
+		if value.Name == name {
+			return true
 		}
-  }
+	}
 
-  return false
+	// We also need to check if the name has been used in this session but not yet persisted
+	for _, value := range em.Names {
+		if value == name {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (em ExistingMonitors) GetNameForCurrent() (string, error) {
@@ -57,11 +58,11 @@ func (em ExistingMonitors) GetNameForCurrent() (string, error) {
 				return value.Name, nil
 			}
 		}
-  }
-  return "", errors.New("does not exist")
+	}
+	return "", errors.New("does not exist")
 }
 
-func (em ExistingMonitors) AddName(name string)  {
+func (em ExistingMonitors) AddName(name string) {
 	em.Names = append(em.Names, name)
 }
 
@@ -112,10 +113,6 @@ Example where you perform a dry-run without any crontab modifications:
   $ cronitor discover /path/to/crontab --dry-run
       > Steps line by line, creates or updates monitors
       > Checks permissions to ensure integration can be applied later
-
-
-In all of these examples, auto discover is enabled by adding 'cronitor discover --auto' to your crontab as an hourly task. Auto discover will send job schedule changes
-to Cronitor."
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
 
@@ -158,7 +155,7 @@ to Cronitor."
 				importedCrontabs++
 			}
 
-			if systemCrontab := lib.CrontabFactory(username, lib.SYSTEM_CRONTAB) ; systemCrontab.Exists() {
+			if systemCrontab := lib.CrontabFactory(username, lib.SYSTEM_CRONTAB); systemCrontab.Exists() {
 				if processCrontab(systemCrontab) {
 					importedCrontabs++
 				}
@@ -288,7 +285,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 					printErrorText("Aborted by ctrl-c", false)
 					os.Exit(-1)
 				} else {
-					printErrorText("Error: " + err.Error() + "\n", false)
+					printErrorText("Error: "+err.Error()+"\n", false)
 				}
 
 				break
@@ -347,7 +344,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 			}
 		} else {
 			if !isSilent {
-				printErrorText("Problem saving crontab: " + err.Error(), true)
+				printErrorText("Problem saving crontab: "+err.Error(), true)
 			}
 			return false
 		}
@@ -469,11 +466,11 @@ func promptTemplates() *promptui.PromptTemplates {
 	bold := promptui.Styler(promptui.FGBold)
 	faint := promptui.Styler(promptui.FGFaint)
 	return &promptui.PromptTemplates{
-		Prompt:  fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconInitial), bold(":")),
-		Valid:   fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconGood), bold(":")),
-		Invalid: fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconBad), bold(":")),
-		Success: fmt.Sprintf("    {{ . | faint }}%s ", faint(":")),
-		ValidationError:            `    {{ ">>" | red }} {{ . | red }}`,
+		Prompt:          fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconInitial), bold(":")),
+		Valid:           fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconGood), bold(":")),
+		Invalid:         fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconBad), bold(":")),
+		Success:         fmt.Sprintf("    {{ . | faint }}%s ", faint(":")),
+		ValidationError: `    {{ ">>" | red }} {{ . | red }}`,
 	}
 }
 
