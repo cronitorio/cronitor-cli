@@ -1,16 +1,16 @@
 package lib
 
 import (
-	"encoding/json"
 	"bytes"
-	"fmt"
+	"encoding/json"
 	"errors"
-	"net/http"
-	"time"
-	"strings"
+	"fmt"
+	"github.com/getsentry/raven-go"
 	"github.com/spf13/viper"
 	"io/ioutil"
-	"github.com/getsentry/raven-go"
+	"net/http"
+	"strings"
+	"time"
 )
 
 type Rule struct {
@@ -21,32 +21,32 @@ type Rule struct {
 }
 
 type Monitor struct {
-	Name  			string   `json:"name,omitempty"`
-	DefaultName		string   `json:"defaultName"`
-	Key   			string   `json:"key"`
-	Rules 			[]Rule   `json:"rules"`
-	Tags  			[]string `json:"tags"`
-	Type  			string   `json:"type"`
-	Code			string   `json:"code,omitempty"`
-	Timezone		string	 `json:"timezone,omitempty"`
-	Note  			string   `json:"defaultNote,omitempty"`
-	Notifications	map[string][]string `json:"notifications,omitempty"`
-	NoStdoutPassthru bool	 `json:"-"`
+	Name             string              `json:"name,omitempty"`
+	DefaultName      string              `json:"defaultName"`
+	Key              string              `json:"key"`
+	Rules            []Rule              `json:"rules"`
+	Tags             []string            `json:"tags"`
+	Type             string              `json:"type"`
+	Code             string              `json:"code,omitempty"`
+	Timezone         string              `json:"timezone,omitempty"`
+	Note             string              `json:"defaultNote,omitempty"`
+	Notifications    map[string][]string `json:"notifications,omitempty"`
+	NoStdoutPassthru bool                `json:"-"`
 }
 
 type MonitorSummary struct {
-	Name  			string   `json:"name,omitempty"`
-	DefaultName		string   `json:"defaultName"`
-	Key   			string   `json:"key"`
-	Code			string   `json:"code,omitempty"`
+	Name        string `json:"name,omitempty"`
+	DefaultName string `json:"defaultName"`
+	Key         string `json:"key"`
+	Code        string `json:"code,omitempty"`
 }
 
 type CronitorApi struct {
-	IsDev bool
+	IsDev          bool
 	IsAutoDiscover bool
-	ApiKey string
-	UserAgent string
-	Logger func(string)
+	ApiKey         string
+	UserAgent      string
+	Logger         func(string)
 }
 
 func (api CronitorApi) PutMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {
@@ -107,9 +107,9 @@ func (api CronitorApi) GetMonitors() ([]MonitorSummary, error) {
 		}
 
 		type ExpectedResponse struct {
-			TotalMonitorCount int `json:"total_monitor_count"`
-			PageSize int `json:"page_size"`
-			Monitors []MonitorSummary `json:"monitors"`
+			TotalMonitorCount int              `json:"total_monitor_count"`
+			PageSize          int              `json:"page_size"`
+			Monitors          []MonitorSummary `json:"monitors"`
 		}
 
 		responseMonitors := ExpectedResponse{}
@@ -118,7 +118,7 @@ func (api CronitorApi) GetMonitors() ([]MonitorSummary, error) {
 		}
 
 		monitors = append(monitors, responseMonitors.Monitors...)
-		if page * responseMonitors.PageSize >= responseMonitors.TotalMonitorCount {
+		if page*responseMonitors.PageSize >= responseMonitors.TotalMonitorCount {
 			break
 		}
 

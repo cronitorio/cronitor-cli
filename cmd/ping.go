@@ -1,9 +1,9 @@
 package cmd
 
 import (
+	"errors"
 	"github.com/spf13/cobra"
 	"sync"
-	"errors"
 )
 
 var run bool
@@ -14,7 +14,7 @@ var msg string
 var pingCmd = &cobra.Command{
 	Use:   "ping <code>",
 	Short: "Send a single ping to the selected monitoring endpoint",
-	Long:  `
+	Long: `
 Ping the specified monitor to report current status.
 
 Example:

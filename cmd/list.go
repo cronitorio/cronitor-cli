@@ -1,12 +1,12 @@
 package cmd
 
 import (
+	"cronitor/lib"
 	"fmt"
+	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 	"os"
 	"os/user"
-	"cronitor/lib"
-	"github.com/olekukonko/tablewriter"
 )
 
 var listCmd = &cobra.Command{

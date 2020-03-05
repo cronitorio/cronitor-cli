@@ -2,9 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
 	"os"
-	"github.com/manifoldco/promptui"
 	"strings"
 )
 
@@ -46,7 +46,7 @@ Example:
 					startTime := makeStamp()
 
 					// Cron runs from the home directory, so imply the same
-					exitCode := RunCommand("cd ~ ; " + result, false,false)
+					exitCode := RunCommand("cd ~ ; "+result, false, false)
 					duration := formatStamp(makeStamp() - startTime)
 
 					if exitCode == 0 {

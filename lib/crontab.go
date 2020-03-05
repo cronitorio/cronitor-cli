@@ -23,13 +23,13 @@ type TimezoneLocationName struct {
 }
 
 type Crontab struct {
-	User                 		string
-	IsUserCrontab        		bool
-	IsSaved						bool
-	Filename             		string
-	Lines                		[]*Line
-	TimezoneLocationName 		*TimezoneLocationName
-	UsesSixFieldExpressions 	bool
+	User                    string
+	IsUserCrontab           bool
+	IsSaved                 bool
+	Filename                string
+	Lines                   []*Line
+	TimezoneLocationName    *TimezoneLocationName
+	UsesSixFieldExpressions bool
 }
 
 func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
@@ -91,11 +91,11 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 		}
 
 		// Create a Line struct with details for this line so we can re-create it later
-		line := Line {
+		line := Line{
 			CronExpression: cronExpression,
-			FullLine: fullLine,
-			LineNumber: lineNumber,
-			RunAs: runAs,
+			FullLine:       fullLine,
+			LineNumber:     lineNumber,
+			RunAs:          runAs,
 		}
 
 		// If this job is already being wrapped by the Cronitor client, read current code.
@@ -205,7 +205,7 @@ func (c Crontab) Exists() bool {
 
 	if c.Filename != "" {
 		if _, err := os.Stat(c.Filename); os.IsNotExist(err) {
-		  return false
+			return false
 		}
 	} else {
 		cmd := exec.Command("crontab", "-l")
@@ -254,7 +254,6 @@ func (c Crontab) load() ([]string, int, error) {
 
 	return strings.Split(string(crontabBytes), "\n"), 0, nil
 }
-
 
 type Line struct {
 	Name           string
@@ -310,7 +309,7 @@ func (l Line) Write() string {
 
 	if len(l.CommandToRun) > 0 {
 		if l.CommandIsComplex() {
-			lineParts = append(lineParts, "\"" + strings.Replace(l.CommandToRun, "\"", "\\\"", -1) + "\"")
+			lineParts = append(lineParts, "\""+strings.Replace(l.CommandToRun, "\"", "\\\"", -1)+"\"")
 		} else {
 			lineParts = append(lineParts, l.CommandToRun)
 		}
@@ -337,7 +336,6 @@ func (l Line) Key(CanonicalPath string) string {
 	data := []byte(fmt.Sprintf("%s-%s-%s-%s", hostname, CommandToRun, CronExpression, RunAs))
 	return fmt.Sprintf("%x", sha1.Sum(data))
 }
-
 
 func createAutoDiscoverLine(crontab *Crontab) *Line {
 	cronExpression := fmt.Sprintf("%d * * * *", randomMinute())
@@ -416,7 +414,7 @@ func ReadCrontabsInDirectory(username, directory string, crontabs []*Crontab) []
 
 func ReadCrontabFromFile(username, filename string, crontabs []*Crontab) []*Crontab {
 	if _, err := os.Stat(filename); filename != "" && os.IsNotExist(err) {
-	  return crontabs
+		return crontabs
 	}
 
 	crontab := CrontabFactory(username, filename)

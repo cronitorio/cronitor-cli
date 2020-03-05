@@ -2,13 +2,13 @@ package main
 
 import (
 	"cronitor/cmd"
-	"os"
 	"github.com/getsentry/raven-go"
+	"os"
 )
 
 func init() {
-    raven.SetDSN("***REMOVED***")
-    raven.SetRelease(cmd.Version)
+	raven.SetDSN("***REMOVED***")
+	raven.SetRelease(cmd.Version)
 }
 
 func main() {
@@ -32,7 +32,7 @@ func main() {
 		}
 	}
 
-	if commandIndex > 0 && !argsEscaped && len(os.Args) > commandIndex + 1 {
+	if commandIndex > 0 && !argsEscaped && len(os.Args) > commandIndex+1 {
 		os.Args = append(os.Args, "")
 		copy(os.Args[commandIndex+1:], os.Args[commandIndex:])
 		os.Args[commandIndex] = "--"

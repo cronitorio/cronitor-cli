@@ -1,12 +1,12 @@
 package cmd
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/spf13/cobra"
-	"errors"
 	"github.com/spf13/viper"
-	"encoding/json"
-	"bytes"
 )
 
 var before string
@@ -15,7 +15,7 @@ var only string
 var activityCmd = &cobra.Command{
 	Use:   "activity",
 	Short: "View monitor activity",
-	Long:  `
+	Long: `
 View monitor pings and alerts
 
 Examples:
@@ -58,7 +58,7 @@ Examples:
 		buf := new(bytes.Buffer)
 		json.Indent(buf, response, "", "  ")
 		fmt.Println(url)
-		if bufString :=  buf.String(); bufString != "[]" {
+		if bufString := buf.String(); bufString != "[]" {
 			fmt.Println(bufString)
 		} else {
 			fmt.Println("No activity")
@@ -68,7 +68,7 @@ Examples:
 
 func init() {
 	RootCmd.AddCommand(activityCmd)
-	activityCmd.Flags().StringVar(&only,"only", only, "Accepted values: pings, alerts")
+	activityCmd.Flags().StringVar(&only, "only", only, "Accepted values: pings, alerts")
 	activityCmd.Flags().StringVar(&before, "before", before, "Return events before provided timestamp")
 }
 
@@ -91,7 +91,7 @@ func isValidOnlyFilter() bool {
 	case
 		"pings",
 		"alerts":
-			return true
+		return true
 	}
 
 	return false

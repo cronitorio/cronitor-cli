@@ -2,8 +2,8 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"github.com/equinox-io/equinox"
+	"github.com/spf13/cobra"
 	"os"
 )
 

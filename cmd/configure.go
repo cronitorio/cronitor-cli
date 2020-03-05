@@ -1,11 +1,11 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/spf13/cobra"
-	"io/ioutil"
 	"github.com/spf13/viper"
-	"encoding/json"
+	"io/ioutil"
 	"os"
 )
 
@@ -14,14 +14,14 @@ type ConfigFile struct {
 	PingApiAuthKey string   `json:"CRONITOR_PING_API_KEY"`
 	ExcludeText    []string `json:"CRONITOR_EXCLUDE_TEXT,omitempty"`
 	Hostname       string   `json:"CRONITOR_HOSTNAME"`
-	Log       	   string   `json:"CRONITOR_LOG"`
+	Log            string   `json:"CRONITOR_LOG"`
 }
 
 // configureCmd represents the configure command
 var configureCmd = &cobra.Command{
 	Use:   "configure",
 	Short: "Save configuration variables to the config file",
-	Long:  `
+	Long: `
 Optionally write configuration options to a JSON file.
 
 By default, configuration files are system-wide for ease of use in cron jobs and scripts. Default configuration file location varies by platform:
@@ -76,8 +76,8 @@ Example setting common exclude text for use with 'cronitor discover':
 		os.MkdirAll(defaultConfigFileDirectory(), os.ModePerm)
 		if ioutil.WriteFile(configFilePath(), b, 0644) != nil {
 			fmt.Fprintf(os.Stderr,
-				"\nERROR: The configuration file %s could not be written; check permissions and try again. " +
-				"\n\nBy default, configuration files are system-wide for ease of use in cron jobs and scripts. Specify an alternate config file using the --config argument or CRONITOR_CONFIG environment variable.\n\n", configFilePath())
+				"\nERROR: The configuration file %s could not be written; check permissions and try again. "+
+					"\n\nBy default, configuration files are system-wide for ease of use in cron jobs and scripts. Specify an alternate config file using the --config argument or CRONITOR_CONFIG environment variable.\n\n", configFilePath())
 			os.Exit(126)
 		}
 	},

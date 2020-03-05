@@ -1,31 +1,31 @@
 package cmd
 
 import (
-	"fmt"
-	"github.com/spf13/cobra"
-	"errors"
-	"github.com/spf13/viper"
-	"encoding/json"
 	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/olekukonko/tablewriter"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"os"
 )
 
 type StatusMonitor struct {
-	Name       string  `json:"name"`
-	Code       string  `json:"code"`
-	Passing    bool	  `json:"passing"`
-	Status     string  `json:"status"`
+	Name    string `json:"name"`
+	Code    string `json:"code"`
+	Passing bool   `json:"passing"`
+	Status  string `json:"status"`
 }
 
 type StatusMonitors struct {
-	Monitors	[]StatusMonitor	`json:"monitors"`
+	Monitors []StatusMonitor `json:"monitors"`
 }
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "View monitor status",
-	Long:  `
+	Long: `
 View monitor status
 
 Examples:
@@ -98,4 +98,3 @@ Examples:
 func init() {
 	RootCmd.AddCommand(statusCmd)
 }
-

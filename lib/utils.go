@@ -1,8 +1,8 @@
 package lib
 
 import (
-	"time"
 	"math/rand"
+	"time"
 )
 
 func randomMinute() int {

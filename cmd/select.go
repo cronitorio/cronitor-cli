@@ -1,12 +1,12 @@
 package cmd
 
 import (
+	"cronitor/lib"
 	"fmt"
+	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
 	"os"
-	"github.com/manifoldco/promptui"
 	"os/user"
-	"cronitor/lib"
 )
 
 var selectCmd = &cobra.Command{
@@ -75,7 +75,7 @@ Example:
 		prompt := promptui.Select{
 			Label: "Select job to run",
 			Items: unique(commands),
-			Size: 20,
+			Size:  20,
 		}
 		if _, result, err := prompt.Run(); err == nil {
 			if result != "" {
@@ -84,7 +84,7 @@ Example:
 					monitorCode = monitorCodes[result]
 				}
 
-				printSuccessText("Running command: " + result, false)
+				printSuccessText("Running command: "+result, false)
 				fmt.Println()
 
 				startTime := makeStamp()
@@ -117,14 +117,13 @@ func init() {
 }
 
 func unique(strings []string) []string {
-    keys := make(map[string]bool)
-    list := []string{}
-    for _, entry := range strings {
-        if _, value := keys[entry]; !value {
-            keys[entry] = true
-            list = append(list, entry)
-        }
-    }
-    return list
+	keys := make(map[string]bool)
+	list := []string{}
+	for _, entry := range strings {
+		if _, value := keys[entry]; !value {
+			keys[entry] = true
+			list = append(list, entry)
+		}
+	}
+	return list
 }
-

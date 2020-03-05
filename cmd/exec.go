@@ -1,32 +1,31 @@
 package cmd
 
 import (
-	"fmt"
-	"github.com/spf13/cobra"
-	"sync"
-	"os/exec"
-	"errors"
-	"strings"
-	"os"
-	"github.com/kballard/go-shellquote"
-	"syscall"
-	"runtime"
-	"io/ioutil"
-	"regexp"
-	"os/signal"
-	"bytes"
 	"bufio"
+	"bytes"
+	"errors"
+	"fmt"
+	"github.com/kballard/go-shellquote"
+	"github.com/spf13/cobra"
 	"io"
+	"io/ioutil"
+	"os"
+	"os/exec"
+	"os/signal"
+	"regexp"
+	"runtime"
+	"strings"
+	"sync"
+	"syscall"
 	"time"
 )
-
 
 var monitorCode string
 var commandParts []string
 var execCmd = &cobra.Command{
 	Use:   "exec",
 	Short: "Execute a command with monitoring",
-	Long:  `
+	Long: `
 The supplied command will be executed and Cronitor will be notified of success or failure.
 
 Note: Arguments supplied after the unique monitor code are treated as part of the command to execute. Flags intended for the 'exec' command must be passed before the monitor code.
@@ -46,7 +45,7 @@ Example with no command output send to Cronitor:
 		for _, arg := range os.Args {
 			// Treat anything that comes after the monitor code as the command to execute
 			if foundCode {
-				commandParts = append(commandParts,  strings.TrimSpace(arg))
+				commandParts = append(commandParts, strings.TrimSpace(arg))
 				continue
 			}
 
@@ -138,7 +137,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 		time.Sleep(20 * time.Millisecond)
 
 		if err := execCmd.Start(); err != nil {
-		    waitCh <- err
+			waitCh <- err
 		} else {
 			waitCh <- execCmd.Wait()
 		}
@@ -205,8 +204,8 @@ func init() {
 
 func makeCronLikeEnv() []string {
 	env := []string{"SHELL=/bin/sh"}
-	if homeValue, hasHome := os.LookupEnv("HOME") ; hasHome {
-		env = append(env, "HOME=" + homeValue)
+	if homeValue, hasHome := os.LookupEnv("HOME"); hasHome {
+		env = append(env, "HOME="+homeValue)
 	}
 
 	return env
@@ -231,7 +230,7 @@ func streamAndAggregateOutput(pipe *io.ReadCloser, outputBuffer *bytes.Buffer, m
 		for scanner.Scan() {
 			fmt.Println(scanner.Text())
 			// Ideally we would keep the last n bytes of output but keeping first n bytes easier and acceptable trade off for now..
-			if len(scanner.Bytes()) + outputBuffer.Len() <= maxOutputBufferSize {
+			if len(scanner.Bytes())+outputBuffer.Len() <= maxOutputBufferSize {
 				outputBuffer.Write(append(scanner.Bytes(), "\n"...))
 			}
 		}

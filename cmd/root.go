@@ -1,26 +1,26 @@
 package cmd
 
 import (
+	"cronitor/lib"
+	"errors"
 	"fmt"
+	"io/ioutil"
+	"math/rand"
+	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
+	"regexp"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/fatih/color"
+	"github.com/getsentry/raven-go"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"sync"
-	"net/http"
-	"time"
-	"io/ioutil"
-	"net/url"
-	"strconv"
-	"os/exec"
-	"strings"
-	"regexp"
-	"errors"
-	"runtime"
-	"github.com/getsentry/raven-go"
-	"math/rand"
-	"cronitor/lib"
-	"github.com/fatih/color"
-
 )
 
 var Version string = "24.1"
@@ -41,7 +41,7 @@ var noStdoutPassthru bool
 var RootCmd = &cobra.Command{
 	Use:   "cronitor",
 	Short: shortDescription(Version),
-	Long:  shortDescription(Version) + `
+	Long: shortDescription(Version) + `
 
 Command line tools for Cronitor.io. See https://cronitor.io/docs/using-cronitor-cli for details.`,
 }
@@ -97,7 +97,6 @@ func initConfig() {
 		viper.AddConfigPath(defaultConfigFileDirectory())
 		viper.SetConfigName("cronitor")
 	}
-
 
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
@@ -163,7 +162,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 
 		// After 2 failed attempts, take a brief random break before trying again
 		if i > 2 {
-			time.Sleep(time.Second * time.Duration(float32(i) * 1.5 * rand.Float32()))
+			time.Sleep(time.Second * time.Duration(float32(i)*1.5*rand.Float32()))
 		}
 
 		uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, pingApiAuthKey, hostname, formattedDuration, series, formattedStatusCode)
@@ -195,7 +194,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	}
 
 	if !pingSent {
-		raven.CaptureErrorAndWait(errors.New("Ping failure; retries exhausted: " + uri), nil)
+		raven.CaptureErrorAndWait(errors.New("Ping failure; retries exhausted: "+uri), nil)
 	}
 }
 
@@ -228,7 +227,7 @@ func effectiveTimezoneLocationName() lib.TimezoneLocationName {
 	}
 
 	// If /etc/localtime is a symlink, check what it is linking to
-	if localtimeFile, err := os.Lstat("/etc/localtime"); err == nil && localtimeFile.Mode() & os.ModeSymlink == os.ModeSymlink {
+	if localtimeFile, err := os.Lstat("/etc/localtime"); err == nil && localtimeFile.Mode()&os.ModeSymlink == os.ModeSymlink {
 		if symlink, _ := os.Readlink("/etc/localtime"); len(symlink) > 0 {
 			if strings.Contains(symlink, "UTC") {
 				return lib.TimezoneLocationName{"UTC"}
@@ -281,7 +280,7 @@ func printDoneText(message string, indent bool) {
 	if isAutoDiscover || isSilent {
 		log(message)
 	} else {
-		printSuccessText(message + " ✔", indent)
+		printSuccessText(message+" ✔", indent)
 	}
 }
 
@@ -363,15 +362,15 @@ func formatStamp(timestamp float64) string {
 }
 
 func shortDescription(version string) string {
-	return  fmt.Sprintf("CronitorCLI version %s", version)
+	return fmt.Sprintf("CronitorCLI version %s", version)
 }
 
 func getCronitorApi() *lib.CronitorApi {
 	return &lib.CronitorApi{
-		IsDev: dev,
+		IsDev:          dev,
 		IsAutoDiscover: isAutoDiscover,
-		ApiKey: varApiKey,
-		UserAgent: userAgent,
-		Logger: log,
+		ApiKey:         varApiKey,
+		UserAgent:      userAgent,
+		Logger:         log,
 	}
 }
