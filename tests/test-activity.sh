@@ -3,14 +3,7 @@
 SCRIPT_DIR=$( cd $(dirname $0) ; pwd -P )
 cd $SCRIPT_DIR
 
-if [ "$1" = "--use-dev" ]
-    then
-        CRONITOR_ARGS="--use-dev"
-        HOSTNAME="http://localhost:8000"
-    else
-        CRONITOR_ARGS=""
-        HOSTNAME="https://cronitor.link"
-fi
+source ./setup.sh
 
 #################
 # ACTIVITY TESTS
