@@ -159,28 +159,8 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 			}
 		case err := <-waitCh:
 
-			// Handle stdout from subcommand
-			var outputForPing []byte
-			var outputForPingMaxLen int64 = 2000
-			if noStdoutPassthru || tempFile == nil {
-				outputForPing = []byte{}
-			} else {
-				// Known reasons stat could fail here:
-				// 1. temp file was removed by an external process
-				// 2. filesystem is no longer available
-				if stat, err := os.Stat(tempFile.Name()); err == nil {
-					if size := stat.Size(); size < outputForPingMaxLen {
-						outputForPing = make([]byte, size)
-						tempFile.Seek(0, 0)
-					} else {
-						outputForPing = make([]byte, outputForPingMaxLen)
-						tempFile.Seek(outputForPingMaxLen*-1, 2)
-					}
-					tempFile.Read(outputForPing)
-				}
-			}
-
-			// Clean up after the temp file
+			// Send output to Cronitor and clean up after the temp file
+			outputForPing := gatherOutput(tempFile)
 			defer func() {
 				tempFile.Close()
 				os.Remove(tempFile.Name())
@@ -254,7 +234,7 @@ func getTempFile() (*os.File, error) {
 	path := fmt.Sprintf("%s%s%s", os.TempDir(), string(os.PathSeparator), "cronitor")
 	os.MkdirAll(path, os.ModePerm)
 
-	if tempFiles, err := ioutil.ReadDir(path); err == nil {
+	if tempFiles, cleanupError := ioutil.ReadDir(path); cleanupError == nil {
 		for _, file := range tempFiles {
 			if isStaleFile(file) {
 				cleanupError = os.Remove(fmt.Sprintf("%s%s%s", path, string(os.PathSeparator), file.Name()))
@@ -272,7 +252,30 @@ func getTempFile() (*os.File, error) {
 	} else {
 		return nil, errors.New(fmt.Sprintf("Cannot capture output to temp file: %s", err.Error()))
 	}
+}
 
+func gatherOutput(tempFile *os.File) []byte {
+	var outputForPing []byte
+	var outputForPingMaxLen int64 = 2000
+	if noStdoutPassthru || tempFile == nil {
+		outputForPing = []byte{}
+	} else {
+		// Known reasons stat could fail here:
+		// 1. temp file was removed by an external process
+		// 2. filesystem is no longer available
+		if stat, err := os.Stat(tempFile.Name()); err == nil {
+			if size := stat.Size(); size < outputForPingMaxLen {
+				outputForPing = make([]byte, size)
+				tempFile.Seek(0, 0)
+			} else {
+				outputForPing = make([]byte, outputForPingMaxLen)
+				tempFile.Seek(outputForPingMaxLen*-1, 2)
+			}
+			tempFile.Read(outputForPing)
+		}
+	}
+
+	return outputForPing
 }
 
 func isStaleFile(file os.FileInfo) bool {
