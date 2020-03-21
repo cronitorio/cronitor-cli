@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"github.com/kballard/go-shellquote"
@@ -91,7 +89,6 @@ Example with no command output send to Cronitor:
 
 func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) int {
 	var monitoringWaitGroup sync.WaitGroup
-	var outputWaitGroup sync.WaitGroup
 
 	startTime := makeStamp()
 	formattedStartTime := formatStamp(startTime)
@@ -119,17 +116,22 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 		execCmdStdin.Write(execStdIn)
 	}
 
-	// Combine stdout and stderr from the command into a single buffer which we'll stream as stdout
-	// Alternatively we could pass stderr from the subcommand but I've chosen to only use it for CronitorCLI errors at the moment
-	var combinedOutput bytes.Buffer
-	var maxBufferSize = 2000
-	if stdoutPipe, err := execCmd.StdoutPipe(); err == nil {
-		streamAndAggregateOutput(&stdoutPipe, &combinedOutput, maxBufferSize, &outputWaitGroup)
-		execCmd.Stderr = execCmd.Stdout
+	// Proxy and copy the command's stdout if the filesystem is available
+	tempFile, err := getTempFile()
+	if err == nil {
+		defer tempFile.Close()
+		execCmd.Stdout = io.MultiWriter(os.Stdout, tempFile)
+	} else {
+		log(err.Error())
+		execCmd.Stdout = os.Stdout
 	}
 
+	// Combine stdout and stderr from the command into a single buffer which we'll stream as stdout
+	// Alternatively we could pass stderr from the subcommand but I've chosen to only use it for CronitorCLI errors at the moment
+	execCmd.Stderr = execCmd.Stdout
+
 	// Invoke subcommand and send a message when it's done
-	waitCh := make(chan error, 1)
+	waitCh := make(chan error, 16)
 	go func() {
 		defer close(waitCh)
 
@@ -144,23 +146,45 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 	}()
 
 	// Relay incoming signals to the subprocess
-	sigChan := make(chan os.Signal, 1)
+	sigChan := make(chan os.Signal, 16)
 	signal.Notify(sigChan)
 
 	for {
 		select {
 		case sig := <-sigChan:
-			if err := execCmd.Process.Signal(sig); err != nil {
-				// Ignoring because the only time I've seen an err is when child process has already exited after kill was sent to pgroup
+			if execCmd.Process != nil {
+				if err := execCmd.Process.Signal(sig); err != nil {
+					// Ignoring because the only time I've seen an err is when child process has already exited after kill was sent to pgroup
+				}
 			}
 		case err := <-waitCh:
-			outputWaitGroup.Wait()
 
 			// Handle stdout from subcommand
-			outputForPing := bytes.TrimRight(combinedOutput.Bytes(), "\n")
-			if noStdoutPassthru {
+			var outputForPing []byte
+			var outputForPingMaxLen int64 = 2000
+			if noStdoutPassthru || tempFile == nil {
 				outputForPing = []byte{}
+			} else {
+				// Known reasons stat could fail here:
+				// 1. temp file was removed by an external process
+				// 2. filesystem is no longer available
+				if stat, err := os.Stat(tempFile.Name()); err == nil {
+					if size := stat.Size(); size < outputForPingMaxLen {
+						outputForPing = make([]byte, size)
+						tempFile.Seek(0, 0)
+					} else {
+						outputForPing = make([]byte, outputForPingMaxLen)
+						tempFile.Seek(outputForPingMaxLen*-1, 2)
+					}
+					tempFile.Read(outputForPing)
+				}
 			}
+
+			// Clean up after the temp file
+			defer func() {
+				tempFile.Close()
+				os.Remove(tempFile.Name())
+			}()
 
 			endTime := makeStamp()
 			duration := endTime - startTime
@@ -173,7 +197,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 			} else {
 				message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), outputForPing))
 
-				// This works on both Unix and Windows (syscall.WaitStatus is cross platform).
+				// This works on both Posix and Windows (syscall.WaitStatus is cross platform).
 				// Cribbed from aws-vault.
 				if exiterr, ok := err.(*exec.ExitError); ok {
 
@@ -222,17 +246,41 @@ func makeSubcommandExec(subcommand string) *exec.Cmd {
 	return execCmd
 }
 
-func streamAndAggregateOutput(pipe *io.ReadCloser, outputBuffer *bytes.Buffer, maxOutputBufferSize int, wg *sync.WaitGroup) {
-	scanner := bufio.NewScanner(*pipe)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for scanner.Scan() {
-			fmt.Println(scanner.Text())
-			// Ideally we would keep the last n bytes of output but keeping first n bytes easier and acceptable trade off for now..
-			if len(scanner.Bytes())+outputBuffer.Len() <= maxOutputBufferSize {
-				outputBuffer.Write(append(scanner.Bytes(), "\n"...))
+
+func getTempFile() (*os.File, error) {
+	// Before we create a new temp file be cautious and ensure we don't have stale files that should be cleaned up
+	// This could happen if `exec` crashed in a previous run.
+	var cleanupError error
+	path := fmt.Sprintf("%s%s%s", os.TempDir(), string(os.PathSeparator), "cronitor")
+	os.MkdirAll(path, os.ModePerm)
+
+	if tempFiles, err := ioutil.ReadDir(path); err == nil {
+		for _, file := range tempFiles {
+			if isStaleFile(file) {
+				cleanupError = os.Remove(fmt.Sprintf("%s%s%s", path, string(os.PathSeparator), file.Name()))
 			}
 		}
-	}()
+	}
+
+	// If we can't clean up then stop writing new files...
+	if cleanupError != nil {
+		return nil, errors.New(fmt.Sprintf("Cannot capture output to temp file, cleanup failed: %s", cleanupError.Error()))
+	}
+
+	if file, err := ioutil.TempFile(path, fmt.Sprintf("exec-%s-*", monitorCode)); err == nil {
+		return file, nil
+	} else {
+		return nil, errors.New(fmt.Sprintf("Cannot capture output to temp file: %s", err.Error()))
+	}
+
+}
+
+func isStaleFile(file os.FileInfo) bool {
+	var timeLimit = 3 * 24 * time.Hour
+
+	if !file.Mode().IsRegular() {
+		return false
+	}
+
+	return time.Now().Sub(file.ModTime()) > timeLimit
 }
