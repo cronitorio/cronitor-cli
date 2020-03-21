@@ -4,6 +4,7 @@ CLI_CONFIGFILE="/etc/cronitor/cronitor.json"
 CLI_CONFIGFILE_ALTERNATE="/tmp/test-build-config.json"
 CLI_ACTUAL_API_KEY="cb54ac4fd16142469f2d84fc1bbebd84"
 CLI_CRONTAB_TEMP="/tmp/crontab"
+CLI_USERNAME=`whoami`
 
 if [ "$1" = "--use-dev" ]
     then

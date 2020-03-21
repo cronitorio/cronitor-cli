@@ -37,8 +37,8 @@ fi
 
 rm -f $CLI_LOGFILE
 TEST="Discover correctly parses crontab with username"
-echo "* * * * * sharter echo 'username parse'" | cat - ../fixtures/crontab.txt > $CLI_CRONTAB_TEMP
-if ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "echo '" | grep -q "sharter cronitor exec"
+echo "* * * * * $CLI_USERNAME echo 'username parse'" | cat - ../fixtures/crontab.txt > $CLI_CRONTAB_TEMP
+if ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "echo '" | grep -q "$CLI_USERNAME cronitor exec"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
@@ -97,18 +97,6 @@ if grep "cron.hourly" $TMPFILE | grep -q "cronitor exec"
     else echo "${TEST}.. OK"
 fi
 rm -f $TMPFILE
-
-TEST="Discover adds auto-discover"
-if ../cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e | grep "cronitor" | grep -q "discover"
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
-
-TEST="Discover does not add auto-discover when suppressed"
-if ../cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e --no-auto-discover | grep -q "cronitor discover"
-    then echo "${TEST}.. FAIL"  # Note reversed order here...
-    else echo "${TEST}.. OK"
-fi
 
 TEST="Discover adds no-stdout flag when supplied"
 if ../cronitor $CRONITOR_ARGS discover --auto -v ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e --no-stdout | grep "cronitor exec" | grep -q "no-stdout"
