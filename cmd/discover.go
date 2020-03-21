@@ -135,7 +135,7 @@ Example where you perform a dry-run without any crontab modifications:
 			username = u.Username
 		}
 
-		printSuccessText("Scanning for cron jobs...", false)
+		printSuccessText("Scanning for cron jobs... (Use Ctrl-C to skip)", false)
 
 		// Fetch list of existing monitor names for easy unique name validation and prompt prefill later on
 		existingMonitors.Monitors, _ = getCronitorApi().GetMonitors()
@@ -260,6 +260,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 		tags := createTags()
 		key := line.Key(crontab.CanonicalName())
 		name := defaultName
+		skip := false
 
 		// If we know this monitor exists already, return the name
 		existingMonitors.CurrentKey = key
@@ -282,14 +283,19 @@ func processCrontab(crontab *lib.Crontab) bool {
 				if result, err := prompt.Run(); err == nil {
 					name = result
 				} else if err == promptui.ErrInterrupt {
-					printErrorText("Aborted by ctrl-c", false)
-					os.Exit(-1)
+					printWarningText("Skipped", true)
+					skip = true
+					break
 				} else {
 					printErrorText("Error: "+err.Error()+"\n", false)
 				}
 
 				break
 			}
+		}
+
+		if skip {
+			continue
 		}
 
 		existingMonitors.AddName(name)
@@ -321,7 +327,10 @@ func processCrontab(crontab *lib.Crontab) bool {
 	}
 
 	printLn()
-	printDoneText("Sending to Cronitor", true)
+
+	if len(monitors) > 0 {
+		printDoneText("Sending to Cronitor", true)
+	}
 
 	var err error
 	monitors, err = getCronitorApi().PutMonitors(monitors)
@@ -337,7 +346,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 		fmt.Println(strings.TrimSpace(updatedCrontabLines))
 	}
 
-	if !dryRun {
+	if !dryRun && len(monitors) > 0 {
 		if err := crontab.Save(updatedCrontabLines); err == nil {
 			if !isSilent {
 				printDoneText("Integration complete", true)
