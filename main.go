@@ -7,7 +7,7 @@ import (
 )
 
 func init() {
-	raven.SetDSN("***REMOVED***")
+	// raven.SetDSN("")
 	raven.SetRelease(cmd.Version)
 }
 
