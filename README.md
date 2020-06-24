@@ -1,5 +1,5 @@
 # CronitorCLI
-Command line tools for Cronitor.io
+**Command line tools for Cronitor.io**
 
 CronitorCLI is the recommended companion application to the Cronitor monitoring service.  Use it on your workstation and deploy it to your server for powerful features, including:
 
