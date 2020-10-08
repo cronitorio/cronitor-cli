@@ -219,13 +219,14 @@ func makeSubcommandExec(subcommand string) *exec.Cmd {
 	var execCmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		execCmd = exec.Command("cmd", "/c", subcommand)
+	} else if _, err := os.Stat("/bin/bash"); err == nil {
+		execCmd = exec.Command("bash", "-c", subcommand)
 	} else {
 		execCmd = exec.Command("sh", "-c", subcommand)
 	}
 
 	return execCmd
 }
-
 
 func getTempFile() (*os.File, error) {
 	// Before we create a new temp file be cautious and ensure we don't have stale files that should be cleaned up

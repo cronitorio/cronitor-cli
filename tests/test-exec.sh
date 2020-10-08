@@ -12,6 +12,13 @@ source ./setup.sh
 echo ""
 
 rm -f $CLI_LOGFILE
+TEST="Exec uses bash when available"
+if [[ "$(../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 ../bin/test-bash.sh)"  == "i am an array" ]]
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
+rm -f $CLI_LOGFILE
 TEST="Exec runs command check"
 ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 ./write-to-log-success.sh $CLI_LOGFILE "$TEST" > /dev/null
 if grep -q "$TEST" $CLI_LOGFILE
@@ -29,7 +36,7 @@ fi
 
 rm -f $CLI_LOGFILE
 TEST="Exec runs command with really complex args"
-../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 "cd /tmp && pwd"
+../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 "cd /tmp && pwd" > /dev/null
 if grep -q "/tmp" $CLI_LOGFILE
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
