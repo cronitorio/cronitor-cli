@@ -162,8 +162,10 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 			// Send output to Cronitor and clean up after the temp file
 			outputForPing := gatherOutput(tempFile)
 			defer func() {
-				tempFile.Close()
-				os.Remove(tempFile.Name())
+				if tempFile != nil {
+					tempFile.Close()
+					os.Remove(tempFile.Name())
+				}
 			}()
 
 			endTime := makeStamp()

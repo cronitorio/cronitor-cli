@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var Version string = "25.4"
+var Version string = "25.5"
 
 var cfgFile string
 var userAgent string
