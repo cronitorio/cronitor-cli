@@ -1,13 +1,17 @@
+#!/usr/bin/env bash
+
 SCRIPT_DIR=$( cd $(dirname $0) ; pwd -P )
 cd $SCRIPT_DIR
+cd ../
 
 if [ "$CRONITORCLI_SENTRY_DSN" ]
-  sed -i 's/// raven.SetDSN("")/raven.SetDSN("' + $CRONITORCLI_SENTRY_DSN + '")/g' ../main.go
+  then echo "Adding Sentry to Build..."
+  SENTRY_DSN_ESCAPED=$(printf '%s\n' "$CRONITORCLI_SENTRY_DSN" | sed -e 's/[\/&]/\\&/g')
+  perl -pi -e "s/\/\/\ SetDSN/raven.SetDSN(\"${SENTRY_DSN_ESCAPED}\")/g" main.go
 fi
 
-cd ../
 go build
 
 if [ "$CRONITORCLI_SENTRY_DSN" ]
-  sed -i 's/raven.SetDSN("' + $CRONITORCLI_SENTRY_DSN + '")/// raven.SetDSN("")/g' ../main.go
+  then perl -pi -e "s/raven\.SetDSN\(\"${SENTRY_DSN_ESCAPED}\"\)/\/\/\ SetDSN/g" main.go
 fi
