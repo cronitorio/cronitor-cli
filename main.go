@@ -1,7 +1,7 @@
 package main
 
 import (
-	"cronitor/cmd"
+	"github.com/cronitorio/cronitor-cli/cmd"
 	"github.com/getsentry/raven-go"
 	"os"
 )
