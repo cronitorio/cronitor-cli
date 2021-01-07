@@ -305,14 +305,16 @@ func (l Line) Write() string {
 		}
 		lineParts = append(lineParts, "exec")
 		lineParts = append(lineParts, l.Mon.Code)
-	}
 
-	if len(l.CommandToRun) > 0 {
-		if l.CommandIsComplex() {
-			lineParts = append(lineParts, "\""+strings.Replace(l.CommandToRun, "\"", "\\\"", -1)+"\"")
-		} else {
-			lineParts = append(lineParts, l.CommandToRun)
+		if len(l.CommandToRun) > 0 {
+			if l.CommandIsComplex() {
+				lineParts = append(lineParts, "\""+strings.Replace(l.CommandToRun, "\"", "\\\"", -1)+"\"")
+			} else {
+				lineParts = append(lineParts, l.CommandToRun)
+			}
 		}
+	} else {
+		return l.FullLine
 	}
 
 	return strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)
