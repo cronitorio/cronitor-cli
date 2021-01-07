@@ -10,7 +10,7 @@ if [ "$CRONITORCLI_SENTRY_DSN" ]
   perl -pi -e "s/\/\/\ SetDSN/raven.SetDSN(\"${SENTRY_DSN_ESCAPED}\")/g" main.go
 fi
 
-go build
+go build -o cronitor
 
 if [ "$CRONITORCLI_SENTRY_DSN" ]
   then perl -pi -e "s/raven\.SetDSN\(\"${SENTRY_DSN_ESCAPED}\"\)/\/\/\ SetDSN/g" main.go
