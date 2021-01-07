@@ -1,4 +1,4 @@
-module cronitor
+module github.com/cronitorio/cronitor-cli
 
 go 1.14
 

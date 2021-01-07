@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"cronitor/lib"
+	"github.com/cronitorio/cronitor-cli/lib"
 	"errors"
 	"fmt"
 	"os"
