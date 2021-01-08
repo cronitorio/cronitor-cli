@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var Version string = "25.5"
+var Version string = "26.0"
 
 var cfgFile string
 var userAgent string
@@ -90,9 +90,14 @@ func initConfig() {
 
 	viper.AutomaticEnv() // read in environment variables that match
 
+	configFile := viper.GetString(varConfig)
+	if strings.ToLower(configFile[len(configFile)-5:]) != ".json" {
+		fmt.Println("Error: Config file must be a .json file")
+	}
+
 	// If a custom config file is specified by flag or env var, use it. Otherwise use default file.
-	if len(viper.GetString(varConfig)) > 0 {
-		viper.SetConfigFile(viper.GetString(varConfig))
+	if len(configFile) > 0 {
+		viper.SetConfigFile(configFile)
 	} else {
 		viper.AddConfigPath(defaultConfigFileDirectory())
 		viper.SetConfigName("cronitor")
@@ -101,6 +106,8 @@ func initConfig() {
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
 		log("Reading config from " + viper.ConfigFileUsed())
+	} else {
+		fmt.Printf("Error: Problem with config file at %s: %s\n\n", viper.ConfigFileUsed(), err.Error())
 	}
 }
 
