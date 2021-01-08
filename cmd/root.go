@@ -89,14 +89,13 @@ func init() {
 func initConfig() {
 
 	viper.AutomaticEnv() // read in environment variables that match
-
 	configFile := viper.GetString(varConfig)
-	if strings.ToLower(configFile[len(configFile)-5:]) != ".json" {
-		fmt.Println("Error: Config file must be a .json file")
-	}
 
 	// If a custom config file is specified by flag or env var, use it. Otherwise use default file.
 	if len(configFile) > 0 {
+		if len(configFile) < 5 || strings.ToLower(configFile[len(configFile)-5:]) != ".json" {
+			fmt.Println("Error: Config file must be a .json file")
+		}
 		viper.SetConfigFile(configFile)
 	} else {
 		viper.AddConfigPath(defaultConfigFileDirectory())
@@ -121,6 +120,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	hostname := effectiveHostname()
 	pingApiAuthKey := viper.GetString(varPingApiKey)
 	pingApiHost := ""
+	authenticationKey := ""
 	formattedStamp := ""
 	formattedDuration := ""
 	formattedStatusCode := ""
@@ -156,6 +156,12 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 		series = fmt.Sprintf("&series=%s", series)
 	}
 
+	if len(pingApiAuthKey) > 0 {
+		authenticationKey = pingApiAuthKey
+	} else {
+		authenticationKey = apiKey
+	}
+
 	pingSent := false
 	uri := ""
 	for i := 1; i <= 6; i++ {
@@ -172,7 +178,16 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 			time.Sleep(time.Second * time.Duration(float32(i)*1.5*rand.Float32()))
 		}
 
-		uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, pingApiAuthKey, hostname, formattedDuration, series, formattedStatusCode)
+		if len(authenticationKey) > 0 {
+			// Authenticated pings when available
+			uri = fmt.Sprintf("%s/ping/%s/%s?state=%s&try=%d%s%s%s%s%s%s", pingApiHost, authenticationKey, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode)
+		} else {
+			// Fallback to sending an unauthenticated ping
+			uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode)
+		}
+
+
+
 		log("Sending ping " + uri)
 
 		request, _ := http.NewRequest("GET", uri, nil)

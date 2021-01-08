@@ -15,7 +15,7 @@ git push --tags
 
 if [ "$CRONITORCLI_SENTRY_DSN" ]
   then echo "Adding Sentry to Build..."
-  SENTRY_DSN_ESCAPED=$(printf '%s\n' "$CRONITORCLI_SENTRY_DSN" | sed -e 's/[\/&]/\\&/g')
+  SENTRY_DSN_ESCAPED=$(printf '%s\n' "$CRONITORCLI_SENTRY_DSN" | sed -e 's/[\/&@]/\\&/g')
   perl -pi -e "s/\/\/\ SetDSN/raven.SetDSN(\"${SENTRY_DSN_ESCAPED}\")/g" main.go
 fi
 

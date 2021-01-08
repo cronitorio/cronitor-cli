@@ -12,7 +12,7 @@ var fail bool
 var msg string
 
 var pingCmd = &cobra.Command{
-	Use:   "ping <code>",
+	Use:   "ping <key>",
 	Short: "Send a single ping to the selected monitoring endpoint",
 	Long: `
 Ping the specified monitor to report current status.
@@ -34,7 +34,7 @@ Example when using authenticated ping requests:
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
-			return errors.New("a unique monitor code is required")
+			return errors.New("a unique monitor key is required")
 		}
 
 		if len(getEndpointFromFlag()) == 0 {

@@ -26,7 +26,7 @@ var execCmd = &cobra.Command{
 	Long: `
 The supplied command will be executed and Cronitor will be notified of success or failure.
 
-Note: Arguments supplied after the unique monitor code are treated as part of the command to execute. Flags intended for the 'exec' command must be passed before the monitor code.
+Note: Arguments supplied after the unique monitor key are treated as part of the command to execute. Flags intended for the 'exec' command must be passed before the monitor key.
 
 Example:
   $ cronitor exec d3x0c1 /path/to/command.sh --command-param argument1 argument2
@@ -38,7 +38,7 @@ Example with no command output send to Cronitor:
 	Args: func(cmd *cobra.Command, args []string) error {
 		// We need to use raw os.Args so we can pass the wrapped command through unparsed
 		var foundExec, foundCode bool
-		monitorCodeRegex := regexp.MustCompile(`^[A-Za-z0-9]{3,12}$`)
+		monitorCodeRegex := regexp.MustCompile(`^[\S]{1,128}$`)
 
 		for _, arg := range os.Args {
 			// Treat anything that comes after the monitor code as the command to execute
@@ -70,7 +70,7 @@ Example with no command output send to Cronitor:
 		}
 
 		if len(monitorCode) < 1 || len(commandParts) < 1 {
-			return errors.New("A unique monitor code and cli command are required e.g. cronitor exec d3x0c1 /path/to/command.sh")
+			return errors.New("A unique monitor key and cli command are required e.g. cronitor exec d3x0c1 /path/to/command.sh")
 		}
 
 		return nil
