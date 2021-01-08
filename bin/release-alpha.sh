@@ -26,7 +26,7 @@ equinox release \
  --app="app_itoJoCoW8dr" \
  --token=$CRONITORCLI_EQUINOX_TOKEN \
  --channel="alpha" \
-cronitor
+github.com/cronitorio/cronitor-cli
 
 if [ "$CRONITORCLI_SENTRY_DSN" ]
   then perl -pi -e "s/raven\.SetDSN\(\"${SENTRY_DSN_ESCAPED}\"\)/\/\/\ SetDSN/g" main.go
