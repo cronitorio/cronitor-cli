@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var Version string = "26.0"
+var Version string = "26.1"
 
 var cfgFile string
 var userAgent string
@@ -119,6 +119,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 
 	hostname := effectiveHostname()
 	pingApiAuthKey := viper.GetString(varPingApiKey)
+	apiKey := viper.GetString(varApiKey)
 	pingApiHost := ""
 	authenticationKey := ""
 	formattedStamp := ""
@@ -156,10 +157,21 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 		series = fmt.Sprintf("&series=%s", series)
 	}
 
+	// If a user has set a key specifically for pings, use it.
 	if len(pingApiAuthKey) > 0 {
 		authenticationKey = pingApiAuthKey
 	} else {
 		authenticationKey = apiKey
+	}
+
+	// If we don't have any authentication key we will need to send an unauthenticated ping.
+	// This requires that we have a GUID "monitor code" not a per-user "monitor key"
+	if len(authenticationKey) == 0 {
+		monitorCodeRegex := regexp.MustCompile(`^[A-Za-z0-9]{3,12}$`)
+		if ret := monitorCodeRegex.FindStringSubmatch(uniqueIdentifier); ret == nil {
+			log("Cannot send ping: you must provide a valid API key with this command or save a key using 'cronitor configure'")
+			return
+		}
 	}
 
 	pingSent := false
@@ -185,8 +197,6 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 			// Fallback to sending an unauthenticated ping
 			uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode)
 		}
-
-
 
 		log("Sending ping " + uri)
 
