@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var Version string = "26.1"
+var Version string = "26.2"
 
 var cfgFile string
 var userAgent string
@@ -178,7 +178,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	uri := ""
 	for i := 1; i <= 6; i++ {
 		if dev {
-			pingApiHost = "http://dev.cronitor.io"
+			pingApiHost = "http://localhost:8000"
 		} else if i > 2 && pingApiHost == "https://cronitor.link" {
 			pingApiHost = "https://cronitor.io"
 		} else {
@@ -220,7 +220,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 
 		// Backoff on any 4xx request, e.g. 429 Too Many Requests
 		if response.StatusCode >= 400 && response.StatusCode < 500 {
-			pingSent = true
+			pingSent = false
 			break
 		}
 	}

@@ -55,6 +55,8 @@ Example setting common exclude text for use with 'cronitor discover':
 		configData.Log = viper.GetString(varLog)
 
 		if verbose {
+			fmt.Println("\nVersion:")
+			fmt.Println(Version)
 			fmt.Println("\nAPI Key:")
 			fmt.Println(configData.ApiKey)
 			fmt.Println("\nPing API Key:")
@@ -65,6 +67,10 @@ Example setting common exclude text for use with 'cronitor discover':
 			fmt.Println(effectiveTimezoneLocationName())
 			fmt.Println("\nDebug Log:")
 			fmt.Println(viper.GetString(varLog))
+			fmt.Println("\nEnviornment Variables:")
+			for _, pair := range os.Environ() {
+				fmt.Println(pair)
+			}
 		}
 
 		b, err := json.MarshalIndent(configData, "", "    ")
