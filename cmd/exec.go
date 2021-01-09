@@ -16,6 +16,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	flag "github.com/spf13/pflag"
+
 )
 
 var monitorCode string
@@ -40,7 +42,17 @@ Example with no command output send to Cronitor:
 		var foundExec, foundCode bool
 		monitorCodeRegex := regexp.MustCompile(`^[\S]{1,128}$`)
 
+		// We need to know all of the flags so we can properly identify the monitor code.
+		allFlags := map[string]bool{
+			"--": true,   // seed with the argument separator
+		}
+		cmd.Flags().VisitAll(func(flag *flag.Flag) {
+			allFlags["--" + flag.Name] = true
+			allFlags["-" + flag.Shorthand] = true
+		})
+
 		for _, arg := range os.Args {
+			arg = strings.TrimSpace(arg)
 			// Treat anything that comes after the monitor code as the command to execute
 			if foundCode {
 				commandParts = append(commandParts, strings.TrimSpace(arg))
@@ -49,11 +61,16 @@ Example with no command output send to Cronitor:
 
 			// After finding "exec" we are looking for a monitor code
 			if foundExec && !foundCode {
-				if ret := monitorCodeRegex.FindStringSubmatch(strings.TrimSpace(arg)); ret != nil {
-					monitorCode = arg
-					foundCode = true
+				if _, is_flag := allFlags[arg]; is_flag {
+					continue
 				}
-				continue
+
+				if ret := monitorCodeRegex.FindStringSubmatch(arg); ret == nil {
+					continue
+				}
+
+				monitorCode = arg
+				foundCode = true
 			}
 
 			if strings.ToLower(arg) == "exec" {

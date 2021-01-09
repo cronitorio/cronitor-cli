@@ -11,5 +11,6 @@ require (
 	github.com/manifoldco/promptui v0.7.0
 	github.com/olekukonko/tablewriter v0.0.4
 	github.com/spf13/cobra v0.0.6
+	github.com/spf13/pflag v1.0.3
 	github.com/spf13/viper v1.6.2
 )
