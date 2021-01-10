@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var Version string = "26.2"
+var Version string = "26.3"
 
 var cfgFile string
 var userAgent string
@@ -132,10 +132,6 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 
 	if len(message) > 0 {
 		message = fmt.Sprintf("&msg=%s", url.QueryEscape(truncateString(message, 1000)))
-	}
-
-	if len(pingApiAuthKey) > 0 {
-		pingApiAuthKey = fmt.Sprintf("&auth_key=%s", truncateString(pingApiAuthKey, 50))
 	}
 
 	if len(hostname) > 0 {
