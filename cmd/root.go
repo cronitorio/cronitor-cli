@@ -23,13 +23,14 @@ import (
 	"github.com/spf13/viper"
 )
 
-var Version string = "26.3"
+var Version string = "27.0"
 
 var cfgFile string
 var userAgent string
 
 // Flags that are either global or used in multiple commands
 var apiKey string
+var environment string
 var debugLog string
 var dev bool
 var hostname string
@@ -55,6 +56,7 @@ func Execute() {
 }
 
 var varApiKey = "CRONITOR_API_KEY"
+var varEnv = "CRONITOR_ENV"
 var varHostname = "CRONITOR_HOSTNAME"
 var varLog = "CRONITOR_LOG"
 var varPingApiKey = "CRONITOR_PING_API_KEY"
@@ -69,6 +71,7 @@ func init() {
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
 	RootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", cfgFile, "Config file")
+	RootCmd.PersistentFlags().StringVar(&environment, "env", apiKey, "Cronitor Environment")
 	RootCmd.PersistentFlags().StringVarP(&apiKey, "api-key", "k", apiKey, "Cronitor API Key")
 	RootCmd.PersistentFlags().StringVarP(&pingApiKey, "ping-api-key", "p", pingApiKey, "Ping API Key")
 	RootCmd.PersistentFlags().StringVarP(&hostname, "hostname", "n", hostname, "A unique identifier for this host (default: system hostname)")
@@ -79,6 +82,7 @@ func init() {
 	RootCmd.PersistentFlags().MarkHidden("use-dev")
 
 	viper.BindPFlag(varApiKey, RootCmd.PersistentFlags().Lookup("api-key"))
+	viper.BindPFlag(varEnv, RootCmd.PersistentFlags().Lookup("env"))
 	viper.BindPFlag(varHostname, RootCmd.PersistentFlags().Lookup("hostname"))
 	viper.BindPFlag(varLog, RootCmd.PersistentFlags().Lookup("log"))
 	viper.BindPFlag(varPingApiKey, RootCmd.PersistentFlags().Lookup("ping-api-key"))
@@ -105,8 +109,6 @@ func initConfig() {
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
 		log("Reading config from " + viper.ConfigFileUsed())
-	} else {
-		fmt.Printf("Error: Problem with config file at %s: %s\n\n", viper.ConfigFileUsed(), err.Error())
 	}
 }
 
@@ -120,6 +122,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	hostname := effectiveHostname()
 	pingApiAuthKey := viper.GetString(varPingApiKey)
 	apiKey := viper.GetString(varApiKey)
+	env := viper.GetString(varEnv)
 	pingApiHost := ""
 	authenticationKey := ""
 	formattedStamp := ""
@@ -138,6 +141,10 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 		hostname = fmt.Sprintf("&host=%s", url.QueryEscape(truncateString(hostname, 50)))
 	}
 
+	if len(env) > 0 {
+		env = fmt.Sprintf("&env=%s", url.QueryEscape(truncateString(env, 50)))
+	}
+
 	// By passing duration up, we save the computation on the server side
 	if duration != nil {
 		formattedDuration = fmt.Sprintf("&duration=%s", formatStamp(*duration))
@@ -151,6 +158,10 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	// The `series` data is used to match run events with complete or fail. Useful if multiple instances of a job are running.
 	if len(series) > 0 {
 		series = fmt.Sprintf("&series=%s", series)
+	}
+
+	if len(message) > 0 {
+		message = fmt.Sprintf("&msg=%s", url.QueryEscape(truncateString(message, 1000)))
 	}
 
 	// If a user has set a key specifically for pings, use it.
@@ -188,10 +199,10 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 
 		if len(authenticationKey) > 0 {
 			// Authenticated pings when available
-			uri = fmt.Sprintf("%s/ping/%s/%s?state=%s&try=%d%s%s%s%s%s%s", pingApiHost, authenticationKey, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode)
+			uri = fmt.Sprintf("%s/ping/%s/%s?state=%s&try=%d%s%s%s%s%s%s%s", pingApiHost, authenticationKey, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode, env)
 		} else {
 			// Fallback to sending an unauthenticated ping
-			uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode)
+			uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode, env)
 		}
 
 		log("Sending ping " + uri)
