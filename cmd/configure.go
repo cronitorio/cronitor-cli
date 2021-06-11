@@ -15,6 +15,7 @@ type ConfigFile struct {
 	ExcludeText    []string `json:"CRONITOR_EXCLUDE_TEXT,omitempty"`
 	Hostname       string   `json:"CRONITOR_HOSTNAME"`
 	Log            string   `json:"CRONITOR_LOG"`
+	Env            string   `json:"CRONITOR_ENV"`
 }
 
 // configureCmd represents the configure command
@@ -53,20 +54,49 @@ Example setting common exclude text for use with 'cronitor discover':
 		configData.ExcludeText = viper.GetStringSlice(varExcludeText)
 		configData.Hostname = viper.GetString(varHostname)
 		configData.Log = viper.GetString(varLog)
+		configData.Env = viper.GetString(varEnv)
+
+		fmt.Println("\nConfiguration File:")
+		fmt.Println(configFilePath())
+
+		fmt.Println("\nVersion:")
+		fmt.Println(Version)
+
+		fmt.Println("\nAPI Key:")
+		if configData.ApiKey == "" {
+			fmt.Println("Not Set")
+		} else {
+			fmt.Println(configData.ApiKey)
+		}
+
+		fmt.Println("\nPing API Key:")
+		if configData.PingApiAuthKey == "" {
+			fmt.Println("Not Set")
+		} else {
+			fmt.Println(configData.PingApiAuthKey)
+		}
+
+		fmt.Println("\nEnvironment:")
+		if configData.Env == "" {
+			fmt.Println("Not Set")
+		} else {
+			fmt.Println(configData.Env)
+		}
+
+		fmt.Println("\nHostname:")
+		fmt.Println(effectiveHostname())
+
+		fmt.Println("\nTimezone Location:")
+		fmt.Println(effectiveTimezoneLocationName())
+
+		fmt.Println("\nDebug Log:")
+		if viper.GetString(varLog) == "" {
+			fmt.Println("Off")
+		} else {
+			fmt.Println(viper.GetString(varLog))
+		}
 
 		if verbose {
-			fmt.Println("\nVersion:")
-			fmt.Println(Version)
-			fmt.Println("\nAPI Key:")
-			fmt.Println(configData.ApiKey)
-			fmt.Println("\nPing API Key:")
-			fmt.Println(configData.PingApiAuthKey)
-			fmt.Println("\nHostname:")
-			fmt.Println(effectiveHostname())
-			fmt.Println("\nTimezone Location:")
-			fmt.Println(effectiveTimezoneLocationName())
-			fmt.Println("\nDebug Log:")
-			fmt.Println(viper.GetString(varLog))
 			fmt.Println("\nEnviornment Variables:")
 			for _, pair := range os.Environ() {
 				fmt.Println(pair)
@@ -83,7 +113,7 @@ Example setting common exclude text for use with 'cronitor discover':
 		if ioutil.WriteFile(configFilePath(), b, 0644) != nil {
 			fmt.Fprintf(os.Stderr,
 				"\nERROR: The configuration file %s could not be written; check permissions and try again. "+
-					"\n\nBy default, configuration files are system-wide for ease of use in cron jobs and scripts. Specify an alternate config file using the --config argument or CRONITOR_CONFIG environment variable.\n\n", configFilePath())
+					   "\n       By default, configuration files are system-wide for ease of use in cron jobs and scripts. Specify an alternate config file using the --config argument or CRONITOR_CONFIG environment variable.\n\n", configFilePath())
 			os.Exit(126)
 		}
 	},
