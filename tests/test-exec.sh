@@ -67,6 +67,14 @@ if grep -q "&status_code=123" $CLI_LOGFILE
     else echo "${TEST}.. FAIL"
 fi
 
+rm -f $CLI_LOGFILE
+TEST="Exec sends environment in pings"
+../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE --env test exec d3x0c1 true > /dev/null
+if grep -q "&env=test" $CLI_LOGFILE
+    then echo "${TEST}.. OK"
+    else echo "${TEST}.. FAIL"
+fi
+
 
 rm -f $CLI_LOGFILE
 TEST="Exec sends run timestamp as complete ping series"

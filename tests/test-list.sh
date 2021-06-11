@@ -13,7 +13,7 @@ echo ""
 
 rm -f $CLI_LOGFILE
 TEST="List reads crontab and writes table"
-if ../cronitor $CRONITOR_ARGS list ../fixtures/crontab.txt | grep -q "babylist_web"
+if ../cronitor $CRONITOR_ARGS list ../fixtures/crontab.txt | grep -q "/usr/bin/true"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi

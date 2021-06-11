@@ -40,7 +40,7 @@ rm -f $CLI_LOGFILE
 TEST="Ping with ping api key"
 KEY="XXXXXXXXXX"
 ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --ping-api-key $KEY --log $CLI_LOGFILE
-if grep -q "Sending ping ${HOSTNAME}/d3x0c1/run" $CLI_LOGFILE && grep -q "auth_key=${KEY}" $CLI_LOGFILE
+if grep -q "Sending ping" $CLI_LOGFILE && grep -q "${KEY}" $CLI_LOGFILE
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi

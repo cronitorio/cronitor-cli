@@ -160,10 +160,6 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 		series = fmt.Sprintf("&series=%s", series)
 	}
 
-	if len(message) > 0 {
-		message = fmt.Sprintf("&msg=%s", url.QueryEscape(truncateString(message, 1000)))
-	}
-
 	// If a user has set a key specifically for pings, use it.
 	if len(pingApiAuthKey) > 0 {
 		authenticationKey = pingApiAuthKey
