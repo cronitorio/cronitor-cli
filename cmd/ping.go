@@ -9,11 +9,12 @@ import (
 var run bool
 var complete bool
 var fail bool
+var tick bool
 var msg string
 
 var pingCmd = &cobra.Command{
 	Use:   "ping <key>",
-	Short: "Send a single ping to the selected monitoring endpoint",
+	Short: "Send a telemetry ping to Cronitor",
 	Long: `
 Ping the specified monitor to report current status.
 
@@ -60,6 +61,8 @@ func getEndpointFromFlag() string {
 		return "complete"
 	} else if run {
 		return "run"
+	} else if tick {
+		return "tick"
 	}
 
 	return ""
@@ -67,8 +70,9 @@ func getEndpointFromFlag() string {
 
 func init() {
 	RootCmd.AddCommand(pingCmd)
-	pingCmd.Flags().BoolVar(&run, "run", false, "Send a /run ping")
-	pingCmd.Flags().BoolVar(&complete, "complete", false, "Send a /complete ping")
-	pingCmd.Flags().BoolVar(&fail, "fail", false, "Send a /fail ping")
+	pingCmd.Flags().BoolVar(&run, "run", false, "Report job is running")
+	pingCmd.Flags().BoolVar(&complete, "complete", false, "Report job completion")
+	pingCmd.Flags().BoolVar(&fail, "fail", false, "Report job failure")
+	pingCmd.Flags().BoolVar(&tick, "tick", false, "Send a heartbeat")
 	pingCmd.Flags().StringVar(&msg, "msg", "", "Optional message to send with ping")
 }
