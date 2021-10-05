@@ -34,6 +34,7 @@ jobs:
     name: Create statically-linked build assets
     runs-on: ubuntu-latest
     strategy:
+      max-parallel: 3
       matrix:
         goos: [linux]
         goarch: [amd64]
@@ -58,7 +59,7 @@ jobs:
     name: Create build assets
     runs-on: ubuntu-latest
     strategy:
-      max-parallel: 4
+      max-parallel: 3
       matrix:
         goos: [linux, windows, darwin, freebsd]
         goarch: [amd64, arm, arm64]

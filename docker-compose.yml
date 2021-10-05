@@ -1,0 +1,20 @@
+version: '3'
+
+services:
+  linux:
+    build: .
+    restart: always
+    command: sleep 1000
+    cap_add:
+      - SYS_PTRACE
+    volumes:
+      - .:/cronitor
+
+  alpine:
+    image: alpine:latest
+    restart: always
+    command: /cronitor/cronitorX
+    cap_add:
+      - SYS_PTRACE
+    volumes:
+      - .:/cronitor
