@@ -11,6 +11,7 @@ var complete bool
 var fail bool
 var tick bool
 var msg string
+var series string
 
 var pingCmd = &cobra.Command{
 	Use:   "ping <key>",
@@ -49,7 +50,7 @@ Example when using authenticated ping requests:
 		var wg sync.WaitGroup
 
 		wg.Add(1)
-		go sendPing(getEndpointFromFlag(), args[0], msg, "", makeStamp(), nil, nil, &wg)
+		go sendPing(getEndpointFromFlag(), args[0], msg, series, makeStamp(), nil, nil, &wg)
 		wg.Wait()
 	},
 }
@@ -75,4 +76,5 @@ func init() {
 	pingCmd.Flags().BoolVar(&fail, "fail", false, "Report job failure")
 	pingCmd.Flags().BoolVar(&tick, "tick", false, "Send a heartbeat")
 	pingCmd.Flags().StringVar(&msg, "msg", "", "Optional message to send with ping")
+	pingCmd.Flags().StringVar(&series, "series", "", "Optional unique user-supplied ID to collate related pings")
 }
