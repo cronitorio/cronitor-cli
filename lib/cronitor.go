@@ -9,13 +9,16 @@ import (
 	"github.com/spf13/viper"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
 
+type RuleValue string
+
 type Rule struct {
 	RuleType     string `json:"rule_type"`
-	Value        string `json:"value"`
+	Value        RuleValue `json:"value"`
 	TimeUnit     string `json:"time_unit,omitempty"`
 	GraceSeconds uint   `json:"grace_seconds,omitempty"`
 }
@@ -47,6 +50,22 @@ type CronitorApi struct {
 	ApiKey         string
 	UserAgent      string
 	Logger         func(string)
+}
+
+
+func (fi *RuleValue) UnmarshalJSON(b []byte) error {
+	if b[0] == '"' {
+		return json.Unmarshal(b, (*string)(fi))
+	}
+
+	var i int
+	if err := json.Unmarshal(b, &i); err != nil {
+		return err
+	}
+	s := strconv.Itoa(i)
+
+	*fi = RuleValue(s)
+	return nil
 }
 
 func (api CronitorApi) PutMonitors(monitors map[string]*Monitor) (map[string]*Monitor, error) {

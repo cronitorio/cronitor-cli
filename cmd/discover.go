@@ -451,7 +451,7 @@ func createTags() []string {
 }
 
 func createRule(cronExpression string) lib.Rule {
-	return lib.Rule{"not_on_schedule", cronExpression, "", 0}
+	return lib.Rule{"not_on_schedule", lib.RuleValue(cronExpression), "", 0}
 }
 
 func validateName(candidateName string) error {
