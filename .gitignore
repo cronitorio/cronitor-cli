@@ -69,3 +69,4 @@ target/
 cronitor
 *.key
 ctab
+cronitor-cli
