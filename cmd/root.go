@@ -71,7 +71,7 @@ func init() {
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
 	RootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", cfgFile, "Config file")
-	RootCmd.PersistentFlags().StringVar(&environment, "env", apiKey, "Cronitor Environment")
+	RootCmd.PersistentFlags().StringVar(&environment, "env", environment, "Cronitor Environment")
 	RootCmd.PersistentFlags().StringVarP(&apiKey, "api-key", "k", apiKey, "Cronitor API Key")
 	RootCmd.PersistentFlags().StringVarP(&pingApiKey, "ping-api-key", "p", pingApiKey, "Ping API Key")
 	RootCmd.PersistentFlags().StringVarP(&hostname, "hostname", "n", hostname, "A unique identifier for this host (default: system hostname)")
