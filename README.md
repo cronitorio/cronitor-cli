@@ -15,7 +15,7 @@ For the latest installation details, see https://cronitor.io/docs/using-cronitor
 ### Usage
 
 ```
-CronitorCLI version 25.2
+CronitorCLI version 28.8
 
 Command line tools for Cronitor.io. See https://cronitor.io/docs/using-cronitor-cli for details.
 
