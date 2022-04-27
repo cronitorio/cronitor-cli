@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/kballard/go-shellquote"
 	"github.com/spf13/cobra"
+	flag "github.com/spf13/pflag"
 	"io"
 	"io/ioutil"
 	"os"
@@ -16,8 +17,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	flag "github.com/spf13/pflag"
-
 )
 
 var monitorCode string
@@ -237,7 +236,7 @@ func makeCronLikeEnv() []string {
 func makeSubcommandExec(subcommand string) *exec.Cmd {
 	var execCmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		execCmd = exec.Command("cmd", "/c", subcommand)
+		execCmd = exec.Command("powershell.exe", "-Command", subcommand)
 	} else if _, err := os.Stat("/bin/bash"); err == nil {
 		execCmd = exec.Command("bash", "-c", subcommand)
 	} else {
