@@ -111,11 +111,11 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 	var monitoringWaitGroup sync.WaitGroup
 
 	startTime := makeStamp()
-	formattedStartTime := formatStamp(startTime)
+	series := formatStamp(startTime)
 
 	if withMonitoring {
 		monitoringWaitGroup.Add(1)
-		go sendPing("run", monitorCode, subcommand, formattedStartTime, startTime, nil, nil, nil, &monitoringWaitGroup)
+		go sendPing("run", monitorCode, subcommand, series, startTime, nil, nil, nil, &monitoringWaitGroup)
 	}
 
 	log(fmt.Sprintf("Running subcommand: %s", subcommand))
@@ -199,11 +199,14 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 			if err == nil {
 				if withMonitoring {
 					monitoringWaitGroup.Add(1)
-					go sendPing("complete", monitorCode, string(outputForPing), formattedStartTime, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
+					go sendPing("complete", monitorCode, string(outputForPing), series, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
 					monitoringWaitGroup.Add(1)
 					go func(wg *sync.WaitGroup) {
 						outputForLogs := gatherOutput(tempFile, false)
 						_, err = shipLogData(monitorCode, series, string(outputForLogs))
+						if err != nil {
+							fmt.Printf("%v", err)
+						}
 						wg.Done()
 					}(&monitoringWaitGroup)
 				}
@@ -223,12 +226,11 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 
 				if withMonitoring {
 					monitoringWaitGroup.Add(1)
-					go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
+					go sendPing("fail", monitorCode, message, series, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
 					monitoringWaitGroup.Add(1)
 					go func(wg *sync.WaitGroup) {
 						outputForLogs := gatherOutput(tempFile, false)
 						_, err = shipLogData(monitorCode, series, string(outputForLogs))
-						fmt.Printf("%v\n", err)
 						wg.Done()
 					}(&monitoringWaitGroup)
 				}
@@ -377,7 +379,6 @@ func getPresignedUrl(postBody []byte) ([]byte, error) {
 	}
 	defer response.Body.Close()
 	response.Body = ioutil.NopCloser(bytes.NewBuffer(contents))
-
 	return contents, nil
 }
 

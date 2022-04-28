@@ -70,3 +70,5 @@ cronitor
 *.key
 ctab
 cronitor-cli
+
+local.md
