@@ -3,13 +3,15 @@ package cmd
 import (
 	"bytes"
 	"compress/gzip"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"github.com/kballard/go-shellquote"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	flag "github.com/spf13/pflag"
 	"io"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -198,6 +200,12 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 				if withMonitoring {
 					monitoringWaitGroup.Add(1)
 					go sendPing("complete", monitorCode, string(outputForPing), formattedStartTime, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
+					monitoringWaitGroup.Add(1)
+					go func(wg *sync.WaitGroup) {
+						outputForLogs := gatherOutput(tempFile, false)
+						_, err = shipLogData(monitorCode, series, string(outputForLogs))
+						wg.Done()
+					}(&monitoringWaitGroup)
 				}
 			} else {
 				message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), outputForPing))
@@ -216,6 +224,13 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 				if withMonitoring {
 					monitoringWaitGroup.Add(1)
 					go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
+					monitoringWaitGroup.Add(1)
+					go func(wg *sync.WaitGroup) {
+						outputForLogs := gatherOutput(tempFile, false)
+						_, err = shipLogData(monitorCode, series, string(outputForLogs))
+						fmt.Printf("%v\n", err)
+						wg.Done()
+					}(&monitoringWaitGroup)
 				}
 			}
 
@@ -336,4 +351,78 @@ func gzipLogData(logData string) *bytes.Buffer {
 		return nil
 	}
 	return &b
+}
+
+func getPresignedUrl(postBody []byte) ([]byte, error) {
+	url := "https://cronitor.io/api/logs/presign"
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	request, err := http.NewRequest("POST", url, strings.NewReader(string(postBody)))
+	if err != nil {
+		return nil, errors.Wrap(err, "could not create request for URL presign")
+	}
+	request.SetBasicAuth(apiKey, "")
+	request.Header.Add("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, errors.Wrap(err, "error requesting presigned url")
+	}
+	if response.StatusCode != 200 && response.StatusCode != 201 {
+		return nil, fmt.Errorf("error response code %d returned", response.StatusCode)
+	}
+
+	contents, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	response.Body = ioutil.NopCloser(bytes.NewBuffer(contents))
+
+	return contents, nil
+}
+
+func shipLogData(jobKey string, seriesID string, outputLogs string) ([]byte, error) {
+	gzippedLogs := gzipLogData(outputLogs)
+	jsonBytes, err := json.Marshal(map[string]string{
+		"job_key": jobKey,
+		"series":  seriesID,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "couldn't encode job and series IDs to JSON")
+	}
+	var responseJson struct {
+		Url string `json:"url"`
+	}
+	response, err := getPresignedUrl(jsonBytes)
+	if err != nil {
+		return nil, errors.Wrap(err, "error generating presign url for log uploading")
+	}
+	if err := json.Unmarshal(response, &responseJson); err != nil {
+		return nil, err
+	}
+	s3LogPutUrl := responseJson.Url
+	if len(s3LogPutUrl) == 0 {
+		return nil, errors.New("no presigned S3 url returned. Something is wrong")
+	}
+	req, err := http.NewRequest("PUT", s3LogPutUrl, gzippedLogs)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{
+		Timeout: 120 * time.Second,
+	}
+	response2, err := client.Do(req)
+	if err != nil || response == nil {
+		return nil, errors.Wrap(err, fmt.Sprintf("error putting logs: %v", response2))
+	}
+	if response2.StatusCode < 200 || response2.StatusCode >= 300 {
+		return nil, fmt.Errorf("error response code %d returned", response2.StatusCode)
+	}
+	body, err := ioutil.ReadAll(response2.Body)
+	if err != nil {
+		return nil, err
+	}
+	defer response2.Body.Close()
+	log(fmt.Sprintf("logs shipped for series %s", seriesID))
+	return body, nil
 }
