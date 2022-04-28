@@ -181,7 +181,14 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 
 			// Send output to Cronitor and clean up after the temp file
 			outputForPing := gatherOutput(tempFile, true)
-			logLengthForPing := getLogLength(tempFile)
+			var metrics map[string]int = nil
+			logLengthForPing, err := getFileSize(tempFile)
+			if err == nil {
+				metrics = map[string]int{
+					"length": int(logLengthForPing),
+				}
+			}
+
 			defer func() {
 				if tempFile != nil {
 					tempFile.Close()
@@ -192,9 +199,6 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 			endTime := makeStamp()
 			duration := endTime - startTime
 			exitCode := 0
-			metrics := map[string]int{
-				"length": logLengthForPing,
-			}
 
 			if err == nil {
 				if withMonitoring {
@@ -297,34 +301,41 @@ func getTempFile() (*os.File, error) {
 	}
 }
 
-func gatherOutput(tempFile *os.File, truncateLength bool) []byte {
-	var outputForPing []byte
-	var outputForPingMaxLen int64 = 2000
+func getFileSize(tempFile *os.File) (int64, error) {
+	// Known reasons stat could fail here:
+	// 1. temp file was removed by an external process
+	// 2. filesystem is no longer available
+
+	stat, err := os.Stat(tempFile.Name())
+	return stat.Size(), err
+}
+
+func gatherOutput(tempFile *os.File, truncateForPingOutput bool) []byte {
+	var outputBytes []byte
+	const outputForPingMaxLen int64 = 2000
+	const outputForLogUploadMaxLen int64 = 100000000
 	if noStdoutPassthru || tempFile == nil {
-		outputForPing = []byte{}
+		outputBytes = []byte{}
 	} else {
-		// Known reasons stat could fail here:
-		// 1. temp file was removed by an external process
-		// 2. filesystem is no longer available
-		if stat, err := os.Stat(tempFile.Name()); err == nil {
-			if size := stat.Size(); !truncateLength || size < outputForPingMaxLen {
-				outputForPing = make([]byte, size)
-				tempFile.Seek(0, 0)
-			} else {
-				outputForPing = make([]byte, outputForPingMaxLen)
+
+		if size, err := getFileSize(tempFile); err == nil {
+			// In all cases, if we have to truncate, we want to read the END
+			// of the log file, because it is more informative.
+			if truncateForPingOutput && size > outputForPingMaxLen {
+				outputBytes = make([]byte, outputForPingMaxLen)
 				tempFile.Seek(outputForPingMaxLen*-1, 2)
+			} else if !truncateForPingOutput && size > outputForLogUploadMaxLen {
+				outputBytes = make([]byte, outputForLogUploadMaxLen)
+				tempFile.Seek(outputForLogUploadMaxLen*-1, 2)
+			} else {
+				outputBytes = make([]byte, size)
+				tempFile.Seek(0, 0)
 			}
-			tempFile.Read(outputForPing)
+			tempFile.Read(outputBytes)
 		}
 	}
 
-	return outputForPing
-}
-
-// getLogLength returns the length of the output log file in bytes for use as a Cronitor ping metric
-func getLogLength(tempFile *os.File) int {
-	output := gatherOutput(tempFile, false)
-	return len(output)
+	return outputBytes
 }
 
 func isStaleFile(file os.FileInfo) bool {
