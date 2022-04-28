@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"bytes"
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"github.com/kballard/go-shellquote"
@@ -43,11 +45,11 @@ Example with no command output send to Cronitor:
 
 		// We need to know all of the flags so we can properly identify the monitor code.
 		allFlags := map[string]bool{
-			"--": true,   // seed with the argument separator
+			"--": true, // seed with the argument separator
 		}
 		cmd.Flags().VisitAll(func(flag *flag.Flag) {
-			allFlags["--" + flag.Name] = true
-			allFlags["-" + flag.Shorthand] = true
+			allFlags["--"+flag.Name] = true
+			allFlags["-"+flag.Shorthand] = true
 		})
 
 		for _, arg := range os.Args {
@@ -111,7 +113,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 
 	if withMonitoring {
 		monitoringWaitGroup.Add(1)
-		go sendPing("run", monitorCode, subcommand, formattedStartTime, startTime, nil, nil, &monitoringWaitGroup)
+		go sendPing("run", monitorCode, subcommand, formattedStartTime, startTime, nil, nil, nil, &monitoringWaitGroup)
 	}
 
 	log(fmt.Sprintf("Running subcommand: %s", subcommand))
@@ -176,7 +178,8 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 		case err := <-waitCh:
 
 			// Send output to Cronitor and clean up after the temp file
-			outputForPing := gatherOutput(tempFile)
+			outputForPing := gatherOutput(tempFile, true)
+			logLengthForPing := getLogLength(tempFile)
 			defer func() {
 				if tempFile != nil {
 					tempFile.Close()
@@ -187,10 +190,14 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 			endTime := makeStamp()
 			duration := endTime - startTime
 			exitCode := 0
+			metrics := map[string]int{
+				"length": logLengthForPing,
+			}
+
 			if err == nil {
 				if withMonitoring {
 					monitoringWaitGroup.Add(1)
-					go sendPing("complete", monitorCode, string(outputForPing), formattedStartTime, endTime, &duration, &exitCode, &monitoringWaitGroup)
+					go sendPing("complete", monitorCode, string(outputForPing), formattedStartTime, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
 				}
 			} else {
 				message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), outputForPing))
@@ -208,7 +215,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 
 				if withMonitoring {
 					monitoringWaitGroup.Add(1)
-					go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, &monitoringWaitGroup)
+					go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
 				}
 			}
 
@@ -273,7 +280,7 @@ func getTempFile() (*os.File, error) {
 	}
 }
 
-func gatherOutput(tempFile *os.File) []byte {
+func gatherOutput(tempFile *os.File, truncateLength bool) []byte {
 	var outputForPing []byte
 	var outputForPingMaxLen int64 = 2000
 	if noStdoutPassthru || tempFile == nil {
@@ -283,7 +290,7 @@ func gatherOutput(tempFile *os.File) []byte {
 		// 1. temp file was removed by an external process
 		// 2. filesystem is no longer available
 		if stat, err := os.Stat(tempFile.Name()); err == nil {
-			if size := stat.Size(); size < outputForPingMaxLen {
+			if size := stat.Size(); !truncateLength || size < outputForPingMaxLen {
 				outputForPing = make([]byte, size)
 				tempFile.Seek(0, 0)
 			} else {
@@ -297,6 +304,12 @@ func gatherOutput(tempFile *os.File) []byte {
 	return outputForPing
 }
 
+// getLogLength returns the length of the output log file in bytes for use as a Cronitor ping metric
+func getLogLength(tempFile *os.File) int {
+	output := gatherOutput(tempFile, false)
+	return len(output)
+}
+
 func isStaleFile(file os.FileInfo) bool {
 	var timeLimit = 3 * 24 * time.Hour
 
@@ -305,4 +318,22 @@ func isStaleFile(file os.FileInfo) bool {
 	}
 
 	return time.Now().Sub(file.ModTime()) > timeLimit
+}
+
+func gzipLogData(logData string) *bytes.Buffer {
+	var b bytes.Buffer
+	if len(logData) < 1 {
+		return &b
+	}
+
+	gz := gzip.NewWriter(&b)
+	if _, err := gz.Write([]byte(logData)); err != nil {
+		log("error writing gzip")
+		return nil
+	}
+	if err := gz.Close(); err != nil {
+		log("error closing gzip")
+		return nil
+	}
+	return &b
 }

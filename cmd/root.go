@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	"github.com/cronitorio/cronitor-cli/lib"
 	"errors"
 	"fmt"
+	"github.com/cronitorio/cronitor-cli/lib"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -112,7 +112,7 @@ func initConfig() {
 	}
 }
 
-func sendPing(endpoint string, uniqueIdentifier string, message string, series string, timestamp float64, duration *float64, exitCode *int, group *sync.WaitGroup) {
+func sendPing(endpoint string, uniqueIdentifier string, message string, series string, timestamp float64, duration *float64, exitCode *int, metrics map[string]int, group *sync.WaitGroup) {
 	defer group.Done()
 
 	Client := &http.Client{
@@ -128,6 +128,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	formattedStamp := ""
 	formattedDuration := ""
 	formattedStatusCode := ""
+	formattedMetrics := ""
 
 	if timestamp > 0 {
 		formattedStamp = fmt.Sprintf("&stamp=%s", formatStamp(timestamp))
@@ -158,6 +159,14 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	// The `series` data is used to match run events with complete or fail. Useful if multiple instances of a job are running.
 	if len(series) > 0 {
 		series = fmt.Sprintf("&series=%s", series)
+	}
+
+	if metrics != nil && len(metrics) > 0 {
+		values := url.Values{}
+		for key, element := range metrics {
+			values.Add("metric", fmt.Sprintf("%s:%d", key, element))
+		}
+		formattedMetrics = "&" + values.Encode()
 	}
 
 	// If a user has set a key specifically for pings, use it.
@@ -195,10 +204,10 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 
 		if len(authenticationKey) > 0 {
 			// Authenticated pings when available
-			uri = fmt.Sprintf("%s/ping/%s/%s?state=%s&try=%d%s%s%s%s%s%s%s", pingApiHost, authenticationKey, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode, env)
+			uri = fmt.Sprintf("%s/ping/%s/%s?state=%s&try=%d%s%s%s%s%s%s%s%s", pingApiHost, authenticationKey, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode, formattedMetrics, env)
 		} else {
 			// Fallback to sending an unauthenticated ping
-			uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode, env)
+			uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode, formattedMetrics, env)
 		}
 
 		log("Sending ping " + uri)
