@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/cronitorio/cronitor-cli/lib"
 	"fmt"
+	"github.com/cronitorio/cronitor-cli/lib"
 	"github.com/kballard/go-shellquote"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -202,7 +202,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 					monitoringWaitGroup.Add(1)
 					go sendPing("complete", monitorCode, string(outputForPing), series, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
 					monitoringWaitGroup.Add(1)
-					go shipLogData(tempFile, &monitoringWaitGroup)
+					go shipLogData(tempFile, series, &monitoringWaitGroup)
 				}
 			} else {
 				message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), outputForPing))
@@ -222,7 +222,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 					monitoringWaitGroup.Add(1)
 					go sendPing("fail", monitorCode, message, series, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
 					monitoringWaitGroup.Add(1)
-					go shipLogData(tempFile, &monitoringWaitGroup)
+					go shipLogData(tempFile, series, &monitoringWaitGroup)
 				}
 			}
 
@@ -334,7 +334,7 @@ func isStaleFile(file os.FileInfo) bool {
 	return time.Now().Sub(file.ModTime()) > timeLimit
 }
 
-func shipLogData(tempFile *os.File, wg *sync.WaitGroup) {
+func shipLogData(tempFile *os.File, series string, wg *sync.WaitGroup) {
 	outputForLogs := gatherOutput(tempFile, false)
 	_, err := lib.SendLogData(apiKey, monitorCode, series, string(outputForLogs))
 	if err != nil {
