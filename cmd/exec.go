@@ -182,8 +182,8 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 			// Send output to Cronitor and clean up after the temp file
 			outputForPing := gatherOutput(tempFile, true)
 			var metrics map[string]int = nil
-			logLengthForPing, err := getFileSize(tempFile)
-			if err == nil {
+			logLengthForPing, err2 := getFileSize(tempFile)
+			if err2 == nil {
 				metrics = map[string]int{
 					"length": int(logLengthForPing),
 				}
@@ -205,14 +205,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 					monitoringWaitGroup.Add(1)
 					go sendPing("complete", monitorCode, string(outputForPing), series, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
 					monitoringWaitGroup.Add(1)
-					go func(wg *sync.WaitGroup) {
-						outputForLogs := gatherOutput(tempFile, false)
-						_, err = shipLogData(monitorCode, series, string(outputForLogs))
-						if err != nil {
-							fmt.Printf("%v", err)
-						}
-						wg.Done()
-					}(&monitoringWaitGroup)
+					go shipLogData(tempFile, &monitoringWaitGroup)
 				}
 			} else {
 				message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), outputForPing))
@@ -232,11 +225,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 					monitoringWaitGroup.Add(1)
 					go sendPing("fail", monitorCode, message, series, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
 					monitoringWaitGroup.Add(1)
-					go func(wg *sync.WaitGroup) {
-						outputForLogs := gatherOutput(tempFile, false)
-						_, err = shipLogData(monitorCode, series, string(outputForLogs))
-						wg.Done()
-					}(&monitoringWaitGroup)
+					go shipLogData(tempFile, &monitoringWaitGroup)
 				}
 			}
 
@@ -348,6 +337,15 @@ func isStaleFile(file os.FileInfo) bool {
 	return time.Now().Sub(file.ModTime()) > timeLimit
 }
 
+func shipLogData(tempFile *os.File, wg *sync.WaitGroup) {
+	outputForLogs := gatherOutput(tempFile, false)
+	_, err := sendLogData(monitorCode, series, string(outputForLogs))
+	if err != nil {
+		log(fmt.Sprintf("%v", err))
+	}
+	wg.Done()
+}
+
 func gzipLogData(logData string) *bytes.Buffer {
 	var b bytes.Buffer
 	if len(logData) < 1 {
@@ -393,10 +391,10 @@ func getPresignedUrl(postBody []byte) ([]byte, error) {
 	return contents, nil
 }
 
-func shipLogData(jobKey string, seriesID string, outputLogs string) ([]byte, error) {
+func sendLogData(monitorKey string, seriesID string, outputLogs string) ([]byte, error) {
 	gzippedLogs := gzipLogData(outputLogs)
 	jsonBytes, err := json.Marshal(map[string]string{
-		"job_key": jobKey,
+		"job_key": monitorKey,
 		"series":  seriesID,
 	})
 	if err != nil {
