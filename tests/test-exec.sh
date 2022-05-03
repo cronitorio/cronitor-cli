@@ -46,7 +46,7 @@ fi
 rm -f $CLI_LOGFILE
 TEST="Exec sends complete ping on success"
 ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 true > /dev/null
-if grep -q "Sending ping ${HOSTNAME}/d3x0c1/complete" $CLI_LOGFILE
+if grep "Sending ping" $CLI_LOGFILE | grep -q "state=complete"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
@@ -54,7 +54,7 @@ fi
 rm -f $CLI_LOGFILE
 TEST="Exec sends fail ping on failure"
 ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 false > /dev/null
-if grep -q "Sending ping ${HOSTNAME}/d3x0c1/fail" $CLI_LOGFILE
+if grep "Sending ping" $CLI_LOGFILE | grep -q "state=fail"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
@@ -95,7 +95,7 @@ fi
 rm -f $CLI_LOGFILE
 TEST="Exec sends command with run ping"
 ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec --no-stdout d3x0c1 ../bin/success.sh xyz > /dev/null
-if grep "/run" $CLI_LOGFILE | grep "&msg=" | grep -q "success.sh+xyz"
+if grep "state=run" $CLI_LOGFILE | grep "&msg=" | grep -q "success.sh+xyz"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi

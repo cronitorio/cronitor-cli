@@ -1,9 +1,10 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
+	"github.com/cronitorio/cronitor-cli/lib"
 	"github.com/kballard/go-shellquote"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	flag "github.com/spf13/pflag"
 	"io"
@@ -43,11 +44,11 @@ Example with no command output send to Cronitor:
 
 		// We need to know all of the flags so we can properly identify the monitor code.
 		allFlags := map[string]bool{
-			"--": true,   // seed with the argument separator
+			"--": true, // seed with the argument separator
 		}
 		cmd.Flags().VisitAll(func(flag *flag.Flag) {
-			allFlags["--" + flag.Name] = true
-			allFlags["-" + flag.Shorthand] = true
+			allFlags["--"+flag.Name] = true
+			allFlags["-"+flag.Shorthand] = true
 		})
 
 		for _, arg := range os.Args {
@@ -107,11 +108,11 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 	var monitoringWaitGroup sync.WaitGroup
 
 	startTime := makeStamp()
-	formattedStartTime := formatStamp(startTime)
+	series := formatStamp(startTime)
 
 	if withMonitoring {
 		monitoringWaitGroup.Add(1)
-		go sendPing("run", monitorCode, subcommand, formattedStartTime, startTime, nil, nil, &monitoringWaitGroup)
+		go sendPing("run", monitorCode, subcommand, series, startTime, nil, nil, nil, &monitoringWaitGroup)
 	}
 
 	log(fmt.Sprintf("Running subcommand: %s", subcommand))
@@ -176,7 +177,15 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 		case err := <-waitCh:
 
 			// Send output to Cronitor and clean up after the temp file
-			outputForPing := gatherOutput(tempFile)
+			outputForPing := gatherOutput(tempFile, true)
+			var metrics map[string]int = nil
+			logLengthForPing, err2 := getFileSize(tempFile)
+			if err2 == nil {
+				metrics = map[string]int{
+					"length": int(logLengthForPing),
+				}
+			}
+
 			defer func() {
 				if tempFile != nil {
 					tempFile.Close()
@@ -187,10 +196,13 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 			endTime := makeStamp()
 			duration := endTime - startTime
 			exitCode := 0
+
 			if err == nil {
 				if withMonitoring {
 					monitoringWaitGroup.Add(1)
-					go sendPing("complete", monitorCode, string(outputForPing), formattedStartTime, endTime, &duration, &exitCode, &monitoringWaitGroup)
+					go sendPing("complete", monitorCode, string(outputForPing), series, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
+					monitoringWaitGroup.Add(1)
+					go shipLogData(tempFile, series, &monitoringWaitGroup)
 				}
 			} else {
 				message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), outputForPing))
@@ -208,7 +220,9 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 
 				if withMonitoring {
 					monitoringWaitGroup.Add(1)
-					go sendPing("fail", monitorCode, message, formattedStartTime, endTime, &duration, &exitCode, &monitoringWaitGroup)
+					go sendPing("fail", monitorCode, message, series, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
+					monitoringWaitGroup.Add(1)
+					go shipLogData(tempFile, series, &monitoringWaitGroup)
 				}
 			}
 
@@ -273,28 +287,41 @@ func getTempFile() (*os.File, error) {
 	}
 }
 
-func gatherOutput(tempFile *os.File) []byte {
-	var outputForPing []byte
-	var outputForPingMaxLen int64 = 2000
+func getFileSize(tempFile *os.File) (int64, error) {
+	// Known reasons stat could fail here:
+	// 1. temp file was removed by an external process
+	// 2. filesystem is no longer available
+
+	stat, err := os.Stat(tempFile.Name())
+	return stat.Size(), err
+}
+
+func gatherOutput(tempFile *os.File, truncateForPingOutput bool) []byte {
+	var outputBytes []byte
+	const outputForPingMaxLen int64 = 2000
+	const outputForLogUploadMaxLen int64 = 100000000
 	if noStdoutPassthru || tempFile == nil {
-		outputForPing = []byte{}
+		outputBytes = []byte{}
 	} else {
-		// Known reasons stat could fail here:
-		// 1. temp file was removed by an external process
-		// 2. filesystem is no longer available
-		if stat, err := os.Stat(tempFile.Name()); err == nil {
-			if size := stat.Size(); size < outputForPingMaxLen {
-				outputForPing = make([]byte, size)
-				tempFile.Seek(0, 0)
-			} else {
-				outputForPing = make([]byte, outputForPingMaxLen)
+
+		if size, err := getFileSize(tempFile); err == nil {
+			// In all cases, if we have to truncate, we want to read the END
+			// of the log file, because it is more informative.
+			if truncateForPingOutput && size > outputForPingMaxLen {
+				outputBytes = make([]byte, outputForPingMaxLen)
 				tempFile.Seek(outputForPingMaxLen*-1, 2)
+			} else if !truncateForPingOutput && size > outputForLogUploadMaxLen {
+				outputBytes = make([]byte, outputForLogUploadMaxLen)
+				tempFile.Seek(outputForLogUploadMaxLen*-1, 2)
+			} else {
+				outputBytes = make([]byte, size)
+				tempFile.Seek(0, 0)
 			}
-			tempFile.Read(outputForPing)
+			tempFile.Read(outputBytes)
 		}
 	}
 
-	return outputForPing
+	return outputBytes
 }
 
 func isStaleFile(file os.FileInfo) bool {
@@ -305,4 +332,13 @@ func isStaleFile(file os.FileInfo) bool {
 	}
 
 	return time.Now().Sub(file.ModTime()) > timeLimit
+}
+
+func shipLogData(tempFile *os.File, series string, wg *sync.WaitGroup) {
+	outputForLogs := gatherOutput(tempFile, false)
+	_, err := lib.SendLogData(apiKey, monitorCode, series, string(outputForLogs))
+	if err != nil {
+		log(fmt.Sprintf("%v", err))
+	}
+	wg.Done()
 }
