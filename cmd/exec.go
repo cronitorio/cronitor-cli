@@ -7,6 +7,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	flag "github.com/spf13/pflag"
+	"github.com/spf13/viper"
 	"io"
 	"io/ioutil"
 	"os"
@@ -336,7 +337,7 @@ func isStaleFile(file os.FileInfo) bool {
 
 func shipLogData(tempFile *os.File, series string, wg *sync.WaitGroup) {
 	outputForLogs := gatherOutput(tempFile, false)
-	_, err := lib.SendLogData(apiKey, monitorCode, series, string(outputForLogs))
+	_, err := lib.SendLogData(viper.GetString(varApiKey), monitorCode, series, string(outputForLogs))
 	if err != nil {
 		log(fmt.Sprintf("%v", err))
 	}
