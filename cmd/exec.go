@@ -299,7 +299,7 @@ func getFileSize(tempFile *os.File) (int64, error) {
 
 func gatherOutput(tempFile *os.File, truncateForPingOutput bool) []byte {
 	var outputBytes []byte
-	const outputForPingMaxLen int64 = 2000
+	const outputForPingMaxLen int64 = 1000
 	const outputForLogUploadMaxLen int64 = 100000000
 	if noStdoutPassthru || tempFile == nil {
 		outputBytes = []byte{}
