@@ -15,7 +15,4 @@ require (
 	github.com/spf13/viper v1.9.0
 )
 
-require (
-	github.com/certifi/gocertifi v0.0.0-20200211180108-c7c1fbc02894 // indirect
-	github.com/pkg/errors v0.8.1
-)
+require github.com/pkg/errors v0.8.1

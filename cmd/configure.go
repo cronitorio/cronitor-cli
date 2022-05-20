@@ -3,10 +3,11 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"io/ioutil"
 	"os"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 type ConfigFile struct {
@@ -113,7 +114,7 @@ Example setting common exclude text for use with 'cronitor discover':
 		if ioutil.WriteFile(configFilePath(), b, 0644) != nil {
 			fmt.Fprintf(os.Stderr,
 				"\nERROR: The configuration file %s could not be written; check permissions and try again. "+
-					   "\n       By default, configuration files are system-wide for ease of use in cron jobs and scripts. Specify an alternate config file using the --config argument or CRONITOR_CONFIG environment variable.\n\n", configFilePath())
+					"\n       By default, configuration files are system-wide for ease of use in cron jobs and scripts. Specify an alternate config file using the --config argument or CRONITOR_CONFIG environment variable.\n\n", configFilePath())
 			os.Exit(126)
 		}
 	},
