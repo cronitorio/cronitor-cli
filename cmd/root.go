@@ -252,6 +252,14 @@ func effectiveHostname() string {
 }
 
 func effectiveTimezoneLocationName() lib.TimezoneLocationName {
+
+	if runtime.GOOS == "windows" {
+		out, err := exec.Command("powershell", "-NoProfile", "-c", "(Get-TimeZone | Select-Object -First 1 -Property Id).Id | Write-Output").CombinedOutput()
+		if err == nil {
+			return lib.TimezoneLocationName{fmt.Sprintf("%s", out)}
+		}
+	}
+
 	// First, check if a TZ or CRON_TZ environemnt variable is set -- Diff var used by diff distros
 	if locale, isSetFlag := os.LookupEnv("TZ"); isSetFlag {
 		return lib.TimezoneLocationName{locale}

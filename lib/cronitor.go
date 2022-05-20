@@ -18,17 +18,36 @@ import (
 type RuleValue string
 
 type Rule struct {
-	RuleType     string `json:"rule_type"`
+	RuleType     string    `json:"rule_type"`
 	Value        RuleValue `json:"value"`
-	TimeUnit     string `json:"time_unit,omitempty"`
-	GraceSeconds uint   `json:"grace_seconds,omitempty"`
+	TimeUnit     string    `json:"time_unit,omitempty"`
+	GraceSeconds uint      `json:"grace_seconds,omitempty"`
 }
+
+type Platform string
+
+const (
+	CRON       Platform = "cron"
+	WINDOWS    Platform = "windows"
+	KUBERNETES Platform = "kubernetes"
+	JVM        Platform = "jvm"
+	LARAVEL    Platform = "laravel"
+	MAGENTO    Platform = "magento"
+	SIDEKIQ    Platform = "sidekiq"
+	CELERY     Platform = "celery"
+	JENKINS    Platform = "jenkins"
+	QUARTZ     Platform = "quartz"
+	SPRING     Platform = "spring"
+	CLOUDWATCH Platform = "cloudwatch"
+	NODECRON   Platform = "node-cron"
+)
 
 type Monitor struct {
 	Name             string              `json:"name,omitempty"`
 	DefaultName      string              `json:"defaultName"`
 	Key              string              `json:"key"`
 	Rules            []Rule              `json:"rules"`
+	Platform         Platform            `json:"platform,omitempty"`
 	Tags             []string            `json:"tags"`
 	Type             string              `json:"type"`
 	Code             string              `json:"code,omitempty"`
@@ -52,7 +71,6 @@ type CronitorApi struct {
 	UserAgent      string
 	Logger         func(string)
 }
-
 
 func (fi *RuleValue) UnmarshalJSON(b []byte) error {
 	if b[0] == '"' {

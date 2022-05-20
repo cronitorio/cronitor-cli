@@ -70,6 +70,7 @@ cronitor
 *.key
 ctab
 cronitor-cli
+cronitor.exe
 
 local.md
 TODO.md
