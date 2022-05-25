@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
-	"github.com/pkg/errors"
 	"fmt"
 	"github.com/getsentry/raven-go"
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"io/ioutil"
 	"net/http"
@@ -43,18 +43,18 @@ const (
 )
 
 type Monitor struct {
-	Name             string              `json:"name,omitempty"`
-	DefaultName      string              `json:"defaultName"`
-	Key              string              `json:"key"`
-	Rules            []Rule              `json:"rules"`
-	Platform         Platform            `json:"platform,omitempty"`
-	Tags             []string            `json:"tags"`
-	Type             string              `json:"type"`
-	Code             string              `json:"code,omitempty"`
-	Timezone         string              `json:"timezone,omitempty"`
-	Note             string              `json:"defaultNote,omitempty"`
-	Notifications    map[string][]string `json:"notifications,omitempty"`
-	NoStdoutPassthru bool                `json:"-"`
+	Name             string   `json:"name,omitempty"`
+	DefaultName      string   `json:"defaultName"`
+	Key              string   `json:"key"`
+	Schedule         string   `json:"schedule,omitempty"`
+	Platform         Platform `json:"platform,omitempty"`
+	Tags             []string `json:"tags"`
+	Type             string   `json:"type"`
+	Code             string   `json:"code,omitempty"`
+	Timezone         string   `json:"timezone,omitempty"`
+	Note             string   `json:"defaultNote,omitempty"`
+	Notify           []string `json:"notify,omitempty"`
+	NoStdoutPassthru bool     `json:"-"`
 }
 
 type MonitorSummary struct {
@@ -193,9 +193,9 @@ func (api CronitorApi) GetRawResponse(url string) ([]byte, error) {
 
 func (api CronitorApi) Url() string {
 	if api.IsDev {
-		return "http://dev.cronitor.io/v3/monitors"
+		return "http://dev.cronitor.io/api/monitors"
 	} else {
-		return "https://cronitor.io/v3/monitors"
+		return "https://cronitor.io/api/monitors"
 	}
 }
 

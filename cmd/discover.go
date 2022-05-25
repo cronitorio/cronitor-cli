@@ -259,7 +259,6 @@ func processCrontab(crontab *lib.Crontab) bool {
 			continue
 		}
 
-		rules := []lib.Rule{createRule(line.CronExpression)}
 		defaultName := createDefaultName(line, crontab, effectiveHostname(), excludeFromName, allNameCandidates)
 		tags := createTags()
 		key := line.Key(crontab.CanonicalName())
@@ -308,22 +307,25 @@ func processCrontab(crontab *lib.Crontab) bool {
 			name = ""
 		}
 
-		notificationListMap := map[string][]string{}
+		var notifications []string
 		if notificationList != "" {
-			notificationListMap = map[string][]string{"templates": {notificationList}}
+			notifications = []string{notificationList}
+		} else {
+			notifications = []string{"default"}
 		}
 
 		line.Mon = lib.Monitor{
 			Name:             name,
 			DefaultName:      defaultName,
 			Key:              key,
-			Rules:            rules,
 			Tags:             tags,
-			Type:             "heartbeat",
+			Schedule:         line.CronExpression,
+			Type:             "job",
+			Platform:         lib.CRON,
 			Code:             line.Code,
 			Timezone:         timezone.Name,
 			Note:             createNote(line, crontab),
-			Notifications:    notificationListMap,
+			Notify:           notifications,
 			NoStdoutPassthru: noStdoutPassthru,
 		}
 
@@ -452,10 +454,6 @@ func createTags() []string {
 	var tags []string
 	tags = append(tags, "cron-job")
 	return tags
-}
-
-func createRule(cronExpression string) lib.Rule {
-	return lib.Rule{"not_on_schedule", lib.RuleValue(cronExpression), "", 0}
 }
 
 func validateName(candidateName string) error {

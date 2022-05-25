@@ -256,7 +256,7 @@ func effectiveTimezoneLocationName() lib.TimezoneLocationName {
 	if runtime.GOOS == "windows" {
 		out, err := exec.Command("powershell", "-NoProfile", "-c", "(Get-TimeZone | Select-Object -First 1 -Property Id).Id | Write-Output").CombinedOutput()
 		if err == nil {
-			return lib.TimezoneLocationName{fmt.Sprintf("%s", out)}
+			return lib.TimezoneLocationName{strings.TrimSpace(fmt.Sprintf("%s", out))}
 		}
 	}
 

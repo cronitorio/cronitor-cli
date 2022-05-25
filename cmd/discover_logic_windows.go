@@ -133,19 +133,21 @@ func processWindowsTaskScheduler() bool {
 
 		existingMonitors.AddName(name)
 
-		notificationListMap := map[string][]string{}
+		var notifications []string
 		if notificationList != "" {
-			notificationListMap = map[string][]string{"templates": {notificationList}}
+			notifications = []string{notificationList}
+		} else {
+			notifications = []string{"default"}
 		}
 
 		monitor := lib.Monitor{
 			DefaultName:      defaultName,
+			Name:             name,
 			Key:              key,
-			Rules:            []lib.Rule{},
 			Platform:         lib.WINDOWS,
 			Tags:             tags,
-			Type:             "heartbeat",
-			Notifications:    notificationListMap,
+			Type:             "job",
+			Notify:           notifications,
 			NoStdoutPassthru: noStdoutPassthru,
 		}
 		tz := effectiveTimezoneLocationName()
@@ -210,6 +212,7 @@ func processWindowsTaskScheduler() bool {
 			log(fmt.Sprintf("%s: %s", task.Path, output))
 
 			newTask, err := taskService.UpdateTask(task.Path, newDefinition)
+			defer newTask.Release()
 			if err != nil {
 				serialized, _ := json.Marshal(newTask)
 				log(fmt.Sprintf("err updating task %s: %v. JSON: %s", task.Path, err, serialized))
