@@ -43,6 +43,7 @@ Flags:
   -l, --log string            Write debug logs to supplied file
   -p, --ping-api-key string   Ping API Key
   -v, --verbose               Verbose output
+      --no-stdout             Disable sending job output logs to Cronitor
 
 Use "cronitor [command] --help" for more information about a command.
 ```
