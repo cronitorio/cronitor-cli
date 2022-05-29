@@ -16,3 +16,5 @@ require (
 )
 
 require github.com/pkg/errors v0.8.1
+
+replace github.com/manifoldco/promptui => github.com/1lann/promptui v0.8.1-0.20201231190244-d8f2159af2b2
