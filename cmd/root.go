@@ -112,7 +112,7 @@ func initConfig() {
 	}
 }
 
-func sendPing(endpoint string, uniqueIdentifier string, message string, series string, timestamp float64, duration *float64, exitCode *int, metrics map[string]int, group *sync.WaitGroup) {
+func sendPing(endpoint string, uniqueIdentifier string, message string, series string, timestamp float64, duration *float64, exitCode *int, metrics map[string]int, schedule string, group *sync.WaitGroup) {
 	defer group.Done()
 
 	Client := &http.Client{
@@ -129,6 +129,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	formattedDuration := ""
 	formattedStatusCode := ""
 	formattedMetrics := ""
+	formattedSchedule := ""
 
 	if timestamp > 0 {
 		formattedStamp = fmt.Sprintf("&stamp=%s", formatStamp(timestamp))
@@ -149,6 +150,10 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	// By passing duration up, we save the computation on the server side
 	if duration != nil {
 		formattedDuration = fmt.Sprintf("&duration=%s", formatStamp(*duration))
+	}
+
+	if schedule != "" {
+		formattedSchedule = fmt.Sprintf("&schedule=%s", schedule)
 	}
 
 	// We aren't using exit code at time of writing, but we have the field available for healthcheck monitors.
@@ -204,10 +209,10 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 
 		if len(authenticationKey) > 0 {
 			// Authenticated pings when available
-			uri = fmt.Sprintf("%s/ping/%s/%s?state=%s&try=%d%s%s%s%s%s%s%s%s", pingApiHost, authenticationKey, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode, formattedMetrics, env)
+			uri = fmt.Sprintf("%s/ping/%s/%s?state=%s&try=%d%s%s%s%s%s%s%s%s%s", pingApiHost, authenticationKey, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode, formattedMetrics, env, formattedSchedule)
 		} else {
 			// Fallback to sending an unauthenticated ping
-			uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode, formattedMetrics, env)
+			uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode, formattedMetrics, env, formattedSchedule)
 		}
 
 		log("Sending ping " + uri)

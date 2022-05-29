@@ -110,10 +110,14 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 
 	startTime := makeStamp()
 	series := formatStamp(startTime)
+	schedule := ""
 
 	if withMonitoring {
 		monitoringWaitGroup.Add(1)
-		go sendPing("run", monitorCode, subcommand, series, startTime, nil, nil, nil, &monitoringWaitGroup)
+		if runtime.GOOS == "windows" {
+			schedule = GetNextRunFromMonitorKey(monitorCode)
+		}
+		go sendPing("run", monitorCode, subcommand, series, startTime, nil, nil, nil, schedule, &monitoringWaitGroup)
 	}
 
 	log(fmt.Sprintf("Running subcommand: %s", subcommand))
@@ -203,7 +207,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 			if err == nil {
 				if withMonitoring {
 					monitoringWaitGroup.Add(1)
-					go sendPing("complete", monitorCode, string(outputForPing), series, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
+					go sendPing("complete", monitorCode, string(outputForPing), series, endTime, &duration, &exitCode, metrics, schedule, &monitoringWaitGroup)
 					monitoringWaitGroup.Add(1)
 					go shipLogData(tempFile, series, &monitoringWaitGroup)
 				}
@@ -223,7 +227,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 
 				if withMonitoring {
 					monitoringWaitGroup.Add(1)
-					go sendPing("fail", monitorCode, message, series, endTime, &duration, &exitCode, metrics, &monitoringWaitGroup)
+					go sendPing("fail", monitorCode, message, series, endTime, &duration, &exitCode, metrics, schedule, &monitoringWaitGroup)
 					monitoringWaitGroup.Add(1)
 					go shipLogData(tempFile, series, &monitoringWaitGroup)
 				}

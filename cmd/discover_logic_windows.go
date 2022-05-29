@@ -15,6 +15,7 @@ import (
 	"github.com/cronitorio/cronitor-cli/lib"
 	"github.com/manifoldco/promptui"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -32,6 +33,28 @@ type WrappedWindowsTask taskmaster.RegisteredTask
 func NewWrappedWindowsTask(t taskmaster.RegisteredTask) WrappedWindowsTask {
 	w := WrappedWindowsTask(t)
 	return w
+}
+
+func (r WrappedWindowsTask) FullName() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		log(fmt.Sprintf("err: %v", err))
+		hostname = "[no-hostname]"
+	}
+	// Windows Task Scheduler won't allow multiple tasks with the same name, so using
+	// the tasks' name should be safe. You also do not seem to be able to edit the name
+	// in Windows Task Scheduler, so this seems safe as the Key as well.
+	fullName := fmt.Sprintf("%s/%s", hostname, r.Name)
+	// Max name length of 75, so we need to truncate
+	if len(fullName) >= 74 {
+		fullName = fullName[:74]
+	}
+
+	return fullName
+}
+
+func (r WrappedWindowsTask) WindowsKey() string {
+	return getWindowsKey(r.FullName())
 }
 
 func (r WrappedWindowsTask) IsMicrosoftTask() bool {
@@ -53,6 +76,14 @@ func (r WrappedWindowsTask) GetCommandToRun() string {
 	}
 
 	return strings.Join(commands, " && ")
+}
+
+func (r WrappedWindowsTask) GetNextRunTime() int64 {
+	return r.NextRunTime.Unix()
+}
+
+func (r WrappedWindowsTask) GetNextRunTimeString() string {
+	return strconv.Itoa(int(r.GetNextRunTime()))
 }
 
 func processWindowsTaskScheduler() bool {
@@ -81,23 +112,12 @@ func processWindowsTaskScheduler() bool {
 			continue
 		}
 
-		hostname, err := os.Hostname()
-		if err != nil {
-			log(fmt.Sprintf("err: %v", err))
-		}
-		// Windows Task Scheduler won't allow multiple tasks with the same name, so using
-		// the tasks' name should be safe. You also do not seem to be able to edit the name
-		// in Windows Task Scheduler, so this seems safe as the Key as well.
-		fullName := fmt.Sprintf("%s/%s", hostname, task.Name)
-		// Max name length of 75, so we need to truncate
-		if len(fullName) >= 74 {
-			fullName = fullName[:74]
-		}
-		defaultName := fullName
+		defaultName := t.FullName()
 		tags := createTags()
-		key := getWindowsKey(fullName)
+		key := t.WindowsKey()
 		name := defaultName
 		skip := false
+		schedule := t.GetNextRunTimeString()
 
 		// The monitor name will always be the same, so we don't have to fetch it
 		// from the Cronitor existing monitors
@@ -149,6 +169,7 @@ func processWindowsTaskScheduler() bool {
 			Type:             "job",
 			Notify:           notifications,
 			NoStdoutPassthru: noStdoutPassthru,
+			Schedule:         schedule,
 		}
 		tz := effectiveTimezoneLocationName()
 		if tz.Name != "" {
