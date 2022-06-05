@@ -74,11 +74,11 @@ teardown() {
 }
 
 @test "Discover adds no-stdout flag when supplied" {
-  run -1 ../cronitor $CRONITOR_ARGS discover --auto -v $FIXTURES_DIR/crontab.txt -k "$API_KEY" --no-stdout | grep "cronitor exec" | grep -q "no-stdout"
+  run -1 bash -c '../cronitor $CRONITOR_ARGS discover --auto -v $FIXTURES_DIR/crontab.txt -k "$API_KEY" --no-stdout | grep "cronitor exec" | grep -q "no-stdout"'
 }
 
 @test "Discover omits 'notifications' if notification-list not specificed" {
-  run -1 ../cronitor $CRONITOR_ARGS discover --auto -v $FIXTURES_DIR/crontab.txt -k "$API_KEY" | grep -q "notifications"
+  run -1 bash -c '../cronitor $CRONITOR_ARGS discover --auto -v $FIXTURES_DIR/crontab.txt -k "$API_KEY" | grep -q "notifications"'
 }
 
 @test "Discover includes custom notification-list" {
