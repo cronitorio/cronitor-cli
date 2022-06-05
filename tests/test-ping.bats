@@ -36,6 +36,6 @@ setup() {
 
 @test "Ping integration test" {
   MSG=`date`
-  ../cronitor $CRONITOR_ARGS ping 44oI2n --run --msg "$MSG" --log $CLI_LOGFILE && sleep 1
-  ../cronitor $CRONITOR_ARGS activity 44oI2n | grep -q "$MSG"
+  ../cronitor $CRONITOR_ARGS ping 44oI2n --run --msg "$MSG" --log $CLI_LOGFILE -k $CRONITOR_API_KEY && sleep 3
+  ../cronitor $CRONITOR_ARGS activity 44oI2n -k $CRONITOR_API_KEY | grep -q "$MSG"
 }
