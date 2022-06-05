@@ -24,20 +24,5 @@ jobs:
       - name: Run tests
         working-directory: tests
         run: |
+          sudo su -
           bats *.bats
-
-      - name: Exec
-        working-directory: tests
-        run: ./test-exec.sh
-
-      - name: List
-        working-directory: tests
-        run: ./test-list.sh
-
-      - name: Ping
-        working-directory: tests
-        run: ./test-ping.sh
-
-      - name: Status
-        working-directory: tests
-        run: ./test-status.sh
