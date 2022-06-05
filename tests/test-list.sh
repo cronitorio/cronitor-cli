@@ -1,28 +1,21 @@
-#!/usr/bin/env bash
+#!/usr/bin/env bats
 
-echo "Running test-list..."
+setup() {
+  SCRIPT_DIR="$(dirname $BATS_TEST_FILENAME)"
+  cd $SCRIPT_DIR
 
-SCRIPT_DIR=$( cd $(dirname $0) ; pwd -P )
-cd $SCRIPT_DIR
-
-source ./setup.sh
+  source $SCRIPT_DIR/setup.sh
+  rm -f $CLI_LOGFILE
+}
 
 #################
 # LIST TESTS
 #################
 
-echo ""
+@test "List reads crontab and writes table" {
+  ../cronitor $CRONITOR_ARGS list ../fixtures/crontab.txt | grep -q "/usr/bin/true"
+}
 
-rm -f $CLI_LOGFILE
-TEST="List reads crontab and writes table"
-if ../cronitor $CRONITOR_ARGS list ../fixtures/crontab.txt | grep -q "/usr/bin/true"
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
-
-rm -f $CLI_LOGFILE
-TEST="List reads crontab and formats table correctly"
-if ../cronitor $CRONITOR_ARGS list ../fixtures/crontab.txt | grep -q "\-----"
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
+@test "List reads crontab and formats table correctly" {
+  ../cronitor $CRONITOR_ARGS list ../fixtures/crontab.txt | grep -q "\-----"
+}
