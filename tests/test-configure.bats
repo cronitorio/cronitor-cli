@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  SCRIPT_DIR=$( cd $(dirname $0) ; pwd -P )
+  SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]:-$0}"; )" &> /dev/null && pwd 2> /dev/null; )";
   cd $SCRIPT_DIR
 
   source $SCRIPT_DIR/setup.sh
@@ -15,27 +15,20 @@ setup() {
 # CONFIGURE TESTS
 #################
 
-echo ""
-TEST="Configure uses log file from env var"
-CRONITOR_LOG=$CLI_LOGFILE ../cronitor $CRONITOR_ARGS ping d3x0c1 --run
-if grep -q "Sending ping ${HOSTNAME}/d3x0c1/run" $CLI_LOGFILE
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
+@test "Configure uses log file from env var" {
+  CRONITOR_LOG=$CLI_LOGFILE ../cronitor $CRONITOR_ARGS ping d3x0c1 --run
+  grep -q "Sending ping ${HOSTNAME}/d3x0c1/run" $CLI_LOGFILE
+}
 
-TEST="Configure uses hostname from env var"
-CRONITOR_HOSTNAME=myHost ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --log $CLI_LOGFILE
-if grep -q "&host=myHost" $CLI_LOGFILE
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
+@test "Configure uses hostname from env var" {
+  CRONITOR_HOSTNAME=myHost ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --log $CLI_LOGFILE
+  grep -q "&host=myHost" $CLI_LOGFILE
+}
 
-TEST="Configure uses hostname from arg not env var"
-CRONITOR_HOSTNAME=myHost ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --log $CLI_LOGFILE --hostname otherHost
-if grep -q "&host=otherHost" $CLI_LOGFILE
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
+@test "Configure uses hostname from arg not env var" {
+  CRONITOR_HOSTNAME=myHost ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --log $CLI_LOGFILE --hostname otherHost
+  grep -q "&host=otherHost" $CLI_LOGFILE
+}
 
 TEST="Configure uses ping api key from env var"
 CRONITOR_PING_API_KEY=123 ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --log $CLI_LOGFILE
