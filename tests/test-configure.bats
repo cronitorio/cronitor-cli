@@ -36,12 +36,12 @@ setup() {
 }
 
 @test "Configure writes hostname correctly to config file" {
-  ../cronitor $CRONITOR_ARGS configure --hostname "$MSG"
+  ../cronitor $CRONITOR_ARGS configure --hostname "$MSG"  2>/dev/null
   grep "CRONITOR_HOSTNAME" $CLI_CONFIGFILE | grep -q "$MSG"
 }
 
 @test "Configure writes API Key correctly to config file" {
-  ../cronitor $CRONITOR_ARGS configure --api-key "$MSG"
+  ../cronitor $CRONITOR_ARGS configure --api-key "$MSG"  2>/dev/null
   grep "CRONITOR_API_KEY" $CLI_CONFIGFILE | grep -q "$MSG"
 }
 
@@ -51,31 +51,31 @@ setup() {
 }
 
 @test "Configure writes API Key correctly to custom config file set by param" {
-  ../cronitor $CRONITOR_ARGS configure --config $CLI_CONFIGFILE_ALTERNATE --api-key "$MSG"
+  ../cronitor $CRONITOR_ARGS configure --config $CLI_CONFIGFILE_ALTERNATE --api-key "$MSG"  2>/dev/null
   grep "CRONITOR_API_KEY" $CLI_CONFIGFILE_ALTERNATE | grep -q "$MSG"
 }
 
 @test "Configure writes API Key correctly to custom config file set by env var" {
-  CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --api-key "$MSG"
+  CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --api-key "$MSG"  2>/dev/null
   grep "CRONITOR_API_KEY" $CLI_CONFIGFILE_ALTERNATE | grep -q "$MSG"
 }
 
 @test "Configure writes Ping API Key correctly to config file" {
-  ../cronitor $CRONITOR_ARGS configure --ping-api-key "$MSG"
+  ../cronitor $CRONITOR_ARGS configure --ping-api-key "$MSG"  2>/dev/null
   grep "CRONITOR_PING_API_KEY" $CLI_CONFIGFILE | grep -q "$MSG"
 }
 
 @test "Configure writes log path correctly to config file" {
-  ../cronitor $CRONITOR_ARGS configure --log $CLI_LOGFILE_ALTERNATE
+  ../cronitor $CRONITOR_ARGS configure --log $CLI_LOGFILE_ALTERNATE  2>/dev/null
   grep "CRONITOR_LOG" $CLI_CONFIGFILE | grep -q $CLI_LOGFILE_ALTERNATE
 }
 
 @test "Configure writes exclude text correctly to config file" {
-  ../cronitor $CRONITOR_ARGS configure --exclude-from-name "$MSG"
+  ../cronitor $CRONITOR_ARGS configure --exclude-from-name "$MSG"  2>/dev/null
   grep -q "CRONITOR_EXCLUDE_TEXT" $CLI_CONFIGFILE && grep -q "$MSG" $CLI_CONFIGFILE
 }
 
 @test "Configure writes multiple exclude text entries correctly to config file" {
-  ../cronitor $CRONITOR_ARGS configure --exclude-from-name "${MSG}A" --exclude-from-name "${MSG}B"
+  ../cronitor $CRONITOR_ARGS configure --exclude-from-name "${MSG}A" --exclude-from-name "${MSG}B"  2>/dev/null
   grep -q "CRONITOR_EXCLUDE_TEXT" $CLI_CONFIGFILE && grep -q "${MSG}A" $CLI_CONFIGFILE && grep -q "${MSG}B" $CLI_CONFIGFILE
 }
