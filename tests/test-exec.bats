@@ -94,6 +94,5 @@ setup() {
 }
 
 @test "Exec passes exitcode through to caller" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/fail.sh > /dev/null
-  [ $? -eq 123 ]
+  run -123 ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/fail.sh > /dev/null
 }
