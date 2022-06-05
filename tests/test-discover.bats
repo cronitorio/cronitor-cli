@@ -8,7 +8,7 @@ setup() {
   source $SCRIPT_DIR/setup.sh
   rm -f $CLI_LOGFILE
 
-  API_KEY="53b6c114717140cf896899060bcc9d7e"
+  API_KEY="$CRONITOR_API_KEY"
 }
 
 teardown() {
