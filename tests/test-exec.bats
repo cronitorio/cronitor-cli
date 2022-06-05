@@ -34,7 +34,7 @@ setup() {
 }
 
 
-@test "Exec sends complete ping on success" {}
+@test "Exec sends complete ping on success" {
   ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 true > /dev/null
   grep "Sending ping" $CLI_LOGFILE | grep -q "state=complete"
 }
