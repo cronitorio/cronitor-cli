@@ -21,17 +21,13 @@ jobs:
       - name: Build binary
         run: go build -o cronitor main.go
 
-      - name: Activity
+      - name: Run tests
         working-directory: tests
-        run: ./test-activity.bats
-
-      - name: Configure
-        working-directory: tests
-        run: sudo ./test-configure.bats
-
-      - name: Discover
-        working-directory: tests
-        run: ./test-discover.bats
+        run: |
+          sudo bats \
+            test-activity.bats \
+            test-configure.bats \
+            test-discover.bats
 
       - name: Exec
         working-directory: tests
