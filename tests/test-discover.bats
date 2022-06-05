@@ -79,22 +79,15 @@ teardown() {
 }
 
 @test "Discover omits 'notifications' if notification-list not specificed" {
-if ../cronitor $CRONITOR_ARGS discover --auto -v ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e | grep -q "notifications"
-    then echo "${TEST}.. FAIL"  # Note reversed order here...
-    else echo "${TEST}.. OK"
-fi
+  run ../cronitor $CRONITOR_ARGS discover --auto -v ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e | grep -q "notifications"
+  [ "status" -eq 1 ]
 }
 
-TEST="Discover includes custom notification-list"
-if ../cronitor $CRONITOR_ARGS discover --auto -v ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e --notification-list test-list-name | grep -q "test-list-name"
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
+@test "Discover includes custom notification-list" {
+  ../cronitor $CRONITOR_ARGS discover --auto -v ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e --notification-list test-list-name | grep -q "test-list-name"
+}
 
 @test "Discover reads all of the crontabs in a directory" {
-OUTPUT="$(../cronitor $CRONITOR_ARGS discover --auto ../fixtures/cron.d -k 53b6c114717140cf896899060bcc9d7e)"
-if echo "$OUTPUT" | grep -q "every_minute" && echo "$OUTPUT" | grep -q "top_of_hour"
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
+  OUTPUT="$(../cronitor $CRONITOR_ARGS discover --auto ../fixtures/cron.d -k 53b6c114717140cf896899060bcc9d7e)"
+  echo "$OUTPUT" | grep -q "every_minute" && echo "$OUTPUT" | grep -q "top_of_hour"
 }
