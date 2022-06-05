@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  SCRIPT_DIR="$BATS_TEST_FILENAME"
+  SCRIPT_DIR="$(dirname $BATS_TEST_FILENAME)"
   cd $SCRIPT_DIR
 
   source $SCRIPT_DIR/setup.sh
@@ -60,12 +60,10 @@ setup() {
   grep "CRONITOR_API_KEY" $CLI_CONFIGFILE_ALTERNATE | grep -q "$MSG"
 }
 
-TEST="Configure writes Ping API Key correctly to config file"
-../cronitor $CRONITOR_ARGS configure --ping-api-key "$MSG"
-if grep "CRONITOR_PING_API_KEY" $CLI_CONFIGFILE | grep -q "$MSG"
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
+@test "Configure writes Ping API Key correctly to config file" {
+  ../cronitor $CRONITOR_ARGS configure --ping-api-key "$MSG"
+  grep "CRONITOR_PING_API_KEY" $CLI_CONFIGFILE | grep -q "$MSG"
+}
 
 TEST="Configure writes log path correctly to config file"
 ../cronitor $CRONITOR_ARGS configure --log $CLI_LOGFILE_ALTERNATE
@@ -74,16 +72,12 @@ if grep "CRONITOR_LOG" $CLI_CONFIGFILE | grep -q $CLI_LOGFILE_ALTERNATE
     else echo "${TEST}.. FAIL"
 fi
 
-TEST="Configure writes exclude text correctly to config file"
-../cronitor $CRONITOR_ARGS configure --exclude-from-name "$MSG"
-if grep -q "CRONITOR_EXCLUDE_TEXT" $CLI_CONFIGFILE && grep -q "$MSG" $CLI_CONFIGFILE
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
+@test "Configure writes exclude text correctly to config file" {
+  ../cronitor $CRONITOR_ARGS configure --exclude-from-name "$MSG"
+  grep -q "CRONITOR_EXCLUDE_TEXT" $CLI_CONFIGFILE && grep -q "$MSG" $CLI_CONFIGFILE
+}
 
-TEST="Configure writes multiple exclude text entries correctly to config file"
-../cronitor $CRONITOR_ARGS configure --exclude-from-name "${MSG}A" --exclude-from-name "${MSG}B"
-if grep -q "CRONITOR_EXCLUDE_TEXT" $CLI_CONFIGFILE && grep -q "${MSG}A" $CLI_CONFIGFILE && grep -q "${MSG}B" $CLI_CONFIGFILE
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
+@test "Configure writes multiple exclude text entries correctly to config file" {
+  ../cronitor $CRONITOR_ARGS configure --exclude-from-name "${MSG}A" --exclude-from-name "${MSG}B"
+  grep -q "CRONITOR_EXCLUDE_TEXT" $CLI_CONFIGFILE && grep -q "${MSG}A" $CLI_CONFIGFILE && grep -q "${MSG}B" $CLI_CONFIGFILE
+}

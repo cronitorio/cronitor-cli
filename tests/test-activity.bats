@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  SCRIPT_DIR="$BATS_TEST_FILENAME"
+  SCRIPT_DIR="$(dirname $BATS_TEST_FILENAME)"
   cd $SCRIPT_DIR
 
   source $SCRIPT_DIR/setup.sh

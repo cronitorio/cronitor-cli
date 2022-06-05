@@ -1,20 +1,23 @@
-#!/usr/bin/env bash
+#!/usr/bin/env bats
 
-echo "Running test-discover..."
+setup() {
+  SCRIPT_DIR="$(dirname $BATS_TEST_FILENAME)"
+  cd $SCRIPT_DIR
 
-SCRIPT_DIR=$( cd $(dirname $0) ; pwd -P )
-cd $SCRIPT_DIR
+  source $SCRIPT_DIR/setup.sh
+  rm -f $CLI_LOGFILE
 
-source ./setup.sh
+  API_KEY="53b6c114717140cf896899060bcc9d7e"
+}
+
+teardown() {
+  rm -f $TMPFILE
+}
 
 #################
 # DISCOVER TESTS
 #################
 
-echo ""
-API_KEY="53b6c114717140cf896899060bcc9d7e"
-
-rm -f $CLI_LOGFILE
 TEST="Discover reads file and sends PUT"
 ../cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e --log $CLI_LOGFILE > /dev/null
 if grep -q "Request" $CLI_LOGFILE
@@ -22,14 +25,13 @@ if grep -q "Request" $CLI_LOGFILE
     else echo "${TEST}.. FAIL"
 fi
 
-rm -f $CLI_LOGFILE
 TEST="Discover parses reponse and rewrites crontab"
 if ../cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e| grep "slave_status.sh" | grep -q "cronitor exec"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
 
-rm -f $CLI_LOGFILE
+
 TEST="Discover is silent when being run under exec"
 if [[ $(../cronitor $CRONITOR_ARGS exec d3x0c1 cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e | wc -c) -ne 0 ]];
     then echo "${TEST}.. FAIL"
@@ -37,7 +39,6 @@ if [[ $(../cronitor $CRONITOR_ARGS exec d3x0c1 cronitor $CRONITOR_ARGS discover 
 fi
 
 
-rm -f $CLI_LOGFILE
 TEST="Discover correctly parses crontab with username"
 echo "* * * * * $CLI_USERNAME echo 'username parse'" | cat - ../fixtures/crontab.txt > $CLI_CRONTAB_TEMP
 if ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "echo '" | grep -q "$CLI_USERNAME cronitor exec"
@@ -45,7 +46,6 @@ if ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k 53b6c11471714
     else echo "${TEST}.. FAIL"
 fi
 
-rm -f $CLI_LOGFILE
 TEST="Discover correctly parses crontab with 6 digits"
 echo "* * * * * 0 echo 'six dig parse'" | cat - ../fixtures/crontab.txt > $CLI_CRONTAB_TEMP
 if ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "echo '" | grep -q "0 cronitor exec"
@@ -53,7 +53,6 @@ if ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k 53b6c11471714
     else echo "${TEST}.. FAIL"
 fi
 
-rm -f $CLI_LOGFILE
 TEST="Discover correctly parses crontab with 6th digit DoW string range"
 echo "* * * * * Mon-Fri echo 'DoW string parse'" | cat - ../fixtures/crontab.txt > $CLI_CRONTAB_TEMP
 if ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "echo '" | grep -q "Mon-Fri cronitor exec"
@@ -61,7 +60,6 @@ if ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k 53b6c11471714
     else echo "${TEST}.. FAIL"
 fi
 
-rm -f $CLI_LOGFILE
 TEST="Discover correctly parses crontab with 6th digit DoW string list"
 echo "* * * * * Mon,Wed,Fri echo 'DoW string list parse'" | cat - ../fixtures/crontab.txt > $CLI_CRONTAB_TEMP
 if ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "echo '" | grep -q "Mon,Wed,Fri cronitor exec"
@@ -69,7 +67,6 @@ if ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k 53b6c11471714
     else echo "${TEST}.. FAIL"
 fi
 
-rm -f $CLI_LOGFILE
 TEST="Discover correctly parses crontab with 6th digit DoW string name"
 echo "* * * * * Mon echo 'DoW string name parse'" | cat - ../fixtures/crontab.txt > $CLI_CRONTAB_TEMP
 if ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "echo '" | grep -q "Mon cronitor exec"
@@ -77,7 +74,6 @@ if ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k 53b6c11471714
     else echo "${TEST}.. FAIL"
 fi
 
-rm -f $CLI_LOGFILE
 TEST="Discover rewrites crontab in place"
 TMPFILE="/tmp/crontab.txt"
 cp ../fixtures/crontab.txt $TMPFILE
@@ -86,9 +82,6 @@ if grep "slave_status.sh" $TMPFILE | grep -q "cronitor exec"
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
-rm -f $TMPFILE
-
-rm -f $CLI_LOGFILE
 
 TEST="Discover ignores meta crontab entries"
 TMPFILE="/tmp/crontab.txt"
@@ -98,7 +91,6 @@ if grep "cron.hourly" $TMPFILE | grep -q "cronitor exec"
     then echo "${TEST}.. FAIL"
     else echo "${TEST}.. OK"
 fi
-rm -f $TMPFILE
 
 TEST="Discover adds no-stdout flag when supplied"
 if ../cronitor $CRONITOR_ARGS discover --auto -v ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e --no-stdout | grep "cronitor exec" | grep -q "no-stdout"
@@ -124,5 +116,3 @@ if echo "$OUTPUT" | grep -q "every_minute" && echo "$OUTPUT" | grep -q "top_of_h
     then echo "${TEST}.. OK"
     else echo "${TEST}.. FAIL"
 fi
-
-echo ""

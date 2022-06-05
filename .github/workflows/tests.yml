@@ -31,7 +31,7 @@ jobs:
 
       - name: Discover
         working-directory: tests
-        run: ./test-discover.sh
+        run: ./test-discover.bats
 
       - name: Exec
         working-directory: tests
