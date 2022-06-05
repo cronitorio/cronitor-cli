@@ -79,8 +79,7 @@ setup() {
 
 @test "Exec does not send stdout when suppressed" {
   ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec --no-stdout d3x0c1 $PROJECT_DIR/bin/success.sh xyz > /dev/null
-  run grep "/complete" $CLI_LOGFILE | grep "&msg=" | grep -q "xyz"
-  [ "$status" -eq 1 ]
+  grep "/complete" $CLI_LOGFILE | grep "&msg=" | grep -q "xyz"
 }
 
 @test "Exec passes stdout through to caller" {
