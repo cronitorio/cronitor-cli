@@ -65,12 +65,10 @@ setup() {
   grep "CRONITOR_PING_API_KEY" $CLI_CONFIGFILE | grep -q "$MSG"
 }
 
-TEST="Configure writes log path correctly to config file"
-../cronitor $CRONITOR_ARGS configure --log $CLI_LOGFILE_ALTERNATE
-if grep "CRONITOR_LOG" $CLI_CONFIGFILE | grep -q $CLI_LOGFILE_ALTERNATE
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
+@test "Configure writes log path correctly to config file" {
+  ../cronitor $CRONITOR_ARGS configure --log $CLI_LOGFILE_ALTERNATE
+  grep "CRONITOR_LOG" $CLI_CONFIGFILE | grep -q $CLI_LOGFILE_ALTERNATE
+}
 
 @test "Configure writes exclude text correctly to config file" {
   ../cronitor $CRONITOR_ARGS configure --exclude-from-name "$MSG"
