@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+echo "Running test-exec..."
+
 SCRIPT_DIR=$( cd $(dirname $0) ; pwd -P )
 cd $SCRIPT_DIR
 

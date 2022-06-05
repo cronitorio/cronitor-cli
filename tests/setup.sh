@@ -15,4 +15,4 @@ if [ "$1" = "--use-dev" ]
         HOSTNAME="https://cronitor.link"
 fi
 
-sudo ../cronitor configure -k "$CLI_ACTUAL_API_KEY"
+sudo ../cronitor configure -k "$CLI_ACTUAL_API_KEY" > /dev/null
