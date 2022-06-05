@@ -16,6 +16,30 @@ jobs:
       - name: Build binary
         run: go build -o cronitor main.go
 
-      - name: Run tests
-        run: bash test-all.sh
+      - name: Activity
         working-directory: tests
+        run: bash test-activity.sh
+
+      - name: Configure
+        working-directory: tests
+        run: bash test-configure.sh
+
+      - name: Discover
+        working-directory: tests
+        run: bash test-discover.sh
+
+      - name: Exec
+        working-directory: tests
+        run: bash test-exec.sh
+
+      - name: List
+        working-directory: tests
+        run: bash test-list.sh
+
+      - name: Ping
+        working-directory: tests
+        run: bash test-ping.sh
+
+      - name: Status
+        working-directory: tests
+        run: bash test-status.sh
