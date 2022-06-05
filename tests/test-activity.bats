@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]:-$0}"; )" &> /dev/null && pwd 2> /dev/null; )";
+  SCRIPT_DIR="$BATS_TEST_FILENAME"
   cd $SCRIPT_DIR
 
   source $SCRIPT_DIR/setup.sh
