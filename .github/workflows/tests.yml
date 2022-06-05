@@ -29,4 +29,4 @@ jobs:
           echo "::add-mask::cb54ac4fd16142469f2d84fc1bbebd84"
           echo "::add-mask::$CRONITOR_API_KEY"
           sudo su -
-          bats -p *.bats
+          bats *.bats
