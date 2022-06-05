@@ -70,8 +70,7 @@ teardown() {
   TMPFILE="/tmp/crontab.txt"
   cp $FIXTURES_DIR/metacrontab.txt $TMPFILE
   ../cronitor $CRONITOR_ARGS discover --auto $TMPFILE -k "$API_KEY" > /dev/null
-  run grep "cron.hourly" $TMPFILE | grep -q "cronitor exec"
-  [ "$status" -eq 1 ]
+  run -1 bash -c 'grep "cron.hourly" $TMPFILE | grep -q "cronitor exec"'
 }
 
 @test "Discover adds no-stdout flag when supplied" {
