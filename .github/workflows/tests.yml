@@ -24,10 +24,7 @@ jobs:
       - name: Run tests
         working-directory: tests
         run: |
-          sudo bats \
-            test-activity.bats \
-            test-configure.bats \
-            test-discover.bats
+          bats *.bats
 
       - name: Exec
         working-directory: tests

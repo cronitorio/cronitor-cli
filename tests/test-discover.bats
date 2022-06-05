@@ -29,7 +29,7 @@ teardown() {
 
 
 @test "Discover is silent when being run under exec" {
-  [[ $(../cronitor $CRONITOR_ARGS exec d3x0c1 cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e | wc -c) -ne 0 ]]
+ ! [[ $(../cronitor $CRONITOR_ARGS exec d3x0c1 cronitor $CRONITOR_ARGS discover --auto ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e | wc -c) -ne 0 ]]
 }
 
 
@@ -49,11 +49,8 @@ teardown() {
 }
 
 @test "Discover correctly parses crontab with 6th digit DoW string list" {
-echo "* * * * * Mon,Wed,Fri echo 'DoW string list parse'" | cat - ../fixtures/crontab.txt > $CLI_CRONTAB_TEMP
-if ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "echo '" | grep -q "Mon,Wed,Fri cronitor exec"
-    then echo "${TEST}.. OK"
-    else echo "${TEST}.. FAIL"
-fi
+  echo "* * * * * Mon,Wed,Fri echo 'DoW string list parse'" | cat - ../fixtures/crontab.txt > $CLI_CRONTAB_TEMP
+  ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k 53b6c114717140cf896899060bcc9d7e| grep "echo '" | grep -q "Mon,Wed,Fri cronitor exec"
 }
 
 @test "Discover correctly parses crontab with 6th digit DoW string name" {
@@ -69,26 +66,24 @@ fi
 }
 
 @test "Discover ignores meta crontab entries" {
-TMPFILE="/tmp/crontab.txt"
-cp ../fixtures/metacrontab.txt $TMPFILE
-../cronitor $CRONITOR_ARGS discover --auto $TMPFILE -k 53b6c114717140cf896899060bcc9d7e > /dev/null
-if grep "cron.hourly" $TMPFILE | grep -q "cronitor exec"
-    then echo "${TEST}.. FAIL"
-    else echo "${TEST}.. OK"
-fi
+  TMPFILE="/tmp/crontab.txt"
+  cp ../fixtures/metacrontab.txt $TMPFILE
+  ../cronitor $CRONITOR_ARGS discover --auto $TMPFILE -k 53b6c114717140cf896899060bcc9d7e > /dev/null
+  run grep "cron.hourly" $TMPFILE | grep -q "cronitor exec"
+  [ "$status" -eq 1 ]
 }
 
-TEST="Discover adds no-stdout flag when supplied"
-if ../cronitor $CRONITOR_ARGS discover --auto -v ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e --no-stdout | grep "cronitor exec" | grep -q "no-stdout"
-    then echo "${TEST}.. FAIL"  # Note reversed order here...
-    else echo "${TEST}.. OK"
-fi
+@test "Discover adds no-stdout flag when supplied" {
+  run ../cronitor $CRONITOR_ARGS discover --auto -v ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e --no-stdout | grep "cronitor exec" | grep -q "no-stdout"
+  [ "status" -eq 1 ]
+}
 
-TEST="Discover omits 'notifications' if notification-list not specificed"
+@test "Discover omits 'notifications' if notification-list not specificed" {
 if ../cronitor $CRONITOR_ARGS discover --auto -v ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e | grep -q "notifications"
     then echo "${TEST}.. FAIL"  # Note reversed order here...
     else echo "${TEST}.. OK"
 fi
+}
 
 TEST="Discover includes custom notification-list"
 if ../cronitor $CRONITOR_ARGS discover --auto -v ../fixtures/crontab.txt -k 53b6c114717140cf896899060bcc9d7e --notification-list test-list-name | grep -q "test-list-name"
