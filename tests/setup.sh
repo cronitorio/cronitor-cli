@@ -14,3 +14,5 @@ if [ "$1" = "--use-dev" ]
         CRONITOR_ARGS=""
         HOSTNAME="https://cronitor.link"
 fi
+
+../cronitor configure -k "$CLI_ACTUAL_API_KEY"
