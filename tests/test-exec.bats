@@ -4,6 +4,8 @@ setup() {
   SCRIPT_DIR="$(dirname $BATS_TEST_FILENAME)"
   cd $SCRIPT_DIR
 
+  PROJECT_DIR="$(dirname $SCRIPT_DIR)"
+
   source $SCRIPT_DIR/setup.sh
 
   rm -f $CLI_LOGFILE
@@ -14,7 +16,7 @@ setup() {
 #################
 
 @test "Exec uses bash when available" {
-  [[ "$(../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 ../bin/test-bash.sh)"  == "i am an array" ]]
+  [[ "$(../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/test-bash.sh)"  == "i am an array" ]]
 }
 
 
@@ -24,7 +26,7 @@ setup() {
 }
 
 @test "Exec runs command with complex args" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 ../bin/success.sh "arg with space" anotherArg > /dev/null
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/success.sh "arg with space" anotherArg > /dev/null
   grep -q "arg with space" $CLI_LOGFILE
 }
 
@@ -45,7 +47,7 @@ setup() {
 }
 
 @test "Exec sends status code on complete ping" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 ../bin/fail.sh > /dev/null
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/fail.sh > /dev/null
   grep -q "&status_code=123" $CLI_LOGFILE
 }
 
@@ -66,32 +68,32 @@ setup() {
 }
 
 @test "Exec sends command with run ping" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec --no-stdout d3x0c1 ../bin/success.sh xyz > /dev/null
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec --no-stdout d3x0c1 $PROJECT_DIR/bin/success.sh xyz > /dev/null
   grep "state=run" $CLI_LOGFILE | grep "&msg=" | grep -q "success.sh+xyz"
 }
 
 @test "Exec sends stdout with complete ping" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 ../bin/success.sh xyz > /dev/null
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/success.sh xyz > /dev/null
   grep "&msg=" $CLI_LOGFILE | grep -q "xyz"
 }
 
 @test "Exec does not send stdout when suppressed" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec --no-stdout d3x0c1 ../bin/success.sh xyz > /dev/null
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec --no-stdout d3x0c1 $PROJECT_DIR/bin/success.sh xyz > /dev/null
   run grep "/complete" $CLI_LOGFILE | grep "&msg=" | grep -q "xyz"
   [ "$status" -eq 1 ]
 }
 
 @test "Exec passes stdout through to caller" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 ../bin/success.sh xyz | grep -q xyz
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/success.sh xyz | grep -q xyz
 }
 
 @test "Exec passes stdout through to caller with newline chars intact" {
-  output="$(../cronitor exec d3x0c1 ../bin/success.sh xyz)"
+  output="$(../cronitor exec d3x0c1 $PROJECT_DIR/bin/success.sh xyz)"
   output_lines=`echo "${output}" | wc -l | cut -d'/' -f1 | awk '{$1=$1};1'`
   ! [ ${output_lines} -eq "1" ]
 }
 
 @test "Exec passes exitcode through to caller" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 ../bin/fail.sh > /dev/null
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/fail.sh > /dev/null
   [ $? -eq 123 ]
 }
