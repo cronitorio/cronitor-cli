@@ -17,22 +17,13 @@ setup() {
 echo ""
 
 @test "Activity integration test without filter" {
-  if ../cronitor $CRONITOR_ARGS activity 44oI2n --log $CLI_LOGFILE | grep -q "monitor_name"
-      then echo "${TEST}.. OK"
-      else echo "${TEST}.. FAIL"
-  fi
+  ../cronitor $CRONITOR_ARGS activity 44oI2n --log $CLI_LOGFILE | grep -q "monitor_name"
 }
 
 @test "Activity integration test with only pings filter" {
-  if ../cronitor $CRONITOR_ARGS activity 44oI2n --only pings --log $CLI_LOGFILE | grep -q "monitor_name"
-      then echo "${TEST}.. OK"
-      else echo "${TEST}.. FAIL"
-  fi
+  ../cronitor $CRONITOR_ARGS activity 44oI2n --only pings --log $CLI_LOGFILE | grep -q "monitor_name"
 }
 
 @test "Activity integration test with only alerts filter" {
-  if ../cronitor $CRONITOR_ARGS activity 44oI2n --only alerts --log $CLI_LOGFILE | grep -q -v "\"description\": \"ping\""
-      then echo "${TEST}.. OK"
-      else echo "${TEST}.. FAIL"
-  fi
+  ../cronitor $CRONITOR_ARGS activity 44oI2n --only alerts --log $CLI_LOGFILE | grep -q -v "\"description\": \"ping\""
 }
