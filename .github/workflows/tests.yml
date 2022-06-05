@@ -23,7 +23,7 @@ jobs:
 
       - name: Activity
         working-directory: tests
-        run: bash test-activity.sh
+        run: bash test-activity.bats
 
       - name: Configure
         working-directory: tests
