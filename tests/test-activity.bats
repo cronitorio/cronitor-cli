@@ -1,12 +1,10 @@
 #!/usr/bin/env bats
 
-echo "Running test-activity..."
-
 setup() {
   SCRIPT_DIR=$( cd $(dirname $0) ; pwd -P )
   cd $SCRIPT_DIR
 
-  source ./setup.sh
+  source $SCRIPT_DIR/setup.sh
   rm -f $CLI_LOGFILE
 }
 
