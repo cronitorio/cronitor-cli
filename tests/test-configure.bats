@@ -9,7 +9,8 @@ setup() {
   rm -f $CLI_CONFIGFILE
   rm -f $CLI_LOGFILE_ALTERNATE
   MSG=`date`
-  CRONITOR_CONFIG="/tmp/cronitor.json"
+
+  skip
 }
 
 #################
