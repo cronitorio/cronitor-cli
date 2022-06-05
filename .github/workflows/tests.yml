@@ -23,28 +23,28 @@ jobs:
 
       - name: Activity
         working-directory: tests
-        run: bash test-activity.bats
+        run: test-activity.bats
 
       - name: Configure
         working-directory: tests
-        run: sudo bash test-configure.sh
+        run: sudo test-configure.sh
 
       - name: Discover
         working-directory: tests
-        run: bash test-discover.sh
+        run: test-discover.sh
 
       - name: Exec
         working-directory: tests
-        run: bash test-exec.sh
+        run: test-exec.sh
 
       - name: List
         working-directory: tests
-        run: bash test-list.sh
+        run: test-list.sh
 
       - name: Ping
         working-directory: tests
-        run: bash test-ping.sh
+        run: test-ping.sh
 
       - name: Status
         working-directory: tests
-        run: bash test-status.sh
+        run: test-status.sh
