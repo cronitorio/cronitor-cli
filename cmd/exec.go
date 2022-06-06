@@ -180,10 +180,12 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 			// Send output to Cronitor and clean up after the temp file
 			outputForPing := gatherOutput(tempFile, true)
 			var metrics map[string]int = nil
-			logLengthForPing, err2 := getFileSize(tempFile)
-			if err2 == nil {
-				metrics = map[string]int{
-					"length": int(logLengthForPing),
+			if tempFile != nil {
+				logLengthForPing, err2 := getFileSize(tempFile)
+				if err2 == nil {
+					metrics = map[string]int{
+						"length": int(logLengthForPing),
+					}
 				}
 			}
 
