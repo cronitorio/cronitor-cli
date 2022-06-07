@@ -42,7 +42,7 @@ setup() {
 }
 
 @test "Exec sends fail ping on failure" {
-  ../cronitor $CRONITOR_ARGS -k $CRONITOR_API_KEY --log $CLI_LOGFILE exec d3x0c1 false > /dev/null
+  run ../cronitor $CRONITOR_ARGS -k $CRONITOR_API_KEY --log $CLI_LOGFILE exec d3x0c1 false > /dev/null
   grep "Sending ping" $CLI_LOGFILE | grep -q "state=fail"
 }
 
