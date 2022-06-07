@@ -5,10 +5,14 @@ setup() {
   cd $SCRIPT_DIR
 
   source $SCRIPT_DIR/setup.sh
+  CLI_CONFIGFILE="$BATS_TMPDIR/cronitor.json"
+  MSG=`date`
+}
+
+teardown() {
   rm -f $CLI_LOGFILE
   rm -f $CLI_CONFIGFILE
   rm -f $CLI_LOGFILE_ALTERNATE
-  MSG=`date`
 }
 
 #################
@@ -36,17 +40,17 @@ setup() {
 }
 
 @test "Configure writes hostname correctly to config file" {
-  ../cronitor $CRONITOR_ARGS configure --hostname "$MSG"  2>/dev/null
+  ../cronitor $CRONITOR_ARGS configure --hostname "$MSG" >/dev/null
   grep "CRONITOR_HOSTNAME" $CLI_CONFIGFILE | grep -q "$MSG"
 }
 
 @test "Configure writes API Key correctly to config file" {
-  ../cronitor $CRONITOR_ARGS configure --api-key "$MSG"  2>/dev/null
+  ../cronitor $CRONITOR_ARGS configure --api-key "$MSG"  >/dev/null
   grep "CRONITOR_API_KEY" $CLI_CONFIGFILE | grep -q "$MSG"
 }
 
 @test "Configure writes API Key correctly to new config file" {
-  ../cronitor $CRONITOR_ARGS configure --api-key "$CLI_ACTUAL_API_KEY"  # Using actual API key here so it will be avail for later integration tests..
+  ../cronitor $CRONITOR_ARGS configure --api-key "$CLI_ACTUAL_API_KEY" >/dev/null  # Using actual API key here so it will be avail for later integration tests..
   grep "CRONITOR_API_KEY" $CLI_CONFIGFILE | grep -q "$CLI_ACTUAL_API_KEY"
 }
 
@@ -61,7 +65,7 @@ setup() {
 }
 
 @test "Configure writes Ping API Key correctly to config file" {
-  ../cronitor $CRONITOR_ARGS configure --ping-api-key "$MSG"  2>/dev/null
+  ../cronitor $CRONITOR_ARGS configure --ping-api-key "$MSG" >/dev/null
   grep "CRONITOR_PING_API_KEY" $CLI_CONFIGFILE | grep -q "$MSG"
 }
 
