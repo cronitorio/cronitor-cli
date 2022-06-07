@@ -5,6 +5,10 @@ setup() {
   cd $SCRIPT_DIR
 
   source $SCRIPT_DIR/setup.sh
+  CLI_LOGFILE=$BATS_TMPDIR/test-build.log
+}
+
+teardown() {
   rm -f $CLI_LOGFILE
 }
 
