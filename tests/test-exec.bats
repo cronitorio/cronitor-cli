@@ -42,12 +42,12 @@ setup() {
 }
 
 @test "Exec sends fail ping on failure" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 false > /dev/null
+  ../cronitor $CRONITOR_ARGS -k $CRONITOR_API_KEY --log $CLI_LOGFILE exec d3x0c1 false > /dev/null
   grep "Sending ping" $CLI_LOGFILE | grep -q "state=fail"
 }
 
 @test "Exec sends status code on complete ping" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/fail.sh > /dev/null
+  run ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/fail.sh > /dev/null
   grep -q "&status_code=123" $CLI_LOGFILE
 }
 
@@ -89,7 +89,7 @@ setup() {
 @test "Exec passes stdout through to caller with newline chars intact" {
   output="$(../cronitor exec d3x0c1 $PROJECT_DIR/bin/success.sh xyz)"
   output_lines=`echo "${output}" | wc -l | cut -d'/' -f1 | awk '{$1=$1};1'`
-  ! [ ${output_lines} -eq "1" ]
+  run ! [ ${output_lines} -eq "1" ]
 }
 
 @test "Exec passes exitcode through to caller" {
