@@ -6,13 +6,13 @@ setup() {
   cd $SCRIPT_DIR
 
   source $SCRIPT_DIR/setup.sh
-  rm -f $CLI_LOGFILE
-
   API_KEY="$CRONITOR_API_KEY"
+  TMPFILE="$BATS_TMPDIR/crontab.txt"
 }
 
 teardown() {
   rm -f $TMPFILE
+  rm -f $CLI_LOGFILE
 }
 
 #################
@@ -46,28 +46,26 @@ teardown() {
 
 @test "Discover correctly parses crontab with 6th digit DoW string range" {
   echo "* * * * * Mon-Fri echo 'DoW string parse'" | cat - $FIXTURES_DIR/crontab.txt > $CLI_CRONTAB_TEMP
-  ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k "$API_KEY"| grep "echo '" | grep -q "Mon-Fri cronitor exec"
+  ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k "$API_KEY" | grep "echo '" | grep -q "Mon-Fri cronitor exec"
 }
 
 @test "Discover correctly parses crontab with 6th digit DoW string list" {
   echo "* * * * * Mon,Wed,Fri echo 'DoW string list parse'" | cat - $FIXTURES_DIR/crontab.txt > $CLI_CRONTAB_TEMP
-  ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k "$API_KEY"| grep "echo '" | grep -q "Mon,Wed,Fri cronitor exec"
+  ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k "$API_KEY" | grep "echo '" | grep -q "Mon,Wed,Fri cronitor exec"
 }
 
 @test "Discover correctly parses crontab with 6th digit DoW string name" {
   echo "* * * * * Mon echo 'DoW string name parse'" | cat - $FIXTURES_DIR/crontab.txt > $CLI_CRONTAB_TEMP
-  ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k "$API_KEY"| grep "echo '" | grep -q "Mon cronitor exec"
+  ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k "$API_KEY" | grep "echo '" | grep -q "Mon cronitor exec"
 }
 
 @test "Discover rewrites crontab in place" {
-  TMPFILE="/tmp/crontab.txt"
   cp $FIXTURES_DIR/crontab.txt $TMPFILE
   ../cronitor $CRONITOR_ARGS discover --auto $TMPFILE -k "$API_KEY" > /dev/null
   grep "slave_status.sh" $TMPFILE | grep -q "cronitor exec"
 }
 
 @test "Discover ignores meta crontab entries" {
-  TMPFILE="/tmp/crontab.txt"
   cp $FIXTURES_DIR/metacrontab.txt $TMPFILE
   ../cronitor $CRONITOR_ARGS discover --auto $TMPFILE -k "$API_KEY" > /dev/null
   run -1 bash -c 'grep "cron.hourly" $TMPFILE | grep -q "cronitor exec"'
