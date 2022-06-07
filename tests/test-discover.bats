@@ -30,7 +30,7 @@ teardown() {
 
 
 @test "Discover is silent when being run under exec" {
- [[ $(../cronitor $CRONITOR_ARGS exec d3x0c1 cronitor $CRONITOR_ARGS discover --auto $FIXTURES_DIR/crontab.txt -k "$API_KEY" | wc -c) -eq 0 ]]
+ [[ $(../cronitor $CRONITOR_ARGS exec d3x0c1 ../cronitor $CRONITOR_ARGS discover --auto $FIXTURES_DIR/crontab.txt -k "$API_KEY" | wc -c) -eq 0 ]]
 }
 
 
