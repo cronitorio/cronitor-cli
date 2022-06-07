@@ -21,7 +21,7 @@ setup() {
 
 
 @test "Exec runs command check" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 ./write-to-log-success.sh $CLI_LOGFILE "$TEST" > /dev/null
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/write-to-log-success.sh $CLI_LOGFILE "$TEST" > /dev/null
   grep -q "$TEST" $CLI_LOGFILE
 }
 
