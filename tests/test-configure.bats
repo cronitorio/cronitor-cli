@@ -20,7 +20,7 @@ teardown() {
 #################
 
 @test "Configure uses log file from env var" {
-  CRONITOR_LOG=$CLI_LOGFILE ../cronitor $CRONITOR_ARGS ping d3x0c1 --run
+  CRONITOR_LOG=$CLI_LOGFILE ../cronitor $CRONITOR_ARGS ping d3x0c1 --run -k $CRONITOR_API_KEY
   grep -q "Sending ping ${HOSTNAME}/d3x0c1/run" $CLI_LOGFILE
 }
 
