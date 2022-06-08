@@ -12,8 +12,6 @@ setup() {
 # ACTIVITY TESTS
 #################
 
-echo ""
-
 @test "Activity integration test without filter" {
   ../cronitor $CRONITOR_ARGS activity 44oI2n --log $CLI_LOGFILE | grep -q "monitor_name"
 }
