@@ -36,7 +36,7 @@ teardown() {
 
 @test "Configure uses ping api key from env var" {
   CRONITOR_PING_API_KEY=123 ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --log $CLI_LOGFILE -k $CRONITOR_API_KEY
-  grep -q "&auth_key=123" $CLI_LOGFILE
+  grep -q "ping/123" $CLI_LOGFILE
 }
 
 @test "Configure writes hostname correctly to config file" {
