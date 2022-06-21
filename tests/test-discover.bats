@@ -8,6 +8,7 @@ setup() {
   load setup.bash
   API_KEY="$CRONITOR_API_KEY"
   TMPFILE="$BATS_TMPDIR/crontab.txt"
+  CLI_CRONTAB_TEMP="/tmp/crontab"
 }
 
 teardown() {
