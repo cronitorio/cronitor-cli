@@ -26,3 +26,9 @@ setup_suite() {
 
     ../cronitor configure -k "$CLI_ACTUAL_API_KEY" >/dev/null 2>/dev/null
 }
+
+skip_if_windows() {
+    if [ "$WINDOWS" = "true" ] ; then
+        skip "Skipping this test on Windows"
+    fi
+}
