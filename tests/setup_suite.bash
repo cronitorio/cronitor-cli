@@ -25,6 +25,4 @@ setup_suite() {
     fi
 
     ../cronitor configure -k "$CLI_ACTUAL_API_KEY" >/dev/null 2>/dev/null
-
-    load test_helper
 }

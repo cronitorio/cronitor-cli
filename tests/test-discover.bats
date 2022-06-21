@@ -5,7 +5,7 @@ setup() {
   FIXTURES_DIR="$SCRIPT_DIR/../fixtures"
   cd $SCRIPT_DIR
 
-  # load setup.bash
+  load test_helper
   API_KEY="$CRONITOR_API_KEY"
   TMPFILE="$BATS_TMPDIR/crontab.txt"
 }
