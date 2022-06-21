@@ -31,7 +31,7 @@ jobs:
           echo "::add-mask::cb54ac4fd16142469f2d84fc1bbebd84"
           echo "::add-mask::$CRONITOR_API_KEY"
           export BATS_PATH="$(which bats)"
-          sudo -E -n -- $BATS_PATH *.bats
+          $BATS_PATH *.bats
 
 
   linux-tests:
