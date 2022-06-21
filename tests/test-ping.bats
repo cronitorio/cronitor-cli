@@ -4,7 +4,7 @@ setup() {
   SCRIPT_DIR="$(dirname $BATS_TEST_FILENAME)"
   cd $SCRIPT_DIR
 
-  source $SCRIPT_DIR/setup.sh
+  load setup.bash
   CLI_LOGFILE=$BATS_TMPDIR/test-build.log
 }
 

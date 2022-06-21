@@ -3,7 +3,7 @@
 setup() {
   SCRIPT_DIR="$BATS_TEST_DIRNAME"
 
-  source $SCRIPT_DIR/setup.sh
+  load setup.bash
   rm -f $CLI_LOGFILE
 }
 
