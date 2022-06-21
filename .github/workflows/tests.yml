@@ -36,6 +36,7 @@ jobs:
         shell: bash
         env:
           CRONITOR_API_KEY: "${{ secrets.CRONITOR_API_KEY }}"
+          WINDOWS: 'true'
         run: |
           echo "::add-mask::cb54ac4fd16142469f2d84fc1bbebd84"
           echo "::add-mask::$CRONITOR_API_KEY"
@@ -64,6 +65,7 @@ jobs:
         working-directory: tests
         env:
           CRONITOR_API_KEY: "${{ secrets.CRONITOR_API_KEY }}"
+          WINDOWS: 'false'
         run: |
           echo "::add-mask::cb54ac4fd16142469f2d84fc1bbebd84"
           echo "::add-mask::$CRONITOR_API_KEY"
