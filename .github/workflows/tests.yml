@@ -13,6 +13,13 @@ jobs:
 
       - uses: actions/setup-go@v3
 
+      # Prefer MSYS2 bash to git bash
+      - name:  "add-path"
+        shell: cmd
+        run:   |
+          echo ::add-path::C:\msys64\usr\bin
+          dir C:\msys64\usr\bin
+
       - name: Setup BATS
         uses: mig4/setup-bats@v1
         with:
