@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  SCRIPT_DIR="$(dirname $BATS_TEST_FILENAME)"
+  SCRIPT_DIR="$BATS_TEST_DIRNAME"
   FIXTURES_DIR="$SCRIPT_DIR/../fixtures"
   cd $SCRIPT_DIR
 
