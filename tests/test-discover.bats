@@ -13,6 +13,7 @@ setup() {
 teardown() {
   rm -f $TMPFILE
   rm -f $CLI_LOGFILE
+  rm -f $CLI_CRONTAB_TEMP
 }
 
 #################
@@ -28,11 +29,9 @@ teardown() {
   ../cronitor $CRONITOR_ARGS discover --auto $FIXTURES_DIR/crontab.txt -k "$API_KEY" | grep "slave_status.sh" | grep -q "cronitor exec"
 }
 
-
 @test "Discover is silent when being run under exec" {
  [[ $(../cronitor $CRONITOR_ARGS exec d3x0c1 ../cronitor $CRONITOR_ARGS discover --auto $FIXTURES_DIR/crontab.txt -k "$API_KEY" | wc -c) -eq 0 ]]
 }
-
 
 @test "Discover correctly parses crontab with username" {
   echo "* * * * * $CLI_USERNAME echo 'username parse'" | cat - $FIXTURES_DIR/crontab.txt > $CLI_CRONTAB_TEMP
