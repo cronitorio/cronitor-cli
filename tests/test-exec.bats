@@ -98,5 +98,5 @@ teardown() {
 }
 
 @test "Exec passes exitcode through to caller" {
-  run -123 bash -c '../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/fail.sh > /dev/null'
+  run -123 bash -c '../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 bash $PROJECT_DIR/bin/fail.sh > /dev/null'
 }
