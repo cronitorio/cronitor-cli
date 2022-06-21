@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 setup_suite() {
     echo '# Running the setup suite...' >&3
 
