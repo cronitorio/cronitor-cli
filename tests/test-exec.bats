@@ -4,9 +4,12 @@ setup() {
   SCRIPT_DIR="$BATS_TEST_DIRNAME"
   cd $SCRIPT_DIR
 
-  PROJECT_DIR="$(dirname $SCRIPT_DIR)"
+  export PROJECT_DIR="$(dirname $SCRIPT_DIR)"
 
   load test_helper
+}
+
+teardown() {
   rm -f $CLI_LOGFILE
 }
 
