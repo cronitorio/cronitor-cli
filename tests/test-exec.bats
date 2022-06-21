@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  SCRIPT_DIR="$(dirname $BATS_TEST_FILENAME)"
+  SCRIPT_DIR="$BATS_TEST_DIRNAME"
   cd $SCRIPT_DIR
 
   PROJECT_DIR="$(dirname $SCRIPT_DIR)"
@@ -15,6 +15,7 @@ setup() {
 #################
 
 @test "Exec uses bash when available" {
+  skip_if_windows
   [[ "$(../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/test-bash.sh)"  == "i am an array" ]]
 }
 
@@ -30,8 +31,8 @@ setup() {
 }
 
 @test "Exec runs command with really complex args" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 "cd /tmp && pwd" > /dev/null
-  grep -q "/tmp" $CLI_LOGFILE
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 "cd $BATS_TMPDIR && pwd" > /dev/null
+  grep -q "$BATS_TMPDIR" $CLI_LOGFILE
 }
 
 
@@ -87,11 +88,12 @@ setup() {
 }
 
 @test "Exec passes stdout through to caller with newline chars intact" {
+  skip_if_windows
   output="$(../cronitor exec d3x0c1 $PROJECT_DIR/bin/success.sh xyz)"
   output_lines=`echo "${output}" | wc -l | cut -d'/' -f1 | awk '{$1=$1};1'`
   [[ ${output_lines} -ne "1" ]]
 }
 
 @test "Exec passes exitcode through to caller" {
-  run -123 ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/fail.sh > /dev/null
+  run -123 bash -c '../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/fail.sh > /dev/null'
 }
