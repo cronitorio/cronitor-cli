@@ -3,7 +3,7 @@
 setup() {
   SCRIPT_DIR="$BATS_TEST_DIRNAME"
 
-  load setup.bash
+  # load setup.bash
   rm -f $CLI_LOGFILE
 }
 

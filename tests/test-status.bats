@@ -4,7 +4,7 @@ setup() {
   SCRIPT_DIR="$(dirname $BATS_TEST_FILENAME)"
   cd $SCRIPT_DIR
 
-  load setup.bash
+  # load setup.bash
   rm -f $CLI_LOGFILE
 }
 

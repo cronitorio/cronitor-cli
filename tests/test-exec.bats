@@ -6,7 +6,7 @@ setup() {
 
   PROJECT_DIR="$(dirname $SCRIPT_DIR)"
 
-  load setup.bash
+  # load setup.bash
 
   rm -f $CLI_LOGFILE
 }
