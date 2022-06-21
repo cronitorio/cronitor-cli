@@ -16,6 +16,8 @@ jobs:
       # Prefer MSYS2 bash to git bash
       - name:  "add-path"
         shell: cmd
+        env:
+          ACTIONS_ALLOW_UNSECURE_COMMANDS: true
         run:   |
           echo ::add-path::C:\msys64\usr\bin
           dir C:\msys64\usr\bin
