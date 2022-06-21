@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 
 setup_suite() {
     export CLI_LOGFILE="/tmp/test-build.log"
