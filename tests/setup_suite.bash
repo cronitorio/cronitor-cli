@@ -1,4 +1,6 @@
 setup_suite() {
+    echo '# Running the setup suite...' >&3
+
     CLI_LOGFILE="/tmp/test-build.log"
     CLI_LOGFILE_ALTERNATE="/tmp/test-build-alternate.log"
     CLI_CONFIGFILE="/etc/cronitor/cronitor.json"
