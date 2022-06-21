@@ -13,8 +13,10 @@ jobs:
 
       - uses: actions/setup-go@v3
 
-      - run: "echo hi"
-        shell: bash
+      - name: Setup BATS
+        uses: mig4/setup-bats@v1
+        with:
+          bats-version: 1.7.0
 
 
 
