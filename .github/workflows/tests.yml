@@ -4,8 +4,19 @@ on:
   - push
 
 jobs:
-  tests:
-    name: Run tests
+  windows-tests:
+    name: Run Windows tests
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+      - uses: actions/setup-go@v3
+
+
+
+  linux-tests:
+    name: Run Linux tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
