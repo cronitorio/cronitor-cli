@@ -3,7 +3,7 @@
 setup_suite() {
     export CLI_LOGFILE="$BATS_TMPDIR/test-build.log"
     export CLI_LOGFILE_ALTERNATE="$BATS_TMPDIR/test-build-alternate.log"
-    export CLI_CONFIGFILE="$BATS_TMPDIR/cronitor.json"
+    export CLI_CONFIGFILE="/etc/cronitor/cronitor.json"
     #CLI_CONFIGFILE="/tmp/cronitor.json"
     export CLI_CONFIGFILE_ALTERNATE="$BATS_TMPDIR/test-build-config.json"
     #CLI_ACTUAL_API_KEY="cb54ac4fd16142469f2d84fc1bbebd84"
