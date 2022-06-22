@@ -8,12 +8,12 @@ setup() {
   load test_helper
   API_KEY="$CRONITOR_API_KEY"
   TMPFILE="$BATS_TMPDIR/crontab.txt"
-  CLI_CRONTAB_TEMP="/tmp/crontab"
 }
 
 teardown() {
   rm -f $TMPFILE
   rm -f $CLI_LOGFILE
+  rm -f $CLI_CRONTAB_TEMP
 }
 
 #################
@@ -26,7 +26,9 @@ teardown() {
 }
 
 @test "Discover parses response and rewrites crontab" {
-  ../cronitor $CRONITOR_ARGS discover --auto $FIXTURES_DIR/crontab.txt -k "$API_KEY" | grep "slave_status.sh" | grep -q "cronitor exec"
+  run ../cronitor $CRONITOR_ARGS discover --auto $FIXTURES_DIR/crontab.txt -k "$API_KEY"
+  echo "$output" >&3
+  echo "$output" | grep "slave_status.sh" | grep -q "cronitor exec"
 }
 
 @test "Discover is silent when being run under exec" {
