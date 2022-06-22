@@ -44,8 +44,8 @@ teardown() {
 }
 
 @test "Discover correctly parses crontab with 6th digit DoW string range" {
-  echo "* * * * * Mon-Fri echo 'DoW string parse'" | cat - $FIXTURES_DIR/crontab.txt > $BATS_TEST_TMPDIR/crontab.txt
-  ../cronitor $CRONITOR_ARGS discover --auto $BATS_TEST_TMPDIR/crontab.txt -k "$API_KEY" | grep "echo '" | grep -q "Mon-Fri cronitor exec"
+  echo "* * * * * Mon-Fri echo 'DoW string parse'" | cat - $FIXTURES_DIR/crontab.txt > $CLI_CRONTAB_TEMP
+  ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k "$API_KEY" | grep "echo '" | grep -q "Mon-Fri cronitor exec"
 }
 
 @test "Discover correctly parses crontab with 6th digit DoW string list" {
