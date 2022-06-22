@@ -14,7 +14,6 @@ setup() {
 teardown() {
   rm -f $TMPFILE
   rm -f $CLI_LOGFILE
-  rm -f $CLI_CRONTAB_TEMP
 }
 
 #################
