@@ -21,13 +21,11 @@ teardown() {
 #################
 
 @test "Discover reads file and sends PUT" {
-  skip_if_windows
   ../cronitor $CRONITOR_ARGS discover --auto $FIXTURES_DIR/crontab.txt -k "$API_KEY" --log $CLI_LOGFILE > /dev/null
   grep -q "Request" $CLI_LOGFILE
 }
 
 @test "Discover parses response and rewrites crontab" {
-  skip_if_windows
   ../cronitor $CRONITOR_ARGS discover --auto $FIXTURES_DIR/crontab.txt -k "$API_KEY" | grep "slave_status.sh" | grep -q "cronitor exec"
 }
 
@@ -36,44 +34,37 @@ teardown() {
 }
 
 @test "Discover correctly parses crontab with username" {
-  skip_if_windows
   echo "* * * * * $CLI_USERNAME echo 'username parse'" | cat - $FIXTURES_DIR/crontab.txt > $CLI_CRONTAB_TEMP
   ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k "$API_KEY" | grep "echo '" | grep -q "$CLI_USERNAME cronitor exec"
 }
 
 @test "Discover correctly parses crontab with 6 digits" {
-  skip_if_windows
   echo "* * * * * 0 echo 'six dig parse'" | cat - $FIXTURES_DIR/crontab.txt > $CLI_CRONTAB_TEMP
   ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k "$API_KEY"| grep "echo '" | grep -q "0 cronitor exec"
 }
 
 @test "Discover correctly parses crontab with 6th digit DoW string range" {
-  skip_if_windows
   echo "* * * * * Mon-Fri echo 'DoW string parse'" | cat - $FIXTURES_DIR/crontab.txt > $CLI_CRONTAB_TEMP
   ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k "$API_KEY" | grep "echo '" | grep -q "Mon-Fri cronitor exec"
 }
 
 @test "Discover correctly parses crontab with 6th digit DoW string list" {
-  skip_if_windows
   echo "* * * * * Mon,Wed,Fri echo 'DoW string list parse'" | cat - $FIXTURES_DIR/crontab.txt > $CLI_CRONTAB_TEMP
   ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k "$API_KEY" | grep "echo '" | grep -q "Mon,Wed,Fri cronitor exec"
 }
 
 @test "Discover correctly parses crontab with 6th digit DoW string name" {
-  skip_if_windows
   echo "* * * * * Mon echo 'DoW string name parse'" | cat - $FIXTURES_DIR/crontab.txt > $CLI_CRONTAB_TEMP
   ../cronitor $CRONITOR_ARGS discover --auto $CLI_CRONTAB_TEMP -k "$API_KEY" | grep "echo '" | grep -q "Mon cronitor exec"
 }
 
 @test "Discover rewrites crontab in place" {
-  skip_if_windows
   cp $FIXTURES_DIR/crontab.txt $TMPFILE
   ../cronitor $CRONITOR_ARGS discover --auto $TMPFILE -k "$API_KEY" > /dev/null
   grep "slave_status.sh" $TMPFILE | grep -q "cronitor exec"
 }
 
 @test "Discover ignores meta crontab entries" {
-  skip_if_windows
   cp $FIXTURES_DIR/metacrontab.txt $TMPFILE
   ../cronitor $CRONITOR_ARGS discover --auto $TMPFILE -k "$API_KEY" > /dev/null
   run -1 bash -c 'grep "cron.hourly" $TMPFILE | grep -q "cronitor exec"'
@@ -92,7 +83,6 @@ teardown() {
 }
 
 @test "Discover reads all of the crontabs in a directory" {
-  skip_if_windows
   OUTPUT="$(../cronitor $CRONITOR_ARGS discover --auto $FIXTURES_DIR/cron.d -k "$API_KEY")"
   echo "$OUTPUT" | grep -q "every_minute" && echo "$OUTPUT" | grep -q "top_of_hour"
 }

@@ -117,7 +117,6 @@ func processWindowsTaskScheduler() bool {
 		key := t.WindowsKey()
 		name := defaultName
 		skip := false
-		schedule := t.GetNextRunTimeString()
 
 		// The monitor name will always be the same, so we don't have to fetch it
 		// from the Cronitor existing monitors
@@ -169,7 +168,6 @@ func processWindowsTaskScheduler() bool {
 			Type:             "job",
 			Notify:           notifications,
 			NoStdoutPassthru: noStdoutPassthru,
-			Schedule:         schedule,
 		}
 		tz := effectiveTimezoneLocationName()
 		if tz.Name != "" {
