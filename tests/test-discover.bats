@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
 
 setup() {
-  SCRIPT_DIR="$BATS_TEST_DIRNAME"
-  FIXTURES_DIR="$SCRIPT_DIR/../fixtures"
+  SCRIPT_DIR="$(dirname $BATS_TEST_FILENAME)"
+  FIXTURES_DIR="$(dirname $SCRIPT_DIR)/fixtures"
   cd $SCRIPT_DIR
 
   load test_helper
