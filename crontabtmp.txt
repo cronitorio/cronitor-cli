@@ -1,0 +1,5 @@
+* * * * * Mon-Fri cronitor exec hp3pEO echo 'DoW string parse'
+0,5,10,15,20,25,30,35,40,45,50,55 * * * * cronitor exec VhPCdm true
+0,15,30,45 * * * * cronitor exec kGwptf /usr/bin/true
+0 * * * * cronitor exec 6khpFR echo "this is a longer command"
+0 * * * * cronitor exec 8GtCLU bash slave_status.sh
