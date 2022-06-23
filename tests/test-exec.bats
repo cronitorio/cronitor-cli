@@ -34,8 +34,8 @@ teardown() {
 }
 
 @test "Exec runs command with really complex args" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 "cd $BATS_TMPDIR && pwd" > /dev/null
-  grep -q "$BATS_TMPDIR" $CLI_LOGFILE
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 "cd /tmp && pwd" > /dev/null
+  grep -q "/tmp" $CLI_LOGFILE
 }
 
 
@@ -68,6 +68,8 @@ teardown() {
 
 @test "Exec sends duration with complete ping" {
   ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 sleep 1 > /dev/null
+  echo "Logfile from 'exec sends duration" >&3
+  cat $CLI_LOGFILE >&3
   grep -q "&duration=1." $CLI_LOGFILE
 }
 

@@ -5,3 +5,7 @@ skip_if_windows() {
         skip "Skipping this test on Windows"
     fi
 }
+
+skip_until_key_returned() {
+    skip 'Skipping until newer API is updated to return `key`'
+}
