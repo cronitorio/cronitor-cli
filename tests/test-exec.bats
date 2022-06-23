@@ -68,8 +68,6 @@ teardown() {
 
 @test "Exec sends duration with complete ping" {
   ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 sleep 1 > /dev/null
-  echo "Logfile from 'exec sends duration" >&3
-  cat $CLI_LOGFILE >&3
   grep -q "&duration=1." $CLI_LOGFILE
 }
 

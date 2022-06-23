@@ -12,13 +12,13 @@ setup() {
 #################
 
 @test "Activity integration test without filter" {
-  ../cronitor $CRONITOR_ARGS activity 44oI2n --log $CLI_LOGFILE | grep -q "monitor_name"
+  ../cronitor $CRONITOR_ARGS activity OFY0dB --log $CLI_LOGFILE | grep -q "monitor_name"
 }
 
 @test "Activity integration test with only pings filter" {
-  ../cronitor $CRONITOR_ARGS activity 44oI2n --only pings --log $CLI_LOGFILE | grep -q "monitor_name"
+  ../cronitor $CRONITOR_ARGS activity OFY0dB --only pings --log $CLI_LOGFILE | grep -q "monitor_name"
 }
 
 @test "Activity integration test with only alerts filter" {
-  ../cronitor $CRONITOR_ARGS activity 44oI2n --only alerts --log $CLI_LOGFILE | grep -q -v "\"description\": \"ping\""
+  ../cronitor $CRONITOR_ARGS activity OFY0dB --only alerts --log $CLI_LOGFILE | grep -q -v "\"description\": \"ping\""
 }

@@ -40,6 +40,6 @@ teardown() {
 
 @test "Ping integration test" {
   MSG=`date`
-  ../cronitor $CRONITOR_ARGS ping 44oI2n --run --msg "$MSG" --log $CLI_LOGFILE -k $CRONITOR_API_KEY && sleep 3
-  ../cronitor $CRONITOR_ARGS activity 44oI2n -k $CRONITOR_API_KEY | grep -q "$MSG"
+  ../cronitor $CRONITOR_ARGS ping OFY0dB --run --msg "$MSG" --log $CLI_LOGFILE -k $CRONITOR_API_KEY && sleep 3
+  ../cronitor $CRONITOR_ARGS activity OFY0dB -k $CRONITOR_API_KEY | grep -q "$MSG"
 }
