@@ -298,7 +298,7 @@ func (l Line) Write() string {
 	lineParts = append(lineParts, l.CronExpression)
 	lineParts = append(lineParts, l.RunAs)
 
-	if len(l.Mon.Code) > 0 {
+	if len(l.Mon.Key) > 0 {
 		lineParts = append(lineParts, "cronitor")
 		if l.Mon.NoStdoutPassthru {
 			lineParts = append(lineParts, "--no-stdout")
