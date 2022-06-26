@@ -207,6 +207,7 @@ func (api CronitorApi) sendHttpPut(url string, body string) ([]byte, error) {
 	request.SetBasicAuth(viper.GetString(api.ApiKey), "")
 	request.Header.Add("Content-Type", "application/json")
 	request.Header.Add("User-Agent", api.UserAgent)
+	request.Header.Add("Cronitor-Version", "2020-10-01")
 	request.ContentLength = int64(len(body))
 	response, err := client.Do(request)
 	if err != nil {
