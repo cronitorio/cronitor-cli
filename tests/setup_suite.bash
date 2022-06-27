@@ -1,6 +1,8 @@
 #!/usr/bin/bash
 
 setup_suite() {
+    bats_require_minimum_version 1.5.0
+
     export CLI_LOGFILE="$BATS_TMPDIR/test-build.log"
     export CLI_LOGFILE_ALTERNATE="$BATS_TMPDIR/test-build-alternate.log"
     if [ "$WINDOWS" = "true" ] ; then
