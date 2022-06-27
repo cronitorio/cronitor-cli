@@ -18,5 +18,7 @@ setup() {
 }
 
 @test "List reads crontab and formats table correctly" {
-  ../cronitor $CRONITOR_ARGS list $FIXTURES_DIR/crontab.txt | grep -q "\-----"
+  run ../cronitor $CRONITOR_ARGS list $FIXTURES_DIR/crontab.txt
+  echo "$output" >&3
+  echo "$output" | grep -q "\-----"
 }
