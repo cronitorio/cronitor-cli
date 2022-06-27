@@ -3,15 +3,13 @@
 setup_suite() {
     bats_require_minimum_version 1.5.0
 
+    export CLI_LOGFILE="$BATS_TMPDIR/test-build.log"
+    export CLI_LOGFILE_ALTERNATE="$BATS_TMPDIR/test-build-alternate.log"
     if [ "$WINDOWS" = "true" ] ; then
         export CLI_CONFIGFILE="C:\ProgramData\Cronitor\cronitor.json"
-        export CLI_LOGFILE="C:\Users\runneradmin\AppData\Local\Temp\test-build.log"
-        export CLI_LOGFILE_ALTERNATE="C:\Users\runneradmin\AppData\Local\Temp\test-build-alternate.log"
         export CLI_CRONTAB_TEMP="C:\Users\runneradmin\AppData\Local\Temp\crontab.txt"
     else
         export CLI_CONFIGFILE="/etc/cronitor/cronitor.json"
-        export CLI_LOGFILE="$BATS_TMPDIR/test-build.log"
-        export CLI_LOGFILE_ALTERNATE="$BATS_TMPDIR/test-build-alternate.log"
         export CLI_CRONTAB_TEMP="$BATS_TMPDIR/crontab.txt"
     fi
     #CLI_CONFIGFILE="/tmp/cronitor.json"
