@@ -1,4 +1,4 @@
 0,5,10,15,20,25,30,35,40,45,50,55 * * * * true
-0 * * * * echo "this is a longer command"
 0,15,30,45 * * * * /usr/bin/true
+0 * * * * echo "this is a longer command"
 0 * * * * bash slave_status.sh

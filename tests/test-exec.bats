@@ -33,9 +33,16 @@ teardown() {
   grep -q "arg with space" $CLI_LOGFILE
 }
 
-@test "Exec runs command with really complex args" {
+@test "Exec runs command with really complex args (Linux)" {
+  skip_if_windows
   ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 "cd /tmp && pwd" > /dev/null
   grep -q "/tmp" $CLI_LOGFILE
+}
+
+@test "Exec runs command with really complex args (Windows)" {
+  skip_if_linux
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 "echo hi && echo 'double hi'" > /dev/null
+  grep -q "hi" $CLI_LOGFILE
 }
 
 
