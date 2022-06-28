@@ -14,11 +14,14 @@ setup() {
 #################
 
 @test "List reads crontab and writes table" {
-  ../cronitor $CRONITOR_ARGS list $FIXTURES_DIR/crontab.txt | grep -q "/usr/bin/true"
+  run ../cronitor $CRONITOR_ARGS list $FIXTURES_DIR/crontab.txt
+  echo "Real file\n"
+  cat $FIXTURES_DIR/crontab.txt >&3
+  echo "Processed file"
+  echo "$output" >&3
+  echo "$output" | grep -q "/usr/bin/true"
 }
 
 @test "List reads crontab and formats table correctly" {
-  run ../cronitor $CRONITOR_ARGS list $FIXTURES_DIR/crontab.txt
-  echo "$output" >&3
-  echo "$output" | grep -q "\-----"
+  ../cronitor $CRONITOR_ARGS list $FIXTURES_DIR/crontab.txt | grep -q "\-----"
 }
