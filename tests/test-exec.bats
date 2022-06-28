@@ -41,8 +41,7 @@ teardown() {
 
 @test "Exec runs command with really complex args (Windows)" {
   skip_if_linux
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 "echo hi && echo 'double hi'" # > /dev/null
-  cat $CLI_LOGFILE >&3
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 "(echo hi) -and (echo 'double hi')" # > /dev/null
   grep -q "hi" $CLI_LOGFILE
 }
 
