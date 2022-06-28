@@ -2,7 +2,11 @@
 
 skip_if_windows() {
     if [ "$WINDOWS" = "true" ] ; then
-        skip "Skipping this test on Windows"
+        SKIP_MESSAGE="Skipping this test on Windows"
+        if [ "$1" != "" ] ; then
+            SKIP_MESSAGE="$SKIP_MESSAGE: $1"
+        fi
+        skip "$SKIP_MESSAGE"
     fi
 }
 
