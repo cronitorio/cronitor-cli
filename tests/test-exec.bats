@@ -104,6 +104,12 @@ teardown() {
   [[ ${output_lines} -ne "1" ]]
 }
 
-@test "Exec passes exitcode through to caller" {
+@test "Exec passes exitcode through to caller (Linux)" {
+  skip_if_windows
   run -123 bash -c '../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 bash $PROJECT_DIR/bin/fail.sh > /dev/null'
+}
+
+@test "Exec passes exitcode through to caller (Windows)" {
+   skip_if_linux
+   run -123 bash -c '../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 powershell -Command $PROJECT_DIR/bin/fail.ps1 > /dev/null'
 }
