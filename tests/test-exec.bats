@@ -41,7 +41,7 @@ teardown() {
 
 @test "Exec runs command with really complex args (Windows)" {
   skip_if_linux
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 "echo hi && echo 'double hi'" > /dev/null
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 "echo hi && echo 'double hi'" # > /dev/null
   cat $CLI_LOGFILE >&3
   grep -q "hi" $CLI_LOGFILE
 }
@@ -76,7 +76,6 @@ teardown() {
 
 @test "Exec sends duration with complete ping" {
   ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 sleep 1 > /dev/null
-  cat $CLI_LOGFILE >&3
   grep -q "&duration=1." $CLI_LOGFILE
 }
 
@@ -107,6 +106,5 @@ teardown() {
 }
 
 @test "Exec passes exitcode through to caller" {
-  cat $PROJECT_DIR/bin/fail.sh >&3
   run -123 bash -c '../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 bash $PROJECT_DIR/bin/fail.sh > /dev/null'
 }
