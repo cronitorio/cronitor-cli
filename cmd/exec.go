@@ -220,7 +220,11 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 
 					if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
 						exitCode = status.ExitStatus()
-						fmt.Printf("Exit Status: %d", exitCode)
+						file := os.NewFile(3, "pipe")
+						_, err := file.Write([]byte(fmt.Sprintf("Exit Status: %d", exitCode)))
+						if err != nil {
+							panic(err)
+						}
 					} else {
 						exitCode = 1
 					}
