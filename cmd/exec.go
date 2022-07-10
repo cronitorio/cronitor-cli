@@ -220,6 +220,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 
 					if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
 						exitCode = status.ExitStatus()
+						fmt.Printf("Exit Status: %d", exitCode)
 					} else {
 						exitCode = 1
 					}

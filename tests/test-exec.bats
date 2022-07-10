@@ -111,6 +111,6 @@ teardown() {
 
 @test "Exec passes exitcode through to caller (Windows)" {
    skip_if_linux
-   # run -123 ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 powershell -Command $PROJECT_DIR/bin/fail.ps1
-   run -123 powershell -Command $PROJECT_DIR/bin/fail.ps1
+   run -123 ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 powershell -Command $PROJECT_DIR/bin/fail.ps1
+   # run -123 powershell -Command $PROJECT_DIR/bin/fail.ps1
 }
