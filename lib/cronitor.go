@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
-	"github.com/pkg/errors"
 	"fmt"
 	"github.com/getsentry/raven-go"
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"io/ioutil"
 	"net/http"
@@ -18,24 +18,43 @@ import (
 type RuleValue string
 
 type Rule struct {
-	RuleType     string `json:"rule_type"`
+	RuleType     string    `json:"rule_type"`
 	Value        RuleValue `json:"value"`
-	TimeUnit     string `json:"time_unit,omitempty"`
-	GraceSeconds uint   `json:"grace_seconds,omitempty"`
+	TimeUnit     string    `json:"time_unit,omitempty"`
+	GraceSeconds uint      `json:"grace_seconds,omitempty"`
 }
 
+type Platform string
+
+const (
+	CRON       Platform = "cron"
+	WINDOWS    Platform = "windows"
+	KUBERNETES Platform = "kubernetes"
+	JVM        Platform = "jvm"
+	LARAVEL    Platform = "laravel"
+	MAGENTO    Platform = "magento"
+	SIDEKIQ    Platform = "sidekiq"
+	CELERY     Platform = "celery"
+	JENKINS    Platform = "jenkins"
+	QUARTZ     Platform = "quartz"
+	SPRING     Platform = "spring"
+	CLOUDWATCH Platform = "cloudwatch"
+	NODECRON   Platform = "node-cron"
+)
+
 type Monitor struct {
-	Name             string              `json:"name,omitempty"`
-	DefaultName      string              `json:"defaultName"`
-	Key              string              `json:"key"`
-	Rules            []Rule              `json:"rules"`
-	Tags             []string            `json:"tags"`
-	Type             string              `json:"type"`
-	Code             string              `json:"code,omitempty"`
-	Timezone         string              `json:"timezone,omitempty"`
-	Note             string              `json:"defaultNote,omitempty"`
-	Notifications    map[string][]string `json:"notifications,omitempty"`
-	NoStdoutPassthru bool                `json:"-"`
+	Name             string   `json:"name,omitempty"`
+	DefaultName      string   `json:"defaultName"`
+	Key              string   `json:"key"`
+	Schedule         string   `json:"schedule,omitempty"`
+	Platform         Platform `json:"platform,omitempty"`
+	Tags             []string `json:"tags"`
+	Type             string   `json:"type"`
+	Code             string   `json:"code,omitempty"`
+	Timezone         string   `json:"timezone,omitempty"`
+	Note             string   `json:"defaultNote,omitempty"`
+	Notify           []string `json:"notify,omitempty"`
+	NoStdoutPassthru bool     `json:"-"`
 }
 
 type MonitorSummary struct {
@@ -52,7 +71,6 @@ type CronitorApi struct {
 	UserAgent      string
 	Logger         func(string)
 }
-
 
 func (fi *RuleValue) UnmarshalJSON(b []byte) error {
 	if b[0] == '"' {
@@ -175,9 +193,9 @@ func (api CronitorApi) GetRawResponse(url string) ([]byte, error) {
 
 func (api CronitorApi) Url() string {
 	if api.IsDev {
-		return "http://dev.cronitor.io/v3/monitors"
+		return "http://dev.cronitor.io/api/monitors"
 	} else {
-		return "https://cronitor.io/v3/monitors"
+		return "https://cronitor.io/api/monitors"
 	}
 }
 
@@ -189,6 +207,7 @@ func (api CronitorApi) sendHttpPut(url string, body string) ([]byte, error) {
 	request.SetBasicAuth(viper.GetString(api.ApiKey), "")
 	request.Header.Add("Content-Type", "application/json")
 	request.Header.Add("User-Agent", api.UserAgent)
+	request.Header.Add("Cronitor-Version", "2020-10-01")
 	request.ContentLength = int64(len(body))
 	response, err := client.Do(request)
 	if err != nil {

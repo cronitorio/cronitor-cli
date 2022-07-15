@@ -4,7 +4,7 @@ setup() {
   SCRIPT_DIR="$(dirname $BATS_TEST_FILENAME)"
   cd $SCRIPT_DIR
 
-  source $SCRIPT_DIR/setup.sh
+  # load setup.bash
   rm -f $CLI_LOGFILE
 }
 
@@ -17,7 +17,7 @@ setup() {
 }
 
 @test "Status integration test with filter" {
-  ../cronitor $CRONITOR_ARGS status 44oI2n --log $CLI_LOGFILE | grep -q "Ok"
+  ../cronitor $CRONITOR_ARGS status OFY0dB --log $CLI_LOGFILE | grep -q "Ok"
 }
 
 @test "Status integration test with bad monitor code" {
