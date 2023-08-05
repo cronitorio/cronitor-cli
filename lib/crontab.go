@@ -23,13 +23,13 @@ type TimezoneLocationName struct {
 }
 
 type Crontab struct {
-	User                    string
-	IsUserCrontab           bool
-	IsSaved                 bool
-	Filename                string
-	Lines                   []*Line
-	TimezoneLocationName    *TimezoneLocationName
-	UsesSixFieldExpressions bool
+	User                    string                `json:"-"`
+	IsUserCrontab           bool                  `json:"-"`
+	IsSaved                 bool                  `json:"-"`
+	Filename                string                `json:"filename,omitempty"`
+	Lines                   []*Line               `json:"lines,omitempty"`
+	TimezoneLocationName    *TimezoneLocationName `json:"timezone,omitempty"`
+	UsesSixFieldExpressions bool                  `json:"-"`
 }
 
 func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
@@ -256,14 +256,14 @@ func (c Crontab) load() ([]string, int, error) {
 }
 
 type Line struct {
-	Name           string
-	FullLine       string
-	LineNumber     int
-	CronExpression string
-	CommandToRun   string
-	Code           string
-	RunAs          string
-	Mon            Monitor
+	Name           string  `json:"name,omitempty"`
+	FullLine       string  `json:"-"`
+	LineNumber     int     `json:"-"`
+	CronExpression string  `json:"schedule,omitempty"`
+	CommandToRun   string  `json:"command,omitempty"`
+	Code           string  `json:"-"`
+	RunAs          string  `json:"run_as,omitempty"`
+	Mon            Monitor `json:"-"`
 }
 
 func (l Line) IsMonitorable() bool {
