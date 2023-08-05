@@ -151,8 +151,8 @@ func (c Crontab) Save(crontabLines string) error {
 			return errors.New("cannot write user crontab: " + err.Error() + " " + string(output))
 		}
 	} else {
-		if ioutil.WriteFile(c.Filename, []byte(crontabLines), 0644) != nil {
-			return errors.New(fmt.Sprintf("cannot write crontab at %s; check permissions and try again", c.Filename))
+		if err := os.WriteFile(c.Filename, []byte(crontabLines), 0644); err != nil {
+			return fmt.Errorf("cannot write crontab at %s; check permissions and try again: %w", c.Filename, err)
 		}
 	}
 
@@ -241,7 +241,7 @@ func (c Crontab) load() ([]string, int, error) {
 			return nil, 66, errors.New(fmt.Sprintf("the file %s does not exist", c.Filename))
 		}
 
-		if b, err := ioutil.ReadFile(c.Filename); err == nil {
+		if b, err := os.ReadFile(c.Filename); err == nil {
 			crontabBytes = b
 		} else {
 			return nil, 126, errors.New(fmt.Sprintf("the crontab file at %s could not be read; check permissions and try again", c.Filename))
