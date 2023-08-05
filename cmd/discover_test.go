@@ -1,26 +1,49 @@
 package cmd
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/stretchr/testify/assert"
+)
 
 func TestCreateDefaultNameHasAddCandidateSideEffect(t *testing.T) {
 	allNameCandidates := map[string]bool{"something": true}
-	createDefaultName("/var/some/command arg1 arg2", "", 11, false, "localhost", nil, allNameCandidates)
 
-	if len(allNameCandidates) == 0 || allNameCandidates["[localhost] /var/some/command arg1 arg2"] != true {
-		t.Error("Name candidate not added to allNameCandidates")
+	// createDefaultName("/var/some/command arg1 arg2", "", 11, false, "localhost", nil, allNameCandidates)
+	line := &lib.Line{
+		Name:           "",
+		FullLine:       "",
+		LineNumber:     11,
+		CronExpression: "",
+		CommandToRun:   "/var/some/command arg1 arg2",
+		Code:           "",
+		RunAs:          "",
+		Mon:            lib.Monitor{},
 	}
+	crontab := &lib.Crontab{
+		User:                    "",
+		IsUserCrontab:           false,
+		IsSaved:                 false,
+		Filename:                "",
+		Lines:                   []*lib.Line{},
+		TimezoneLocationName:    &lib.TimezoneLocationName{},
+		UsesSixFieldExpressions: false,
+	}
+
+	_ = createDefaultName(
+		line,
+		crontab,
+		"localhost",
+		nil,
+		allNameCandidates)
+
+	assert.NotZero(t, allNameCandidates)
+	assert.True(t, allNameCandidates["[localhost] /var/some/command arg1 arg2"])
 }
 
 func TestCreateDefaultName(t *testing.T) {
-
-	crontabPath = "/discover/test"
-
-	allNameCandidates := map[string]bool{
-		"[localhost] /var/some/command arg1 arg2": true,
-		"[localhost] cd /var/some/deeply/nested/custom/app/directory/containing/command ; FOO=BAR run-command-here arg1 arg2": true,
-	}
-
-	tables := []struct {
+	tests := []struct {
 		caseName              string
 		command               string
 		runAs                 string
@@ -48,7 +71,10 @@ func TestCreateDefaultName(t *testing.T) {
 			false,
 			"localhost",
 			nil,
-			allNameCandidates,
+			map[string]bool{
+				"[localhost] /var/some/command arg1 arg2": true,
+				"[localhost] cd /var/some/deeply/nested/custom/app/directory/containing/command ; FOO=BAR run-command-here arg1 arg2": true,
+			},
 			"[localhost] /var/some/command arg1 arg2 L11"},
 
 		{"short command with runAs name",
@@ -68,7 +94,10 @@ func TestCreateDefaultName(t *testing.T) {
 			false,
 			"localhost",
 			nil,
-			allNameCandidates,
+			map[string]bool{
+				"[localhost] /var/some/command arg1 arg2": true,
+				"[localhost] cd /var/some/deeply/nested/custom/app/directory/containing/command ; FOO=BAR run-command-here arg1 arg2": true,
+			},
 			"[localhost] rando /var/some/command arg1 arg2"},
 
 		{"stdout redirection is trimmed from name",
@@ -132,7 +161,7 @@ func TestCreateDefaultName(t *testing.T) {
 			"/var/some/command arg1 arg2"},
 
 		{"auto discover name is created",
-			"cronitor d3x0c1 cronitor discover /discover/test",
+			"cronitor d3x0c1 cronitor discover --auto /discover/test",
 			"",
 			11,
 			true,
@@ -168,7 +197,10 @@ func TestCreateDefaultName(t *testing.T) {
 			false,
 			"localhost",
 			nil,
-			allNameCandidates,
+			map[string]bool{
+				"[localhost] /var/some/command arg1 arg2": true,
+				"[localhost] cd /var/some/deeply/nested/custom/app/directory/containing/command ; FOO=BAR run-command-here arg1 arg2": true,
+			},
 			"[localhost] cd /var/some/deeply/...ctory/containing/command ; FOO=BAR run-command-here arg1 arg2 L11"},
 
 		{"long command with runAs",
@@ -182,10 +214,36 @@ func TestCreateDefaultName(t *testing.T) {
 			"[localhost] rando cd /var/some/deeply/...ory/containing/command ; FOO=BAR run-command-here arg1 arg2"},
 	}
 
-	for _, table := range tables {
-		defaultName := createDefaultName(table.command, table.runAs, table.lineNumber, table.isAutoDiscoverCommand, table.hostname, table.excludeFromName, table.allNameCandidates)
-		if defaultName != table.expected {
-			t.Errorf("Test case '%s' failed, got: %s, expected: %s.", table.caseName, defaultName, table.expected)
-		}
+	for _, tt := range tests {
+		t.Run(tt.caseName, func(t *testing.T) {
+			line := &lib.Line{
+				Name:           "",
+				FullLine:       "",
+				LineNumber:     tt.lineNumber,
+				CronExpression: "",
+				CommandToRun:   tt.command,
+				Code:           "",
+				RunAs:          tt.runAs,
+				Mon:            lib.Monitor{},
+			}
+			crontab := &lib.Crontab{
+				User:                    tt.runAs,
+				IsUserCrontab:           false,
+				IsSaved:                 false,
+				Filename:                "/discover/test",
+				Lines:                   []*lib.Line{},
+				TimezoneLocationName:    &lib.TimezoneLocationName{},
+				UsesSixFieldExpressions: false,
+			}
+
+			got := createDefaultName(
+				line,
+				crontab,
+				tt.hostname,
+				tt.excludeFromName,
+				tt.allNameCandidates)
+
+			assert.Equal(t, tt.expected, got)
+		})
 	}
 }
