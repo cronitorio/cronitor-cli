@@ -23,13 +23,13 @@ type TimezoneLocationName struct {
 }
 
 type Crontab struct {
-	User                    string
-	IsUserCrontab           bool
-	IsSaved                 bool
-	Filename                string
-	Lines                   []*Line
-	TimezoneLocationName    *TimezoneLocationName
-	UsesSixFieldExpressions bool
+	User                    string                `json:"-"`
+	IsUserCrontab           bool                  `json:"-"`
+	IsSaved                 bool                  `json:"-"`
+	Filename                string                `json:"filename,omitempty"`
+	Lines                   []*Line               `json:"lines,omitempty"`
+	TimezoneLocationName    *TimezoneLocationName `json:"timezone,omitempty"`
+	UsesSixFieldExpressions bool                  `json:"-"`
 }
 
 func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
@@ -151,8 +151,8 @@ func (c Crontab) Save(crontabLines string) error {
 			return errors.New("cannot write user crontab: " + err.Error() + " " + string(output))
 		}
 	} else {
-		if ioutil.WriteFile(c.Filename, []byte(crontabLines), 0644) != nil {
-			return errors.New(fmt.Sprintf("cannot write crontab at %s; check permissions and try again", c.Filename))
+		if err := os.WriteFile(c.Filename, []byte(crontabLines), 0644); err != nil {
+			return fmt.Errorf("cannot write crontab at %s; check permissions and try again: %w", c.Filename, err)
 		}
 	}
 
@@ -241,7 +241,7 @@ func (c Crontab) load() ([]string, int, error) {
 			return nil, 66, errors.New(fmt.Sprintf("the file %s does not exist", c.Filename))
 		}
 
-		if b, err := ioutil.ReadFile(c.Filename); err == nil {
+		if b, err := os.ReadFile(c.Filename); err == nil {
 			crontabBytes = b
 		} else {
 			return nil, 126, errors.New(fmt.Sprintf("the crontab file at %s could not be read; check permissions and try again", c.Filename))
@@ -256,14 +256,14 @@ func (c Crontab) load() ([]string, int, error) {
 }
 
 type Line struct {
-	Name           string
-	FullLine       string
-	LineNumber     int
-	CronExpression string
-	CommandToRun   string
-	Code           string
-	RunAs          string
-	Mon            Monitor
+	Name           string  `json:"name,omitempty"`
+	FullLine       string  `json:"-"`
+	LineNumber     int     `json:"-"`
+	CronExpression string  `json:"schedule,omitempty"`
+	CommandToRun   string  `json:"command,omitempty"`
+	Code           string  `json:"-"`
+	RunAs          string  `json:"run_as,omitempty"`
+	Mon            Monitor `json:"-"`
 }
 
 func (l Line) IsMonitorable() bool {
