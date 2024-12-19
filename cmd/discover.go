@@ -3,14 +3,18 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"github.com/cronitorio/cronitor-cli/lib"
-	"github.com/manifoldco/promptui"
-	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"os"
 	"os/user"
 	"runtime"
 	"strings"
+
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 type ExistingMonitors struct {
@@ -135,7 +139,7 @@ Example where you perform a dry-run without any crontab modifications:
 			username = u.Username
 		}
 
-		printSuccessText("Scanning for cron jobs... (Use Ctrl-C to skip)", false)
+		printSuccessText("Scanning for cron jobs...", false)
 
 		// Fetch list of existing monitor names for easy unique name validation and prompt prefill later on
 		existingMonitors.Monitors, _ = getCronitorApi().GetMonitors()
@@ -169,6 +173,7 @@ Example where you perform a dry-run without any crontab modifications:
 		}
 
 		printDoneText("Discover complete", false)
+		printSuccessText("View your dashboard https://cronitor.io/app/dashboard", false)
 		if dryRun {
 			saveCommand := strings.Join(os.Args, " ")
 			saveCommand = strings.Replace(saveCommand, " --dry-run", "", -1)
@@ -207,7 +212,6 @@ func processDirectory(username, directory string) {
 
 func processCrontab(crontab *lib.Crontab) bool {
 	defer printLn()
-	printSuccessText(fmt.Sprintf("Checking %s", crontab.DisplayName()), false)
 
 	if !crontab.Exists() {
 		printWarningText("This crontab does not exist. Skipping.", true)
@@ -247,7 +251,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 		if count == 1 {
 			label = "job"
 		}
-		printSuccessText(fmt.Sprintf("Found %d cron %s:", count, label), true)
+		printSuccessText(fmt.Sprintf("Found %d %s in %s", count, label, crontab.DisplayName()), true)
 	}
 
 	// Read crontab into map of Monitor structs
@@ -273,27 +277,24 @@ func processCrontab(crontab *lib.Crontab) bool {
 		}
 
 		if !isAutoDiscover && !line.IsAutoDiscoverCommand() {
-			fmt.Println(fmt.Sprintf("\n    %s  %s", line.CronExpression, line.CommandToRun))
-			for {
-				prompt := promptui.Prompt{
-					Label:     "Job name",
-					Default:   name,
-					Validate:  validateName,
-					AllowEdit: name != defaultName,
-					Templates: promptTemplates(),
-				}
 
-				if result, err := prompt.Run(); err == nil {
-					name = result
-				} else if err == promptui.ErrInterrupt {
+			printSuccessText(fmt.Sprintf("Line %d:", line.LineNumber+1), true)
+			fmt.Printf("\n   %s %s\n", line.CronExpression, line.CommandToRun)
+
+			model := initialNameInputModel(name)
+			p := tea.NewProgram(model)
+
+			if result, err := p.Run(); err != nil {
+				printErrorText("Error: "+err.Error()+"\n", false)
+				skip = true
+			} else {
+				finalModel := result.(nameInputModel)
+				if !finalModel.done {
 					printWarningText("Skipped", true)
 					skip = true
-					break
 				} else {
-					printErrorText("Error: "+err.Error()+"\n", false)
+					name = finalModel.textInput.Value()
 				}
-
-				break
 			}
 		}
 
@@ -473,17 +474,137 @@ func validateName(candidateName string) error {
 	return nil
 }
 
-func promptTemplates() *promptui.PromptTemplates {
-	bold := promptui.Styler(promptui.FGBold)
-	faint := promptui.Styler(promptui.FGFaint)
-	return &promptui.PromptTemplates{
-		Prompt:          fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconInitial), bold(":")),
-		Valid:           fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconGood), bold(":")),
-		Invalid:         fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconBad), bold(":")),
-		Success:         fmt.Sprintf("    {{ . | faint }}%s ", faint(":")),
-		ValidationError: `    {{ ">>" | red }} {{ . | red }}`,
+type item struct {
+	title, desc string
+}
+
+func (i item) Title() string       { return i.title }
+func (i item) Description() string { return i.desc }
+func (i item) FilterValue() string { return i.title }
+
+type nameInputModel struct {
+	list        list.Model
+	textInput   textinput.Model
+	defaultName string
+	err         error
+	done        bool
+	state       string // "choosing" or "naming"
+	width       int    // Add width field to store terminal width
+}
+
+func initialNameInputModel(defaultName string) nameInputModel {
+	// Setup list items
+	items := []list.Item{
+		item{title: UseDefaultName, desc: defaultName},
+		item{title: EnterCustomName, desc: "A unique name is required"},
+		item{title: SkipJob, desc: "Do not monitor this cron job"},
+	}
+
+	// Setup list with height of 3 to show all items
+	l := list.New(items, list.NewDefaultDelegate(), 0, 3)
+	l.Title = "What would you like to do with this job?"
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+	l.Styles.Title = lipgloss.NewStyle().MarginLeft(1).Bold(false)
+	l.Styles.TitleBar = lipgloss.NewStyle().MarginLeft(2)
+
+	// Update the style names to match the current API
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.NormalTitle = delegate.Styles.NormalTitle.MarginLeft(1)
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.MarginLeft(1)
+	delegate.Styles.NormalDesc = delegate.Styles.NormalDesc.MarginLeft(1).Italic(true)
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.MarginLeft(1).Italic(true)
+
+	l.SetDelegate(delegate)
+
+	// Setup text input
+	ti := textinput.New()
+	ti.Placeholder = "Enter monitor name"
+	ti.Focus()
+	ti.CharLimit = maxNameLen
+
+	return nameInputModel{
+		list:        l,
+		textInput:   ti,
+		defaultName: defaultName,
+		state:       "choosing",
+		width:       80, // Default width if we don't get window size
 	}
 }
+
+func (m nameInputModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m nameInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyCtrlC:
+			return m, tea.Quit
+		case tea.KeyEnter:
+			if m.state == "choosing" {
+				// Handle selection based on list choice
+				switch m.list.SelectedItem().(item).title {
+				case EnterCustomName:
+					m.state = "naming"
+					m.textInput.SetValue("")
+					return m, textinput.Blink
+				case UseDefaultName:
+					m.textInput.SetValue(m.defaultName)
+					m.done = true
+					return m, tea.Quit
+				case SkipJob:
+					m.done = false
+					return m, tea.Quit
+				}
+			} else if m.state == "naming" {
+				if err := validateName(m.textInput.Value()); err != nil {
+					m.err = err
+					return m, nil
+				}
+				m.done = true
+
+				// Empty line for more legibile output
+				printLn()
+
+				return m, tea.Quit
+			}
+		}
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.textInput.Width = msg.Width - 8 // Subtract some padding for the margin
+		m.list.SetWidth(msg.Width)        // Fixed: Use SetWidth method instead of direct assignment
+	}
+
+	if m.state == "choosing" {
+		m.list, cmd = m.list.Update(msg)
+	} else {
+		m.textInput, cmd = m.textInput.Update(msg)
+	}
+	return m, cmd
+}
+
+func (m nameInputModel) View() string {
+	if m.state == "choosing" {
+		return "\n" + m.list.View()
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n    " + m.textInput.View() + "\n")
+	if m.err != nil {
+		sb.WriteString(fmt.Sprintf("    Error: %s\n", m.err))
+	}
+	return sb.String()
+}
+
+const (
+	UseDefaultName  = "Monitor this job - Use default name"
+	EnterCustomName = "Monitor this job - Enter custom name"
+	SkipJob         = "Skip this job"
+)
 
 func init() {
 	RootCmd.AddCommand(discoverCmd)
