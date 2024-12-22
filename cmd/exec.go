@@ -2,23 +2,25 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/cronitorio/cronitor-cli/lib"
-	"github.com/kballard/go-shellquote"
-	"github.com/pkg/errors"
-	"github.com/spf13/cobra"
-	flag "github.com/spf13/pflag"
-	"github.com/spf13/viper"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/kballard/go-shellquote"
+	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
+	flag "github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
 var monitorCode string
@@ -130,12 +132,16 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 	}
 	execCmd.Env = append(execCmd.Env, "CRONITOR_EXEC=1")
 
-	// Handle stdin to the subcommand
-	execCmdStdin, _ := execCmd.StdinPipe()
-	defer execCmdStdin.Close()
-	if stdinStat, err := os.Stdin.Stat(); err == nil && stdinStat.Size() > 0 {
-		execStdIn, _ := ioutil.ReadAll(os.Stdin)
-		execCmdStdin.Write(execStdIn)
+	// Handle stdin to the subcommand - improved pipe handling
+	execCmdStdin, err := execCmd.StdinPipe()
+	if err != nil {
+		log(fmt.Sprintf("Failed to create stdin pipe: %v", err))
+	} else {
+		defer execCmdStdin.Close()
+		go func() {
+			defer execCmdStdin.Close()
+			io.Copy(execCmdStdin, os.Stdin)
+		}()
 	}
 
 	// Proxy and copy the command's stdout if the filesystem is available
@@ -167,19 +173,29 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 		}
 	}()
 
-	// Relay incoming signals to the subprocess
+	// Improved signal handling
 	sigChan := make(chan os.Signal, 16)
-	signal.Notify(sigChan)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigChan)
 
 	for {
 		select {
 		case sig := <-sigChan:
-			if execCmd.Process != nil {
-				if err := execCmd.Process.Signal(sig); err != nil {
-					// Ignoring because the only time I've seen an err is when child process has already exited after kill was sent to pgroup
-				}
+			// Stop listening for signals once process exits
+			if execCmd.Process == nil {
+				signal.Stop(sigChan)
+				continue
 			}
+
+			if err := execCmd.Process.Signal(sig); err != nil {
+				// Process may have already exited, stop listening for signals
+				signal.Stop(sigChan)
+			}
+
 		case err := <-waitCh:
+			// Stop listening for signals since process has exited
+			signal.Stop(sigChan)
+			close(sigChan)
 
 			// Send output to Cronitor and clean up after the temp file
 			outputForPing := gatherOutput(tempFile, true)
@@ -217,7 +233,6 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 				// This works on both Posix and Windows (syscall.WaitStatus is cross platform).
 				// Cribbed from aws-vault.
 				if exiterr, ok := err.(*exec.ExitError); ok {
-
 					if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
 						exitCode = status.ExitStatus()
 					} else {
@@ -268,30 +283,27 @@ func makeSubcommandExec(subcommand string) *exec.Cmd {
 }
 
 func getTempFile() (*os.File, error) {
-	// Before we create a new temp file be cautious and ensure we don't have stale files that should be cleaned up
-	// This could happen if `exec` crashed in a previous run.
-	var cleanupError error
-	path := fmt.Sprintf("%s%s%s", os.TempDir(), string(os.PathSeparator), "cronitor")
-	os.MkdirAll(path, os.ModePerm)
+	path := filepath.Join(os.TempDir(), "cronitor")
 
-	if tempFiles, cleanupError := ioutil.ReadDir(path); cleanupError == nil {
-		for _, file := range tempFiles {
-			if isStaleFile(file) {
-				cleanupError = os.Remove(fmt.Sprintf("%s%s%s", path, string(os.PathSeparator), file.Name()))
-			}
-		}
+	// Create directory with restricted permissions
+	if err := os.MkdirAll(path, 0750); err != nil {
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
-	// If we can't clean up then stop writing new files...
-	if cleanupError != nil {
-		return nil, errors.New(fmt.Sprintf("Cannot capture output to temp file, cleanup failed: %s", cleanupError.Error()))
+	// Use more secure temp file creation
+	file, err := ioutil.TempFile(path, fmt.Sprintf("exec-%s-*.log", monitorCode))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
 	}
 
-	if file, err := ioutil.TempFile(path, fmt.Sprintf("exec-%s-*", monitorCode)); err == nil {
-		return file, nil
-	} else {
-		return nil, errors.New(fmt.Sprintf("Cannot capture output to temp file: %s", err.Error()))
+	// Set restrictive permissions
+	if err := file.Chmod(0600); err != nil {
+		file.Close()
+		os.Remove(file.Name())
+		return nil, fmt.Errorf("failed to set file permissions: %w", err)
 	}
+
+	return file, nil
 }
 
 func getFileSize(tempFile *os.File) (int64, error) {
