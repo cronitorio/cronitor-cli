@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"github.com/cronitorio/cronitor-cli/lib"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -16,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cronitorio/cronitor-cli/lib"
 
 	"github.com/fatih/color"
 	"github.com/getsentry/raven-go"

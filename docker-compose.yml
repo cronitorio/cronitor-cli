@@ -12,8 +12,8 @@ services:
 
   alpine:
     image: alpine:latest
-    restart: always
-    command: /cronitor/cronitorX
+    restart: no
+    command: tail -f /dev/null
     cap_add:
       - SYS_PTRACE
     volumes:

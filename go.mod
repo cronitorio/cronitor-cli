@@ -16,10 +16,11 @@ require (
 )
 
 require (
-	github.com/charmbracelet/bubbles v0.20.0 // indirect
-	github.com/charmbracelet/bubbletea v1.2.4 // indirect
-	github.com/charmbracelet/lipgloss v1.0.0 // indirect
+	github.com/charmbracelet/bubbles v0.20.0
+	github.com/charmbracelet/bubbletea v1.2.4
+	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/pkg/errors v0.8.1
+	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
 )
 
 replace github.com/manifoldco/promptui => github.com/1lann/promptui v0.8.1-0.20201231190244-d8f2159af2b2
