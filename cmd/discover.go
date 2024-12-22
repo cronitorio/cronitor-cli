@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -126,14 +127,20 @@ Example where you perform a dry-run without any crontab modifications:
 			isSilent = true
 		}
 
-		if len(viper.GetString(varApiKey)) < 10 {
-			return errors.New("you must provide a valid API key with this command or save a key using 'cronitor configure'")
-		}
-
 		return nil
 	},
 
 	Run: func(cmd *cobra.Command, args []string) {
+
+		if len(viper.GetString(varApiKey)) < 10 {
+			fatal(fmt.Sprintf("\n%s\n\n%s Run %s to create an account.\n\n%s Copy an SDK key from https://cronitor.io/app/settings/api and save it with %s\n\n",
+				color.New(color.FgRed, color.Bold).Sprint("Add your API key before running discover."),
+				lipgloss.NewStyle().Bold(true).Render("New user?"),
+				lipgloss.NewStyle().Italic(true).Render("cronitor signup"),
+				lipgloss.NewStyle().Bold(true).Render("Existing user?"),
+				lipgloss.NewStyle().Italic(true).Render("cronitor configure --api-key <key>")), 1)
+		}
+
 		var username string
 		if u, err := user.Current(); err == nil {
 			username = u.Username
