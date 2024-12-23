@@ -45,6 +45,11 @@ const (
 )
 
 type Monitor struct {
+	Attributes struct {
+		GroupName string `json:"group_name"`
+		Key       string `json:"key"`
+		Code      string `json:"code"`
+	} `json:"attributes,omitempty"`
 	Name             string   `json:"name,omitempty"`
 	DefaultName      string   `json:"defaultName"`
 	Key              string   `json:"key"`
@@ -63,7 +68,12 @@ type MonitorSummary struct {
 	Name        string `json:"name,omitempty"`
 	DefaultName string `json:"defaultName"`
 	Key         string `json:"key"`
-	Code        string `json:"code,omitempty"`
+	Code        string `json:"attributes.code,omitempty"`
+	Attributes  struct {
+		GroupName string `json:"group_name"`
+		Key       string `json:"key"`
+		Code      string `json:"code"`
+	} `json:"attributes,omitempty"`
 }
 
 type CronitorApi struct {
@@ -129,8 +139,8 @@ func (api CronitorApi) PutMonitors(monitors map[string]*Monitor) (map[string]*Mo
 	}
 
 	for _, value := range responseMonitors {
-		if _, ok := monitors[value.Key]; ok {
-			monitors[value.Key].Code = value.Code
+		if _, ok := monitors[value.Attributes.Key]; ok {
+			monitors[value.Attributes.Key].Attributes = value.Attributes
 		}
 	}
 

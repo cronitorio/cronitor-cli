@@ -304,7 +304,7 @@ func (l Line) Write() string {
 			lineParts = append(lineParts, "--no-stdout")
 		}
 		lineParts = append(lineParts, "exec")
-		lineParts = append(lineParts, l.Mon.Code)
+		lineParts = append(lineParts, l.Mon.Attributes.Code)
 
 		if len(l.CommandToRun) > 0 {
 			if l.CommandIsComplex() {

@@ -28,11 +28,11 @@ type ExistingMonitors struct {
 func (em ExistingMonitors) HasMonitorByName(name string) bool {
 	for _, value := range em.Monitors {
 		if em.CurrentCode != "" {
-			if value.Code == em.CurrentCode {
+			if value.Attributes.Code == em.CurrentCode {
 				continue
 			}
 		} else {
-			if value.Key == em.CurrentKey {
+			if value.Attributes.Key == em.CurrentKey {
 				continue
 			}
 		}
@@ -55,11 +55,11 @@ func (em ExistingMonitors) HasMonitorByName(name string) bool {
 func (em ExistingMonitors) GetNameForCurrent() (string, error) {
 	for _, value := range em.Monitors {
 		if em.CurrentCode != "" {
-			if value.Code == em.CurrentCode {
+			if value.Attributes.Code == em.CurrentCode {
 				return value.Name, nil
 			}
 		} else {
-			if value.Key == em.CurrentKey {
+			if value.Attributes.Key == em.CurrentKey {
 				return value.Name, nil
 			}
 		}
@@ -503,7 +503,7 @@ func initialNameInputModel(defaultName string) nameInputModel {
 	// Setup list items
 	items := []list.Item{
 		item{title: UseDefaultName, desc: defaultName},
-		item{title: EnterCustomName, desc: "A unique name is required"},
+		item{title: EnterCustomName, desc: "Add a friendly, unique name for this job"},
 		item{title: SkipJob, desc: "Do not monitor this cron job"},
 	}
 
@@ -608,8 +608,8 @@ func (m nameInputModel) View() string {
 }
 
 const (
-	UseDefaultName  = "Monitor this job - Use default name"
-	EnterCustomName = "Monitor this job - Enter custom name"
+	UseDefaultName  = "Monitor this job - Use this name:"
+	EnterCustomName = "Monitor this job - Change the name"
 	SkipJob         = "Skip this job"
 )
 
