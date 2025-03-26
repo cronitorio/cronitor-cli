@@ -11,12 +11,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/capnspacehook/taskmaster"
-	"github.com/cronitorio/cronitor-cli/lib"
-	"github.com/manifoldco/promptui"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/capnspacehook/taskmaster"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/cronitorio/cronitor-cli/lib"
 )
 
 func getWindowsKey(taskName string) string {
@@ -124,20 +125,17 @@ func processWindowsTaskScheduler() bool {
 		if !isAutoDiscover {
 			fmt.Println(fmt.Sprintf("\n    %s  %s", defaultName, t.GetCommandToRun()))
 			for {
-				prompt := promptui.Prompt{
-					Label:   "Job name",
-					Default: name,
-					//Validate:  validateName,
-					AllowEdit: name != defaultName,
-					Templates: promptTemplates(),
-				}
+				model := initialNameInputModel(name)
+				p := tea.NewProgram(model)
 
-				if result, err := prompt.Run(); err == nil {
-					name = result
-				} else if err == promptui.ErrInterrupt {
-					printWarningText("Skipped", true)
-					skip = true
-					break
+				if result, err := p.Run(); err == nil {
+					finalModel := result.(nameInputModel)
+					if !finalModel.done {
+						printWarningText("Skipped", true)
+						skip = true
+					} else {
+						name = finalModel.textInput.Value()
+					}
 				} else {
 					printErrorText("Error: "+err.Error()+"\n", false)
 				}

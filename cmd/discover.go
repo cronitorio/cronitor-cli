@@ -67,7 +67,7 @@ func (em ExistingMonitors) GetNameForCurrent() (string, error) {
 	return "", errors.New("does not exist")
 }
 
-func (em ExistingMonitors) AddName(name string) {
+func (em *ExistingMonitors) AddName(name string) {
 	em.Names = append(em.Names, name)
 }
 
