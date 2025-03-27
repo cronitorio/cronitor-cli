@@ -63,6 +63,8 @@ var varLog = "CRONITOR_LOG"
 var varPingApiKey = "CRONITOR_PING_API_KEY"
 var varExcludeText = "CRONITOR_EXCLUDE_TEXT"
 var varConfig = "CRONITOR_CONFIG"
+var varDashUsername = "CRONITOR_DASH_USER"
+var varDashPassword = "CRONITOR_DASH_PASS"
 
 func init() {
 	userAgent = fmt.Sprintf("CronitorCLI/%s", Version)
@@ -88,6 +90,8 @@ func init() {
 	viper.BindPFlag(varLog, RootCmd.PersistentFlags().Lookup("log"))
 	viper.BindPFlag(varPingApiKey, RootCmd.PersistentFlags().Lookup("ping-api-key"))
 	viper.BindPFlag(varConfig, RootCmd.PersistentFlags().Lookup("config"))
+	viper.BindPFlag(varDashUsername, RootCmd.PersistentFlags().Lookup("dash-username"))
+	viper.BindPFlag(varDashPassword, RootCmd.PersistentFlags().Lookup("dash-password"))
 }
 
 // initConfig reads in config file and ENV variables if set.

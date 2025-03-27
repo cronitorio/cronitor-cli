@@ -48,6 +48,22 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install web dependencies
+        run: |
+          cd web
+          npm install
+
+      - name: Build web assets
+        run: |
+          cd web
+          npm run build
+
       - name: Go Release Binaries Normal Volume Size
         uses: wangyoucao577/go-release-action@v1.28
         with:

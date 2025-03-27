@@ -75,3 +75,6 @@ cronitor.exe
 local.md
 TODO.md
 *.exe
+
+# LocalDash
+web/node_modules/

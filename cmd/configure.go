@@ -17,6 +17,8 @@ type ConfigFile struct {
 	Hostname       string   `json:"CRONITOR_HOSTNAME"`
 	Log            string   `json:"CRONITOR_LOG"`
 	Env            string   `json:"CRONITOR_ENV"`
+	DashUsername   string   `json:"CRONITOR_DASH_USERNAME"`
+	DashPassword   string   `json:"CRONITOR_DASH_PASSWORD"`
 }
 
 // configureCmd represents the configure command
@@ -56,6 +58,8 @@ Example setting common exclude text for use with 'cronitor discover':
 		configData.Hostname = viper.GetString(varHostname)
 		configData.Log = viper.GetString(varLog)
 		configData.Env = viper.GetString(varEnv)
+		configData.DashUsername = viper.GetString(varDashUsername)
+		configData.DashPassword = viper.GetString(varDashPassword)
 
 		fmt.Println("\nConfiguration File:")
 		fmt.Println(configFilePath())
@@ -95,6 +99,20 @@ Example setting common exclude text for use with 'cronitor discover':
 			fmt.Println("Off")
 		} else {
 			fmt.Println(viper.GetString(varLog))
+		}
+
+		fmt.Println("\nLocalDash Username:")
+		if configData.DashUsername == "" {
+			fmt.Println("Not Set")
+		} else {
+			fmt.Println(configData.DashUsername)
+		}
+
+		fmt.Println("\LocalDash Password:")
+		if configData.DashPassword == "" {
+			fmt.Println("Not Set")
+		} else {
+			fmt.Println("********")
 		}
 
 		if verbose {
