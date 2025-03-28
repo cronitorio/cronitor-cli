@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
-import { DocumentIcon, ClockIcon, Cog6ToothIcon, SunIcon, MoonIcon } from '@heroicons/react/24/outline';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
+import { DocumentIcon, ClockIcon, Cog6ToothIcon, SunIcon, MoonIcon, FolderOpenIcon } from '@heroicons/react/24/outline';
 import Cookies from 'js-cookie';
 import cronitorLogo from './assets/cronitor.png';
+import Settings from './components/Settings';
 
 const navigation = [
   { name: 'Jobs', href: '/', icon: ClockIcon },
-  { name: 'Crontabs', href: '/crontabs', icon: DocumentIcon },
+  { name: 'Crontabs', href: '/crontabs', icon: FolderOpenIcon },
   { name: 'Settings', href: '/settings', icon: Cog6ToothIcon },
 ];
 
@@ -28,6 +29,69 @@ function ToggleSwitch({ isOn, onChange }) {
         `}
       />
     </button>
+  );
+}
+
+function Sidebar({ isDark, toggleTheme }) {
+  const location = useLocation();
+
+  return (
+    <div className="hidden md:flex md:w-64 md:flex-col">
+      <div className="flex min-h-0 flex-1 flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+        <div className="flex flex-1 flex-col overflow-y-auto pt-5 pb-4">
+          <div className="flex flex-shrink-0 items-center px-4">
+            <img 
+              src={cronitorLogo} 
+              alt="LocalDash Logo" 
+              className="h-8 w-8 object-contain"
+            />
+            <span className="ml-3 text-xl font-bold text-gray-900 dark:text-white">LocalDash</span>
+          </div>
+          <nav className="mt-5 flex-1 space-y-1 bg-white dark:bg-gray-800 px-2">
+            {navigation.map((item) => {
+              const isActive = location.pathname === item.href;
+              return (
+                <Link
+                  key={item.name}
+                  to={item.href}
+                  className={`group flex items-center px-2 py-2 text-sm font-medium rounded-md ${
+                    isActive
+                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  <item.icon
+                    className={`mr-3 h-6 w-6 flex-shrink-0 ${
+                      isActive
+                        ? 'text-gray-500 dark:text-gray-400'
+                        : 'text-gray-400 dark:text-gray-500 group-hover:text-gray-500 dark:group-hover:text-gray-400'
+                    }`}
+                    aria-hidden="true"
+                  />
+                  {item.name}
+                </Link>
+              );
+            })}
+          </nav>
+          {/* Theme Toggle */}
+          <div className="px-4 py-4 border-t border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                {isDark ? (
+                  <MoonIcon className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                ) : (
+                  <SunIcon className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                )}
+                <span className="ml-3 text-sm font-medium text-gray-600 dark:text-gray-300">
+                  {isDark ? 'Dark Mode' : 'Light Mode'}
+                </span>
+              </div>
+              <ToggleSwitch isOn={isDark} onChange={toggleTheme} />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -56,51 +120,7 @@ function App() {
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 font-mono">
         <div className="flex h-screen">
           {/* Sidebar */}
-          <div className="hidden md:flex md:w-64 md:flex-col">
-            <div className="flex min-h-0 flex-1 flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-              <div className="flex flex-1 flex-col overflow-y-auto pt-5 pb-4">
-                <div className="flex flex-shrink-0 items-center px-4">
-                  <img 
-                    src={cronitorLogo} 
-                    alt="LocalDash Logo" 
-                    className="h-8 w-8 object-contain"
-                  />
-                  <span className="ml-3 text-xl font-bold text-gray-900 dark:text-white">LocalDash</span>
-                </div>
-                <nav className="mt-5 flex-1 space-y-1 bg-white dark:bg-gray-800 px-2">
-                  {navigation.map((item) => (
-                    <Link
-                      key={item.name}
-                      to={item.href}
-                      className="group flex items-center px-2 py-2 text-sm font-medium rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white"
-                    >
-                      <item.icon
-                        className="mr-3 h-6 w-6 flex-shrink-0 text-gray-400 dark:text-gray-500 group-hover:text-gray-500 dark:group-hover:text-gray-400"
-                        aria-hidden="true"
-                      />
-                      {item.name}
-                    </Link>
-                  ))}
-                </nav>
-                {/* Theme Toggle */}
-                <div className="px-4 py-4 border-t border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      {isDark ? (
-                        <MoonIcon className="h-5 w-5 text-gray-400 dark:text-gray-500" />
-                      ) : (
-                        <SunIcon className="h-5 w-5 text-gray-400 dark:text-gray-500" />
-                      )}
-                      <span className="ml-3 text-sm font-medium text-gray-600 dark:text-gray-300">
-                        {isDark ? 'Dark Mode' : 'Light Mode'}
-                      </span>
-                    </div>
-                    <ToggleSwitch isOn={isDark} onChange={toggleTheme} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <Sidebar isDark={isDark} toggleTheme={toggleTheme} />
 
           {/* Main content */}
           <div className="flex flex-1 flex-col overflow-hidden">
@@ -134,14 +154,6 @@ function Crontabs() {
   return (
     <div>
       <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Crontabs</h1>
-    </div>
-  );
-}
-
-function Settings() {
-  return (
-    <div>
-      <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Settings</h1>
     </div>
   );
 }

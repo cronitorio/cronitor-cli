@@ -17,8 +17,8 @@ type ConfigFile struct {
 	Hostname       string   `json:"CRONITOR_HOSTNAME"`
 	Log            string   `json:"CRONITOR_LOG"`
 	Env            string   `json:"CRONITOR_ENV"`
-	DashUsername   string   `json:"CRONITOR_DASH_USERNAME"`
-	DashPassword   string   `json:"CRONITOR_DASH_PASSWORD"`
+	DashUsername   string   `json:"CRONITOR_DASH_USER"`
+	DashPassword   string   `json:"CRONITOR_DASH_PASS"`
 }
 
 // configureCmd represents the configure command
@@ -108,7 +108,7 @@ Example setting common exclude text for use with 'cronitor discover':
 			fmt.Println(configData.DashUsername)
 		}
 
-		fmt.Println("\LocalDash Password:")
+		fmt.Println("\nLocalDash Password:")
 		if configData.DashPassword == "" {
 			fmt.Println("Not Set")
 		} else {
