@@ -19,7 +19,7 @@ import (
 )
 
 type ExistingMonitors struct {
-	Monitors    []lib.MonitorSummary
+	Monitors    []lib.Monitor
 	Names       []string
 	CurrentKey  string
 	CurrentCode string
@@ -50,6 +50,23 @@ func (em ExistingMonitors) HasMonitorByName(name string) bool {
 	}
 
 	return false
+}
+
+func (em ExistingMonitors) Get(key string, code string) lib.Monitor {
+	for _, value := range em.Monitors {
+		if code != "" {
+			if value.Attributes.Code == code {
+				return value
+			}
+		}
+
+		if key != "" {
+			if value.Attributes.Key == key {
+				return value
+			}
+		}
+	}
+	return lib.Monitor{Key: key, Code: code}
 }
 
 func (em ExistingMonitors) GetNameForCurrent() (string, error) {

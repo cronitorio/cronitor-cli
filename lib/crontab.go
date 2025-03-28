@@ -48,34 +48,44 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 		var cronExpression string
 		var command []string
 		var runAs string
+		var name string
 
 		fullLine = strings.TrimSpace(fullLine)
 
+		// Check for special #Name: comment
+		if strings.HasPrefix(fullLine, "#") {
+			if nameMatch := regexp.MustCompile(`^#\s*Name:\s*(.+)$`).FindStringSubmatch(fullLine); nameMatch != nil {
+				name = strings.TrimSpace(nameMatch[1])
+				// Skip to next line since this was just a name comment
+				continue
+			}
+			// Skip regular comments
+			continue
+		}
+
 		// Do not attempt to parse the current line if it's a comment
 		// Otherwise split on any whitespace and parse
-		if !strings.HasPrefix(fullLine, "#") {
-			splitLine := strings.Fields(fullLine)
-			splitLineLen := len(splitLine)
-			if splitLineLen == 1 && strings.Contains(splitLine[0], "=") {
-				// Handling for environment variables... we're looking for timezone declarations
-				if splitExport := strings.Split(splitLine[0], "="); splitExport[0] == "TZ" || splitExport[0] == "CRON_TZ" {
-					c.TimezoneLocationName = &TimezoneLocationName{splitExport[1]}
-				}
-			} else if splitLineLen > 0 && strings.HasPrefix(splitLine[0], "@") {
-				// Handling for special cron @keyword
-				cronExpression = splitLine[0]
-				command = splitLine[1:]
-			} else if splitLineLen >= 6 {
-				// Handling for javacron-style 6 item cron expressions
-				c.UsesSixFieldExpressions = splitLineLen >= 7 && isSixFieldCronExpression(splitLine)
+		splitLine := strings.Fields(fullLine)
+		splitLineLen := len(splitLine)
+		if splitLineLen == 1 && strings.Contains(splitLine[0], "=") {
+			// Handling for environment variables... we're looking for timezone declarations
+			if splitExport := strings.Split(splitLine[0], "="); splitExport[0] == "TZ" || splitExport[0] == "CRON_TZ" {
+				c.TimezoneLocationName = &TimezoneLocationName{splitExport[1]}
+			}
+		} else if splitLineLen > 0 && strings.HasPrefix(splitLine[0], "@") {
+			// Handling for special cron @keyword
+			cronExpression = splitLine[0]
+			command = splitLine[1:]
+		} else if splitLineLen >= 6 {
+			// Handling for javacron-style 6 item cron expressions
+			c.UsesSixFieldExpressions = splitLineLen >= 7 && isSixFieldCronExpression(splitLine)
 
-				if c.UsesSixFieldExpressions {
-					cronExpression = strings.Join(splitLine[0:6], " ")
-					command = splitLine[6:]
-				} else {
-					cronExpression = strings.Join(splitLine[0:5], " ")
-					command = splitLine[5:]
-				}
+			if c.UsesSixFieldExpressions {
+				cronExpression = strings.Join(splitLine[0:6], " ")
+				command = splitLine[6:]
+			} else {
+				cronExpression = strings.Join(splitLine[0:5], " ")
+				command = splitLine[5:]
 			}
 		}
 
@@ -92,6 +102,7 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 
 		// Create a Line struct with details for this line so we can re-create it later
 		line := Line{
+			Name:           name,
 			CronExpression: cronExpression,
 			FullLine:       fullLine,
 			LineNumber:     lineNumber,
@@ -145,7 +156,7 @@ func (c Crontab) Save(crontabLines string) error {
 		// crontab will use whatever $EDITOR is set. Temporarily just cat it out.
 		cmd.Env = []string{"EDITOR=/bin/cat"}
 		cmdStdin, _ := cmd.StdinPipe()
-		cmdStdin.Write([]byte(crontabLines + "\n"))
+		cmdStdin.Write([]byte(crontabLines))
 		cmdStdin.Close()
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return errors.New("cannot write user crontab: " + err.Error() + " " + string(output))
@@ -289,8 +300,19 @@ func (l Line) CommandIsComplex() bool {
 }
 
 func (l Line) Write() string {
+	var outputLines []string
+
+	// Add the name comment if present
+	if len(l.Name) > 0 {
+		outputLines = append(outputLines, fmt.Sprintf("# Name: %s", l.Name))
+	}
+
+	// If not monitorable or has existing code, just return the original line with name comment
 	if !l.IsMonitorable() || len(l.Code) > 0 {
-		// If a cronitor integration already existed on the line we have nothing else here to change
+		if len(outputLines) > 0 {
+			outputLines = append(outputLines, l.FullLine)
+			return strings.Join(outputLines, "\n")
+		}
 		return l.FullLine
 	}
 
@@ -314,10 +336,15 @@ func (l Line) Write() string {
 			}
 		}
 	} else {
+		if len(outputLines) > 0 {
+			outputLines = append(outputLines, l.FullLine)
+			return strings.Join(outputLines, "\n")
+		}
 		return l.FullLine
 	}
 
-	return strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)
+	outputLines = append(outputLines, strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1))
+	return strings.Join(outputLines, "\n")
 }
 
 func (l Line) Key(CanonicalPath string) string {

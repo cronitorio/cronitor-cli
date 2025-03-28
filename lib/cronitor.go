@@ -61,7 +61,47 @@ type Monitor struct {
 	Timezone         string   `json:"timezone,omitempty"`
 	Note             string   `json:"defaultNote,omitempty"`
 	Notify           []string `json:"notify,omitempty"`
+	Passing          bool     `json:"passing"`
+	Initialized      bool     `json:"initialized"`
+	Disabled         bool     `json:"disabled"`
+	Paused           bool     `json:"paused"`
 	NoStdoutPassthru bool     `json:"-"`
+}
+
+// UnmarshalJSON implements custom unmarshaling for the Monitor struct
+func (m *Monitor) UnmarshalJSON(data []byte) error {
+	// Create an auxiliary struct to handle the raw notify field
+	type AuxMonitor Monitor
+	aux := &struct {
+		*AuxMonitor
+		Notify interface{} `json:"notify,omitempty"`
+	}{
+		AuxMonitor: (*AuxMonitor)(m),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	// Handle the notify field
+	if aux.Notify != nil {
+		switch v := aux.Notify.(type) {
+		case []interface{}:
+			// Convert []interface{} to []string
+			m.Notify = make([]string, len(v))
+			for i, item := range v {
+				if str, ok := item.(string); ok {
+					m.Notify[i] = str
+				}
+			}
+		case []string:
+			m.Notify = v
+		case string:
+			m.Notify = []string{v}
+		}
+	}
+
+	return nil
 }
 
 type MonitorSummary struct {
@@ -147,26 +187,47 @@ func (api CronitorApi) PutMonitors(monitors map[string]*Monitor) (map[string]*Mo
 	return monitors, nil
 }
 
-func (api CronitorApi) GetMonitors() ([]MonitorSummary, error) {
+func (api CronitorApi) GetMonitors() ([]Monitor, error) {
 	url := api.Url()
 	page := 1
-	monitors := []MonitorSummary{}
+	monitors := []Monitor{}
 
 	for {
 		response, err, _ := api.send("GET", fmt.Sprintf("%s?page=%d", url, page), "")
+
 		if err != nil {
 			return nil, errors.New(fmt.Sprintf("Request to %s failed: %s", url, err))
 		}
 
 		type ExpectedResponse struct {
-			TotalMonitorCount int              `json:"total_monitor_count"`
-			PageSize          int              `json:"page_size"`
-			Monitors          []MonitorSummary `json:"monitors"`
+			TotalMonitorCount int       `json:"total_monitor_count"`
+			PageSize          int       `json:"page_size"`
+			Monitors          []Monitor `json:"monitors"`
 		}
 
-		responseMonitors := ExpectedResponse{}
-		if err = json.Unmarshal(response, &responseMonitors); err != nil {
+		// Create an auxiliary struct to handle raw monitor data
+		type AuxExpectedResponse struct {
+			TotalMonitorCount int               `json:"total_monitor_count"`
+			PageSize          int               `json:"page_size"`
+			Monitors          []json.RawMessage `json:"monitors"`
+		}
+
+		var auxResponse AuxExpectedResponse
+		if err = json.Unmarshal(response, &auxResponse); err != nil {
 			return nil, errors.New(fmt.Sprintf("Error from %s: %s", url, err.Error()))
+		}
+
+		// Manually unmarshal each monitor to use the custom UnmarshalJSON implementation
+		responseMonitors := ExpectedResponse{
+			TotalMonitorCount: auxResponse.TotalMonitorCount,
+			PageSize:          auxResponse.PageSize,
+			Monitors:          make([]Monitor, len(auxResponse.Monitors)),
+		}
+
+		for i, rawMonitor := range auxResponse.Monitors {
+			if err = json.Unmarshal(rawMonitor, &responseMonitors.Monitors[i]); err != nil {
+				return nil, errors.New(fmt.Sprintf("Error unmarshaling monitor: %s", err.Error()))
+			}
 		}
 
 		monitors = append(monitors, responseMonitors.Monitors...)

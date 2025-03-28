@@ -11,10 +11,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"runtime"
 	"strings"
 	"time"
 
+	"github.com/cronitorio/cronitor-cli/lib"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -112,6 +114,9 @@ The dashboard provides a web interface for managing your Cronitor monitors and c
 
 		// Add settings API endpoints
 		http.Handle("/api/settings", authMiddleware(http.HandlerFunc(handleSettings)))
+
+		// Add jobs endpoint
+		http.Handle("/api/jobs", authMiddleware(http.HandlerFunc(handleJobs)))
 
 		// Start the server in a goroutine
 		go func() {
@@ -258,4 +263,106 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+type Job struct {
+	Name        string `json:"name"`
+	Command     string `json:"command"`
+	Expression  string `json:"expression"`
+	RunAsUser   string `json:"run_as_user"`
+	CronFile    string `json:"cron_file"`
+	LineNumber  int    `json:"line_number"`
+	IsMonitored bool   `json:"is_monitored"`
+	Timezone    string `json:"timezone"`
+	Passing     bool   `json:"passing"`
+	Disabled    bool   `json:"disabled"`
+	Paused      bool   `json:"paused"`
+	Initialized bool   `json:"initialized"`
+	Code        string `json:"code"`
+}
+
+// handleJobs handles GET requests for jobs
+func handleJobs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var err error
+	existingMonitors.Monitors, err = getCronitorApi().GetMonitors()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var username string
+	if u, err := user.Current(); err == nil {
+		username = u.Username
+	}
+
+	var jobs []Job
+	var crontabs []*lib.Crontab
+
+	// Read user crontab
+	crontabs = lib.ReadCrontabFromFile(username, "", crontabs)
+
+	// Read system crontab if it exists
+	if systemCrontab := lib.CrontabFactory(username, lib.SYSTEM_CRONTAB); systemCrontab.Exists() {
+		crontabs = lib.ReadCrontabFromFile(username, lib.SYSTEM_CRONTAB, crontabs)
+	}
+
+	// Read crontabs from drop-in directory
+	crontabs = lib.ReadCrontabsInDirectory(username, lib.DROP_IN_DIRECTORY, crontabs)
+
+	// Process each crontab
+	for _, crontab := range crontabs {
+		for i := range crontab.Lines {
+			line := crontab.Lines[i]
+			if !line.IsMonitorable() {
+				continue
+			}
+
+			// If we know this monitor exists already, return the name
+			line.Mon = existingMonitors.Get(line.Key(crontab.CanonicalName()), line.Code)
+			line.Name = line.Mon.Name
+			timezone := effectiveTimezoneLocationName().Name
+			if crontab.TimezoneLocationName != nil {
+				timezone = crontab.TimezoneLocationName.Name
+			}
+
+			runAsUser := line.RunAs
+			if runAsUser == "" {
+				runAsUser = crontab.User
+			}
+
+			job := Job{
+				Name:        line.Name,
+				Command:     line.CommandToRun,
+				Expression:  line.CronExpression,
+				RunAsUser:   runAsUser,
+				CronFile:    crontab.DisplayName(),
+				LineNumber:  line.LineNumber + 1,
+				IsMonitored: len(line.Code) > 0,
+				Timezone:    timezone,
+				Passing:     line.Mon.Passing,
+				Disabled:    line.Mon.Disabled,
+				Paused:      line.Mon.Paused,
+				Initialized: line.Mon.Initialized,
+				Code:        line.Code,
+			}
+
+			jobs = append(jobs, job)
+		}
+		crontab.Save(crontab.Write())
+	}
+
+	responseData, err := json.Marshal(jobs)
+	if err != nil {
+		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+		return
+	}
+
+	w.Write(responseData)
 }

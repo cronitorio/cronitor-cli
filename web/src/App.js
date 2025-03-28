@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { DocumentIcon, ClockIcon, Cog6ToothIcon, SunIcon, MoonIcon, FolderOpenIcon } from '@heroicons/react/24/outline';
+import { DocumentIcon, ClockIcon, Cog6ToothIcon, SunIcon, MoonIcon, FolderOpenIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline';
 import Cookies from 'js-cookie';
 import cronitorLogo from './assets/cronitor.png';
 import Settings from './components/Settings';
 import useSWR from 'swr';
+import guru from './lib/guru';
+import Jobs from './components/Jobs';
 
 const fetcher = url => fetch(url).then(res => res.json());
 
@@ -156,14 +158,6 @@ function App() {
         </div>
       </div>
     </Router>
-  );
-}
-
-function Jobs() {
-  return (
-    <div>
-      <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Jobs</h1>
-    </div>
   );
 }
 
