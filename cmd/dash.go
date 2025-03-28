@@ -143,6 +143,7 @@ type SettingsResponse struct {
 	ConfigFile
 	EnvVars        map[string]bool `json:"env_vars"`
 	ConfigFilePath string          `json:"config_file_path"`
+	Version        string          `json:"version"`
 }
 
 // handleSettings handles GET and POST requests for settings
@@ -169,6 +170,7 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		response := SettingsResponse{
 			ConfigFile:     configData,
 			ConfigFilePath: configPath,
+			Version:        Version,
 			EnvVars: map[string]bool{
 				"CRONITOR_API_KEY":      os.Getenv(varApiKey) != "",
 				"CRONITOR_PING_API_KEY": os.Getenv(varPingApiKey) != "",

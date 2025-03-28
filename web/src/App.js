@@ -4,6 +4,9 @@ import { DocumentIcon, ClockIcon, Cog6ToothIcon, SunIcon, MoonIcon, FolderOpenIc
 import Cookies from 'js-cookie';
 import cronitorLogo from './assets/cronitor.png';
 import Settings from './components/Settings';
+import useSWR from 'swr';
+
+const fetcher = url => fetch(url).then(res => res.json());
 
 const navigation = [
   { name: 'Jobs', href: '/', icon: ClockIcon },
@@ -34,6 +37,9 @@ function ToggleSwitch({ isOn, onChange }) {
 
 function Sidebar({ isDark, toggleTheme }) {
   const location = useLocation();
+  const { data } = useSWR('/api/settings', fetcher, {
+    refreshInterval: 5000, // Refresh every 5 seconds
+  });
 
   return (
     <div className="hidden md:flex md:w-64 md:flex-col">
@@ -73,6 +79,17 @@ function Sidebar({ isDark, toggleTheme }) {
               );
             })}
           </nav>
+          {/* Version Info */}
+          <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700">
+            <a
+              href="https://cronitor.io/docs/using-cronitor-cli"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+            >
+              CronitorCLI v{data?.version || '...'}
+            </a>
+          </div>
           {/* Theme Toggle */}
           <div className="px-4 py-4 border-t border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between">
