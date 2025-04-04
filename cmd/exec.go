@@ -228,7 +228,10 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 					go shipLogData(tempFile, series, &monitoringWaitGroup)
 				}
 			} else {
-				message := strings.TrimSpace(fmt.Sprintf("[%s] %s", err.Error(), outputForPing))
+				message := ""
+				if !noStdoutPassthru {
+					message = strings.TrimSpace(fmt.Sprintf("%s [%s]", outputForPing, err.Error()))
+				}
 
 				// This works on both Posix and Windows (syscall.WaitStatus is cross platform).
 				// Cribbed from aws-vault.
