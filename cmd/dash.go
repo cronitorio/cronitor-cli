@@ -318,6 +318,7 @@ func handleJobs(w http.ResponseWriter, r *http.Request) {
 
 	// Process each crontab
 	for _, crontab := range crontabs {
+		hasChanges := false
 		for i := range crontab.Lines {
 			line := crontab.Lines[i]
 			if !line.IsMonitorable() {
@@ -326,7 +327,11 @@ func handleJobs(w http.ResponseWriter, r *http.Request) {
 
 			// If we know this monitor exists already, return the name
 			line.Mon = existingMonitors.Get(line.Key(crontab.CanonicalName()), line.Code)
-			line.Name = line.Mon.Name
+			if line.Mon.Name != "" && line.Mon.Name != line.Name {
+				line.Name = line.Mon.Name
+				hasChanges = true
+			}
+
 			timezone := effectiveTimezoneLocationName().Name
 			if crontab.TimezoneLocationName != nil {
 				timezone = crontab.TimezoneLocationName.Name
@@ -355,7 +360,9 @@ func handleJobs(w http.ResponseWriter, r *http.Request) {
 
 			jobs = append(jobs, job)
 		}
-		crontab.Save(crontab.Write())
+		if hasChanges {
+			crontab.Save(crontab.Write())
+		}
 	}
 
 	responseData, err := json.Marshal(jobs)
