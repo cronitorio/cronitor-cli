@@ -43,63 +43,58 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 	}
 
 	var autoDiscoverLine *Line
+	var name string
 
 	for lineNumber, fullLine := range lines {
 		var cronExpression string
 		var command []string
 		var runAs string
-		var name string
 
 		fullLine = strings.TrimSpace(fullLine)
 
-		// Check for special #Name: comment
 		if strings.HasPrefix(fullLine, "#") {
+			// Check for special Name: comment, ignore other comments
 			if nameMatch := regexp.MustCompile(`^#\s*Name:\s*(.+)$`).FindStringSubmatch(fullLine); nameMatch != nil {
 				name = strings.TrimSpace(nameMatch[1])
-				// Skip to next line since this was just a name comment
 				continue
 			}
-			// Skip regular comments
-			continue
-		}
+		} else {
+			// Handle regular cron lines
+			splitLine := strings.Fields(fullLine)
+			splitLineLen := len(splitLine)
+			if splitLineLen == 1 && strings.Contains(splitLine[0], "=") {
+				// Handling for environment variables... we're looking for timezone declarations
+				if splitExport := strings.Split(splitLine[0], "="); splitExport[0] == "TZ" || splitExport[0] == "CRON_TZ" {
+					c.TimezoneLocationName = &TimezoneLocationName{splitExport[1]}
+				}
+			} else if splitLineLen > 0 && strings.HasPrefix(splitLine[0], "@") {
+				// Handling for special cron @keyword
+				cronExpression = splitLine[0]
+				command = splitLine[1:]
+			} else if splitLineLen >= 6 {
+				// Handling for javacron-style 6 item cron expressions
+				c.UsesSixFieldExpressions = splitLineLen >= 7 && isSixFieldCronExpression(splitLine)
 
-		// Do not attempt to parse the current line if it's a comment
-		// Otherwise split on any whitespace and parse
-		splitLine := strings.Fields(fullLine)
-		splitLineLen := len(splitLine)
-		if splitLineLen == 1 && strings.Contains(splitLine[0], "=") {
-			// Handling for environment variables... we're looking for timezone declarations
-			if splitExport := strings.Split(splitLine[0], "="); splitExport[0] == "TZ" || splitExport[0] == "CRON_TZ" {
-				c.TimezoneLocationName = &TimezoneLocationName{splitExport[1]}
+				if c.UsesSixFieldExpressions {
+					cronExpression = strings.Join(splitLine[0:6], " ")
+					command = splitLine[6:]
+				} else {
+					cronExpression = strings.Join(splitLine[0:5], " ")
+					command = splitLine[5:]
+				}
 			}
-		} else if splitLineLen > 0 && strings.HasPrefix(splitLine[0], "@") {
-			// Handling for special cron @keyword
-			cronExpression = splitLine[0]
-			command = splitLine[1:]
-		} else if splitLineLen >= 6 {
-			// Handling for javacron-style 6 item cron expressions
-			c.UsesSixFieldExpressions = splitLineLen >= 7 && isSixFieldCronExpression(splitLine)
 
-			if c.UsesSixFieldExpressions {
-				cronExpression = strings.Join(splitLine[0:6], " ")
-				command = splitLine[6:]
-			} else {
-				cronExpression = strings.Join(splitLine[0:5], " ")
-				command = splitLine[5:]
-			}
-		}
-
-		// Try to determine if the command begins with a "run as" user designation. This is required for system-level crontabs.
-		// Basically, just see if the first word of the command is a valid user name. This is how vixie cron does it.
-		// https://github.com/rhuitl/uClinux/blob/master/user/vixie-cron/entry.c#L224
-		if runtime.GOOS != "windows" && len(command) > 1 && c.IsRoot() {
-			idOrError, _ := exec.Command("id", "-u", command[0]).CombinedOutput()
-			if _, err := strconv.Atoi(strings.TrimSpace(string(idOrError))); err == nil {
-				runAs = command[0]
-				command = command[1:]
+			// Try to determine if the command begins with a "run as" user designation. This is required for system-level crontabs.
+			// Basically, just see if the first word of the command is a valid user name. This is how vixie cron does it.
+			// https://github.com/rhuitl/uClinux/blob/master/user/vixie-cron/entry.c#L224
+			if runtime.GOOS != "windows" && len(command) > 1 && c.IsRoot() {
+				idOrError, _ := exec.Command("id", "-u", command[0]).CombinedOutput()
+				if _, err := strconv.Atoi(strings.TrimSpace(string(idOrError))); err == nil {
+					runAs = command[0]
+					command = command[1:]
+				}
 			}
 		}
-
 		// Create a Line struct with details for this line so we can re-create it later
 		line := Line{
 			Name:           name,
@@ -123,6 +118,11 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			if noAutoDiscover {
 				continue // remove the auto-discover line from the crontab if --no-auto-discover flag is passed
 			}
+		}
+
+		// Reset the name for the next line after we've found its command line
+		if line.CronExpression != "" {
+			name = ""
 		}
 
 		c.Lines = append(c.Lines, &line)
