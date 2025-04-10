@@ -102,6 +102,7 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			FullLine:       fullLine,
 			LineNumber:     lineNumber,
 			RunAs:          runAs,
+			Crontab:        *c,
 		}
 
 		// If this job is already being wrapped by the Cronitor client, read current code.
@@ -275,6 +276,7 @@ type Line struct {
 	Code           string
 	RunAs          string
 	Mon            Monitor
+	Crontab        Crontab
 }
 
 func (l Line) IsMonitorable() bool {
@@ -318,7 +320,10 @@ func (l Line) Write() string {
 
 	var lineParts []string
 	lineParts = append(lineParts, l.CronExpression)
-	lineParts = append(lineParts, l.RunAs)
+
+	if !l.Crontab.IsUserCrontab {
+		lineParts = append(lineParts, l.RunAs)
+	}
 
 	if len(l.Mon.Key) > 0 {
 		lineParts = append(lineParts, "cronitor")
@@ -336,11 +341,7 @@ func (l Line) Write() string {
 			}
 		}
 	} else {
-		if len(outputLines) > 0 {
-			outputLines = append(outputLines, l.FullLine)
-			return strings.Join(outputLines, "\n")
-		}
-		return l.FullLine
+		lineParts = append(lineParts, l.CommandToRun)
 	}
 
 	outputLines = append(outputLines, strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1))

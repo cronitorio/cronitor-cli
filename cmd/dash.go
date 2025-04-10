@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -117,6 +118,9 @@ The dashboard provides a web interface for managing your Cronitor monitors and c
 
 		// Add jobs endpoint
 		http.Handle("/api/jobs", authMiddleware(http.HandlerFunc(handleJobs)))
+
+		// Add kill jobs endpoint
+		http.Handle("/api/jobs/kill", authMiddleware(http.HandlerFunc(handleKillJobs)))
 
 		// Start the server in a goroutine
 		go func() {
@@ -265,31 +269,45 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type Job struct {
-	Name        string `json:"name"`
-	Command     string `json:"command"`
-	Expression  string `json:"expression"`
-	RunAsUser   string `json:"run_as_user"`
-	CronFile    string `json:"cron_file"`
-	LineNumber  int    `json:"line_number"`
-	IsMonitored bool   `json:"is_monitored"`
-	Timezone    string `json:"timezone"`
-	Passing     bool   `json:"passing"`
-	Disabled    bool   `json:"disabled"`
-	Paused      bool   `json:"paused"`
-	Initialized bool   `json:"initialized"`
-	Code        string `json:"code"`
+type JobInstance struct {
+	PID     string `json:"pid"`
+	Started string `json:"started"`
 }
 
-// handleJobs handles GET requests for jobs
+type Job struct {
+	Name        string        `json:"name"`
+	DefaultName string        `json:"default_name"`
+	Command     string        `json:"command"`
+	Expression  string        `json:"expression"`
+	RunAsUser   string        `json:"run_as_user"`
+	CronFile    string        `json:"cron_file"`
+	LineNumber  int           `json:"line_number"`
+	IsMonitored bool          `json:"is_monitored"`
+	Timezone    string        `json:"timezone"`
+	Passing     bool          `json:"passing"`
+	Disabled    bool          `json:"disabled"`
+	Paused      bool          `json:"paused"`
+	Initialized bool          `json:"initialized"`
+	Code        string        `json:"code"`
+	Key         string        `json:"key"`
+	Instances   []JobInstance `json:"instances"`
+}
+
+// handleJobs handles GET and PUT requests for jobs
 func handleJobs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	if r.Method != "GET" {
+	switch r.Method {
+	case "GET":
+		handleGetJobs(w, r)
+	case "PUT":
+		handlePutJob(w, r)
+	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
 	}
+}
 
+func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 	var err error
 	existingMonitors.Monitors, err = getCronitorApi().GetMonitors()
 	if err != nil {
@@ -344,6 +362,7 @@ func handleJobs(w http.ResponseWriter, r *http.Request) {
 
 			job := Job{
 				Name:        line.Name,
+				DefaultName: createDefaultName(line, crontab, "", []string{}, map[string]bool{}),
 				Command:     line.CommandToRun,
 				Expression:  line.CronExpression,
 				RunAsUser:   runAsUser,
@@ -356,6 +375,8 @@ func handleJobs(w http.ResponseWriter, r *http.Request) {
 				Paused:      line.Mon.Paused,
 				Initialized: line.Mon.Initialized,
 				Code:        line.Code,
+				Key:         line.Key(crontab.CanonicalName()),
+				Instances:   find_instances(line.CommandToRun),
 			}
 
 			jobs = append(jobs, job)
@@ -372,4 +393,238 @@ func handleJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write(responseData)
+}
+
+func handlePutJob(w http.ResponseWriter, r *http.Request) {
+	var job Job
+	if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	var username string
+	if u, err := user.Current(); err == nil {
+		username = u.Username
+	}
+
+	var crontabs []*lib.Crontab
+	var foundLine *lib.Line
+	var foundCrontab *lib.Crontab
+
+	// Read user crontab
+	crontabs = lib.ReadCrontabFromFile(username, "", crontabs)
+
+	// Read system crontab if it exists
+	if systemCrontab := lib.CrontabFactory(username, lib.SYSTEM_CRONTAB); systemCrontab.Exists() {
+		crontabs = lib.ReadCrontabFromFile(username, lib.SYSTEM_CRONTAB, crontabs)
+	}
+
+	// Read crontabs from drop-in directory
+	crontabs = lib.ReadCrontabsInDirectory(username, lib.DROP_IN_DIRECTORY, crontabs)
+
+	// Find the matching line
+	for _, crontab := range crontabs {
+		for _, line := range crontab.Lines {
+			if (job.Code != "" && line.Code == job.Code) || (job.Key != "" && line.Key(crontab.CanonicalName()) == job.Key) {
+				foundLine = line
+				foundCrontab = crontab
+				break
+			}
+		}
+		if foundLine != nil {
+			break
+		}
+	}
+
+	if foundLine == nil {
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	// Update the line
+	hasChanges := false
+
+	// Handle name update
+	if job.Name != foundLine.Name {
+		foundLine.Name = job.Name
+		hasChanges = true
+
+		// If monitor exists, update its name
+		if foundLine.Code != "" {
+			monitor := lib.Monitor{
+				Name:        job.Name,
+				DefaultName: createDefaultName(foundLine, foundCrontab, "", []string{}, map[string]bool{}),
+				Schedule:    job.Expression,
+				Type:        "job",
+				Platform:    lib.CRON,
+				Timezone:    job.Timezone,
+				Code:        foundLine.Code,
+			}
+
+			monitors := map[string]*lib.Monitor{
+				monitor.Key: &monitor,
+			}
+
+			updatedMonitors, err := getCronitorApi().PutMonitors(monitors)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			if updatedMonitor, exists := updatedMonitors[monitor.Key]; exists {
+				foundLine.Mon = *updatedMonitor
+				hasChanges = true
+			}
+		}
+	}
+
+	if job.RunAsUser != "" && foundLine.RunAs != job.RunAsUser {
+		foundLine.RunAs = job.RunAsUser
+		hasChanges = true
+	}
+	if job.Expression != "" && foundLine.CronExpression != job.Expression {
+		foundLine.CronExpression = job.Expression
+		hasChanges = true
+	}
+	if job.Timezone != "" && foundCrontab.TimezoneLocationName != nil && foundCrontab.TimezoneLocationName.Name != job.Timezone {
+		foundCrontab.TimezoneLocationName = &lib.TimezoneLocationName{Name: job.Timezone}
+		hasChanges = true
+	}
+
+	if !job.IsMonitored {
+		if foundLine.Code != "" {
+			foundLine.Code = ""
+			hasChanges = true
+		}
+	} else {
+		// Create monitor if not exists
+		if foundLine.Code == "" {
+			monitor := lib.Monitor{
+				Name:        job.Name,
+				DefaultName: createDefaultName(foundLine, foundCrontab, "", []string{}, map[string]bool{}),
+				Key:         foundLine.Key(foundCrontab.CanonicalName()),
+				Schedule:    job.Expression,
+				Type:        "job",
+				Platform:    lib.CRON,
+				Timezone:    job.Timezone,
+			}
+
+			monitors := map[string]*lib.Monitor{
+				monitor.Key: &monitor,
+			}
+
+			updatedMonitors, err := getCronitorApi().PutMonitors(monitors)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			if updatedMonitor, exists := updatedMonitors[monitor.Key]; exists {
+				foundLine.Mon = *updatedMonitor
+				foundLine.Code = updatedMonitor.Code
+				hasChanges = true
+			}
+		}
+	}
+
+	// Save changes if any
+	if hasChanges {
+		if err := foundCrontab.Save(foundCrontab.Write()); err != nil {
+			http.Error(w, "Failed to save crontab", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Update the job with the latest values
+	job.Name = foundLine.Name
+	job.Code = foundLine.Code
+	job.IsMonitored = len(foundLine.Code) > 0
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(job)
+}
+
+func find_instances(commandString string) []JobInstance {
+	cmd := exec.Command("ps", "-eo", "pid,lstart,args")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	if err := cmd.Run(); err != nil {
+		return []JobInstance{}
+	}
+
+	lines := strings.Split(out.String(), "\n")
+	instances := make([]JobInstance, 0)
+
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 8 {
+			continue
+		}
+		pid := fields[0]
+		// The start time is fields[1:6] (day month date time year)
+		started := strings.Join(fields[1:6], " ")
+		args := strings.Join(fields[6:], " ")
+
+		if strings.Contains(args, commandString) {
+			instances = append(instances, JobInstance{
+				PID:     pid,
+				Started: started,
+			})
+		}
+	}
+
+	return instances
+}
+
+// handleKillJobs handles POST requests to kill processes
+func handleKillJobs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var request struct {
+		PIDs []string `json:"pids"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	type KillError struct {
+		PID   string `json:"pid"`
+		Error string `json:"error"`
+	}
+
+	var errors []KillError
+
+	for _, pid := range request.PIDs {
+		cmd := exec.Command("kill", "-9", pid)
+		if err := cmd.Run(); err != nil {
+			// Check if the process has already exited
+			if strings.Contains(err.Error(), "No such process") {
+				continue
+			}
+			// If it's a permission error, add it to our error list
+			if strings.Contains(err.Error(), "Operation not permitted") {
+				errors = append(errors, KillError{
+					PID:   pid,
+					Error: "Insufficient privileges to kill process",
+				})
+			}
+		}
+	}
+
+	if len(errors) > 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"errors": errors,
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }

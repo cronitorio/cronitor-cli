@@ -61,10 +61,10 @@ type Monitor struct {
 	Timezone         string   `json:"timezone,omitempty"`
 	Note             string   `json:"defaultNote,omitempty"`
 	Notify           []string `json:"notify,omitempty"`
-	Passing          bool     `json:"passing"`
-	Initialized      bool     `json:"initialized"`
-	Disabled         bool     `json:"disabled"`
-	Paused           bool     `json:"paused"`
+	Passing          bool     `json:"passing,omitempty"`
+	Initialized      bool     `json:"initialized,omitempty"`
+	Disabled         bool     `json:"disabled,omitempty"`
+	Paused           bool     `json:"paused,omitempty"`
 	NoStdoutPassthru bool     `json:"-"`
 }
 
