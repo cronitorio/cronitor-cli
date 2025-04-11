@@ -410,6 +410,7 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 	var crontabs []*lib.Crontab
 	var foundLine *lib.Line
 	var foundCrontab *lib.Crontab
+	var foundLineIndex int
 
 	// Read user crontab
 	crontabs = lib.ReadCrontabFromFile(username, "", crontabs)
@@ -424,10 +425,11 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 
 	// Find the matching line
 	for _, crontab := range crontabs {
-		for _, line := range crontab.Lines {
+		for i, line := range crontab.Lines {
 			if (job.Code != "" && line.Code == job.Code) || (job.Key != "" && line.Key(crontab.CanonicalName()) == job.Key) {
 				foundLine = line
 				foundCrontab = crontab
+				foundLineIndex = i
 				break
 			}
 		}
@@ -444,86 +446,61 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 	// Update the line
 	hasChanges := false
 
-	// Handle name update
-	if job.Name != foundLine.Name {
-		foundLine.Name = job.Name
-		hasChanges = true
-
-		// If monitor exists, update its name
-		if foundLine.Code != "" {
-			monitor := lib.Monitor{
-				Name:        job.Name,
-				DefaultName: createDefaultName(foundLine, foundCrontab, "", []string{}, map[string]bool{}),
-				Schedule:    job.Expression,
-				Type:        "job",
-				Platform:    lib.CRON,
-				Timezone:    job.Timezone,
-				Code:        foundLine.Code,
-			}
-
-			monitors := map[string]*lib.Monitor{
-				monitor.Key: &monitor,
-			}
-
-			updatedMonitors, err := getCronitorApi().PutMonitors(monitors)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			if updatedMonitor, exists := updatedMonitors[monitor.Key]; exists {
-				foundLine.Mon = *updatedMonitor
-				hasChanges = true
-			}
+	// Collect all monitor updates
+	var monitor *lib.Monitor
+	if foundLine.Code != "" {
+		monitor = &lib.Monitor{
+			Name:        job.Name,
+			DefaultName: createDefaultName(foundLine, foundCrontab, "", []string{}, map[string]bool{}),
+			Schedule:    job.Expression,
+			Type:        "job",
+			Platform:    lib.CRON,
+			Timezone:    job.Timezone,
+			Code:        foundLine.Code,
+			Key:         foundLine.Code,
 		}
 	}
 
-	if job.RunAsUser != "" && foundLine.RunAs != job.RunAsUser {
-		foundLine.RunAs = job.RunAsUser
+	// Handle name update
+	if job.Name != foundLine.Name {
+		foundCrontab.Lines[foundLineIndex].Name = job.Name
 		hasChanges = true
 	}
+
+	// Handle command update
+	if job.Command != "" && job.Command != foundLine.CommandToRun {
+		foundCrontab.Lines[foundLineIndex].CommandToRun = job.Command
+		hasChanges = true
+	}
+
+	// Handle schedule update
 	if job.Expression != "" && foundLine.CronExpression != job.Expression {
-		foundLine.CronExpression = job.Expression
+		foundCrontab.Lines[foundLineIndex].CronExpression = job.Expression
+		foundCrontab.Lines[foundLineIndex].FullLine = "" // Clear FullLine to force regeneration
 		hasChanges = true
 	}
+
+	// Handle timezone update
 	if job.Timezone != "" && foundCrontab.TimezoneLocationName != nil && foundCrontab.TimezoneLocationName.Name != job.Timezone {
 		foundCrontab.TimezoneLocationName = &lib.TimezoneLocationName{Name: job.Timezone}
 		hasChanges = true
 	}
 
-	if !job.IsMonitored {
-		if foundLine.Code != "" {
-			foundLine.Code = ""
-			hasChanges = true
+	// If monitor exists, update it with all changes
+	if monitor != nil {
+		monitors := map[string]*lib.Monitor{
+			monitor.Key: monitor,
 		}
-	} else {
-		// Create monitor if not exists
-		if foundLine.Code == "" {
-			monitor := lib.Monitor{
-				Name:        job.Name,
-				DefaultName: createDefaultName(foundLine, foundCrontab, "", []string{}, map[string]bool{}),
-				Key:         foundLine.Key(foundCrontab.CanonicalName()),
-				Schedule:    job.Expression,
-				Type:        "job",
-				Platform:    lib.CRON,
-				Timezone:    job.Timezone,
-			}
 
-			monitors := map[string]*lib.Monitor{
-				monitor.Key: &monitor,
-			}
+		updatedMonitors, err := getCronitorApi().PutMonitors(monitors)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
-			updatedMonitors, err := getCronitorApi().PutMonitors(monitors)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			if updatedMonitor, exists := updatedMonitors[monitor.Key]; exists {
-				foundLine.Mon = *updatedMonitor
-				foundLine.Code = updatedMonitor.Code
-				hasChanges = true
-			}
+		if updatedMonitor, exists := updatedMonitors[monitor.Key]; exists {
+			foundCrontab.Lines[foundLineIndex].Mon = *updatedMonitor
+			hasChanges = true
 		}
 	}
 

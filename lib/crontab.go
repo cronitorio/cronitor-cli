@@ -310,7 +310,7 @@ func (l Line) Write() string {
 	}
 
 	// If not monitorable or has existing code, just return the original line with name comment
-	if !l.IsMonitorable() || len(l.Code) > 0 {
+	if !l.IsMonitorable() {
 		if len(outputLines) > 0 {
 			outputLines = append(outputLines, l.FullLine)
 			return strings.Join(outputLines, "\n")
