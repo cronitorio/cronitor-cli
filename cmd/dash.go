@@ -25,6 +25,51 @@ import (
 //go:embed web/dist
 var webAssets embed.FS
 
+type CommandHistory struct {
+	history map[string][]string
+}
+
+func NewCommandHistory() *CommandHistory {
+	return &CommandHistory{
+		history: make(map[string][]string),
+	}
+}
+
+func (ch *CommandHistory) MoveHistory(oldKey, newKey, oldCommand string) {
+	if history, exists := ch.history[oldKey]; exists {
+		// Create new history slice with old command first
+		newHistory := make([]string, 0, 50)
+		newHistory = append(newHistory, oldCommand) // Add the old command to history
+
+		// Add existing history, keeping only the last 49 entries
+		startIdx := len(history) - 49
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		newHistory = append(newHistory, history[startIdx:]...)
+
+		// Update the history map
+		ch.history[newKey] = newHistory
+		delete(ch.history, oldKey)
+	} else {
+		// No existing history, just create new entry with old command
+		ch.history[newKey] = []string{oldCommand}
+	}
+}
+
+func (ch *CommandHistory) GetCommands(key, currentCommand string) []string {
+	commands := make([]string, 0)
+	commands = append(commands, currentCommand) // Always include current command first
+
+	if history, exists := ch.history[key]; exists {
+		commands = append(commands, history...)
+	}
+
+	return commands
+}
+
+var commandHistory = NewCommandHistory()
+
 func openBrowser(url string) {
 	var err error
 	switch runtime.GOOS {
@@ -376,7 +421,7 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 				Initialized: line.Mon.Initialized,
 				Code:        line.Code,
 				Key:         line.Key(crontab.CanonicalName()),
-				Instances:   find_instances(line.CommandToRun),
+				Instances:   findInstances(commandHistory.GetCommands(line.Key(crontab.CanonicalName()), line.CommandToRun)),
 			}
 
 			jobs = append(jobs, job)
@@ -469,8 +514,19 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 
 	// Handle command update
 	if job.Command != "" && job.Command != foundLine.CommandToRun {
+		// Get the old key before updating the command
+		oldKey := foundLine.Key(foundCrontab.CanonicalName())
+		oldCommand := foundLine.CommandToRun // Store the old command
+
+		// Update the command
 		foundCrontab.Lines[foundLineIndex].CommandToRun = job.Command
 		hasChanges = true
+
+		// Get the new key after updating the command
+		newKey := foundLine.Key(foundCrontab.CanonicalName())
+
+		// Move history to new key
+		commandHistory.MoveHistory(oldKey, newKey, oldCommand)
 	}
 
 	// Handle schedule update
@@ -521,7 +577,7 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(job)
 }
 
-func find_instances(commandString string) []JobInstance {
+func findInstances(commandStrings []string) []JobInstance {
 	cmd := exec.Command("ps", "-eo", "pid,lstart,args")
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -532,6 +588,7 @@ func find_instances(commandString string) []JobInstance {
 
 	lines := strings.Split(out.String(), "\n")
 	instances := make([]JobInstance, 0)
+	seenPIDs := make(map[string]bool) // To avoid duplicate entries
 
 	for _, line := range lines {
 		fields := strings.Fields(line)
@@ -543,11 +600,16 @@ func find_instances(commandString string) []JobInstance {
 		started := strings.Join(fields[1:6], " ")
 		args := strings.Join(fields[6:], " ")
 
-		if strings.Contains(args, commandString) {
-			instances = append(instances, JobInstance{
-				PID:     pid,
-				Started: started,
-			})
+		// Check if any of the command strings match
+		for _, cmdStr := range commandStrings {
+			if strings.Contains(args, cmdStr) && !seenPIDs[pid] {
+				instances = append(instances, JobInstance{
+					PID:     pid,
+					Started: started,
+				})
+				seenPIDs[pid] = true
+				break
+			}
 		}
 	}
 

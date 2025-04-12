@@ -10,7 +10,7 @@ function Toast({ message, onClose, type = 'error' }) {
   return (
     <div className={`fixed bottom-4 left-4 ${bgColor} text-white px-4 py-2 rounded shadow-lg flex items-center space-x-2 z-50`}>
       {type === 'error' ? <XCircleIcon className="h-5 w-5" /> : <CheckCircleIcon className="h-5 w-5" />}
-      <span>{message}</span>
+      <span className="text-white dark:text-gray-100">{message}</span>
       <button onClick={onClose} className="ml-2">
         ×
       </button>
@@ -18,12 +18,25 @@ function Toast({ message, onClose, type = 'error' }) {
   );
 }
 
-function StatusIndicator({ job }) {
+function StatusIndicator({ job, mutate, allJobs }) {
   const [isMonitored, setIsMonitored] = React.useState(job.is_monitored);
   const [isLoading, setIsLoading] = React.useState(false);
 
   const handleToggle = async () => {
-    setIsLoading(true);
+    const newMonitoredState = !isMonitored;
+    
+    // Optimistic update
+    setIsMonitored(newMonitoredState);
+    
+    // Optimistically update the jobs list
+    const optimisticData = allJobs.map(j => {
+      if (j.key === job.key) {
+        return { ...j, is_monitored: newMonitoredState };
+      }
+      return j;
+    });
+    mutate(optimisticData, false);
+
     try {
       const response = await fetch('/api/jobs', {
         method: 'PUT',
@@ -37,7 +50,7 @@ function StatusIndicator({ job }) {
           run_as_user: job.run_as_user,
           expression: job.expression,
           timezone: job.timezone,
-          is_monitored: !isMonitored,
+          is_monitored: newMonitoredState,
         }),
       });
 
@@ -45,11 +58,19 @@ function StatusIndicator({ job }) {
         throw new Error('Failed to update job status');
       }
 
-      setIsMonitored(!isMonitored);
+      // Revalidate to ensure we have the latest data
+      mutate();
     } catch (error) {
+      // Revert optimistic update on error
+      setIsMonitored(!newMonitoredState);
+      const revertedData = allJobs.map(j => {
+        if (j.key === job.key) {
+          return { ...j, is_monitored: !newMonitoredState };
+        }
+        return j;
+      });
+      mutate(revertedData, false);
       console.error('Error updating job status:', error);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -59,23 +80,23 @@ function StatusIndicator({ job }) {
   if (job.disabled) {
     statusColor = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
     statusText = 'Upgrade to activate';
-  } else if (!job.initialized) {
+  } else if (!!job.code && !job.initialized) {
     statusColor = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
     statusText = 'Waiting for first run';
-  } else if (!job.passing) {
+  } else if (!!job.code && !job.passing) {
     statusColor = 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400';
     statusText = 'Failing';
-  } else {
+  } else if (!!job.code) {
     statusColor = 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400';
     statusText = 'Healthy';
+  } else {
+    statusColor = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
+    statusText = 'Syncing...';    
   }
 
   return (
     <div className="flex items-center justify-between space-x-4">
-      <div className="flex items-center space-x-2">
-        <span className={`text-sm font-medium ${isMonitored ? 'text-green-500' : 'text-red-500'}`}>
-          Monitoring: {isMonitored ? 'Enabled' : 'Disabled'}
-        </span>
+      <div className="flex items-center space-x-4">
         <button
           onClick={handleToggle}
           disabled={isLoading}
@@ -89,24 +110,24 @@ function StatusIndicator({ job }) {
             }`}
           />
         </button>
+        {isMonitored && (
+          <a
+            href={`https://cronitor.io/app/monitors/${job.code}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`inline-flex items-center px-3 py-0.5 rounded-full text-sm font-medium ${statusColor}`}
+          >
+            {statusText === 'Healthy' && <CheckCircleIcon className="h-4 w-4 mr-1" />}
+            {statusText === 'Failing' && <XCircleIcon className="h-4 w-4 mr-1" />}
+            <span>{statusText}</span>
+          </a>
+        )}
       </div>
-      {isMonitored && (
-        <a
-          href={`https://cronitor.io/app/monitors/${job.code}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor}`}
-        >
-          {statusText === 'Healthy' && <CheckCircleIcon className="h-4 w-4 mr-1" />}
-          {statusText === 'Failing' && <XCircleIcon className="h-4 w-4 mr-1" />}
-          <span>{statusText}</span>
-        </a>
-      )}
     </div>
   );
 }
 
-function JobCard({ job }) {
+function JobCard({ job, mutate, allJobs }) {
   const [isEditing, setIsEditing] = React.useState(false);
   const [editedName, setEditedName] = React.useState(job.name || job.default_name);
   const [isEditingCommand, setIsEditingCommand] = React.useState(false);
@@ -120,10 +141,12 @@ function JobCard({ job }) {
   const [isToastVisible, setIsToastVisible] = React.useState(false);
   const [toastMessage, setToastMessage] = React.useState('');
   const [toastType, setToastType] = React.useState('error');
+  const [isMonitored, setIsMonitored] = React.useState(job.is_monitored);
+  const [isLoading, setIsLoading] = React.useState(false);
   const inputRef = React.useRef(null);
   const commandInputRef = React.useRef(null);
   const scheduleInputRef = React.useRef(null);
-  const { mutate, data: jobs } = useSWR('/api/jobs', fetcher, {
+  const { mutate: jobsMutate, data: jobs } = useSWR('/api/jobs', fetcher, {
     refreshInterval: 5000, // Refresh every 5 seconds
     revalidateOnFocus: true, // Refresh when tab regains focus
   });
@@ -450,19 +473,51 @@ function JobCard({ job }) {
     }
   };
 
+  const handleToggle = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/jobs', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          key: job.key,
+          code: job.code,
+          name: job.name,
+          run_as_user: job.run_as_user,
+          expression: job.expression,
+          timezone: job.timezone,
+          is_monitored: !isMonitored,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update job status');
+      }
+
+      setIsMonitored(!isMonitored);
+    } catch (error) {
+      console.error('Error updating job status:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-4 space-y-2 relative">
       {isToastVisible && <Toast message={toastMessage} onClose={() => setIsToastVisible(false)} type={toastType} />}
-      {/* Status Tag */}
+      
+      {/* Running Indicator Tag */}
       <button
         onClick={() => setShowInstances(!showInstances)}
-        className={`absolute mt-[14px] right-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium z-10 ${
+        className={`absolute top-0 right-0 inline-flex items-center px-2.5 py-0.5 rounded-tr-lg rounded-bl-lg text-sm font-medium z-10 ${
           instances.length > 0
-            ? 'bg-[#4DBEFF] text-gray-900 hover:bg-[#4DBEFF]/90'
+            ? 'bg-blue-400 text-white hover:bg-blue-400/90'
             : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
         }`}
       >
-        RUNNING: {instances.length > 0 ? instances.length : 'None'}
+        {instances.length > 0 ? `RUNNING: ${instances.length}` : 'IDLE'}
       </button>
 
       {/* Line 1: Job Name */}
@@ -495,110 +550,121 @@ function JobCard({ job }) {
         )}
       </div>
 
-      {/* Line 2: Command */}
+      {/* Line 2: Command and Schedule Table */}
       <div className="group relative">
-        {isEditingCommand ? (
-          <div className="flex items-center">
-            <span className="font-medium text-gray-500 dark:text-gray-400 mr-2">Command:</span>
-            <input
-              ref={commandInputRef}
-              type="text"
-              value={editedCommand}
-              onChange={(e) => setEditedCommand(e.target.value)}
-              onKeyDown={handleCommandKeyDown}
-              onBlur={() => {
-                setIsEditingCommand(false);
-                setEditedCommand(job.command);
-              }}
-              className="flex-1 text-sm text-gray-600 dark:text-gray-300 font-mono bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-        ) : (
-          <div className="flex items-center">
-            <span className="font-medium text-gray-500 dark:text-gray-400 mr-2">Command:</span>
-            <div className="text-sm text-gray-600 dark:text-gray-300 font-mono truncate">
-              {job.command}
-            </div>
-            <button
-              onClick={() => setIsEditingCommand(true)}
-              className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
-            >
-              <PencilIcon className="h-4 w-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Line 3: Expression and Description */}
-      <div className="group relative">
-        {isEditingSchedule ? (
-          <div className="space-y-1">
-            <div className="flex items-center">
-              <span className="font-medium text-gray-500 dark:text-gray-400 mr-2">Schedule:</span>
-              <input
-                ref={scheduleInputRef}
-                type="text"
-                value={editedSchedule}
-                onChange={(e) => {
-                  setEditedSchedule(e.target.value);
-                }}
-                onKeyDown={handleScheduleKeyDown}
-                onBlur={handleScheduleBlur}
-                className={`flex-1 text-sm font-mono bg-transparent border-b focus:outline-none ${
+        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+          <thead>
+            <tr>
+              <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[25%] min-w-[200px]">Schedule</th>
+              <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Command</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+            <tr>
+              <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                {isEditingSchedule ? (
+                  <div className="space-y-1">
+                    <input
+                      ref={scheduleInputRef}
+                      type="text"
+                      value={editedSchedule}
+                      onChange={(e) => {
+                        setEditedSchedule(e.target.value);
+                      }}
+                      onKeyDown={handleScheduleKeyDown}
+                      onBlur={handleScheduleBlur}
+                      className={`w-full text-sm font-mono bg-transparent border-b focus:outline-none ${
+                        isScheduleValid 
+                          ? 'text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-600 focus:border-blue-500' 
+                          : 'text-pink-500 dark:text-pink-400 border-pink-300 dark:border-pink-600 focus:border-pink-500'
+                      }`}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex items-center">
+                    <span className="text-sm font-mono text-gray-500 dark:text-gray-400">
+                      {editedSchedule || job.expression}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setIsEditingSchedule(true);
+                        setEditedSchedule(job.expression || '');
+                      }}
+                      className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <PencilIcon className="h-4 w-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
+                    </button>
+                  </div>
+                )}
+              </td>
+              <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                {isEditingCommand ? (
+                  <input
+                    ref={commandInputRef}
+                    type="text"
+                    value={editedCommand}
+                    onChange={(e) => setEditedCommand(e.target.value)}
+                    onKeyDown={handleCommandKeyDown}
+                    onBlur={() => {
+                      setIsEditingCommand(false);
+                      setEditedCommand(job.command);
+                    }}
+                    className="w-full text-sm text-gray-600 dark:text-gray-300 font-mono bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500"
+                  />
+                ) : (
+                  <div className="flex items-center">
+                    <div className="text-sm text-gray-600 dark:text-gray-300 font-mono truncate">
+                      {job.command}
+                    </div>
+                    <button
+                      onClick={() => setIsEditingCommand(true)}
+                      className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <PencilIcon className="h-4 w-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
+                    </button>
+                  </div>
+                )}
+              </td>
+            </tr>
+            <tr>
+              <td colSpan="2" className="py-2 text-sm text-gray-500 dark:text-gray-400">
+                <div className={`text-sm ${
                   isScheduleValid 
-                    ? 'text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-600 focus:border-blue-500' 
-                    : 'text-pink-500 dark:text-pink-400 border-pink-300 dark:border-pink-600 focus:border-pink-500'
-                }`}
-              />
-            </div>
-            <div className={`text-sm italic ${
-              isScheduleValid 
-                ? 'text-gray-600 dark:text-gray-300' 
-                : 'text-pink-500 dark:text-pink-400'
-            }`}>
-              {getScheduleDescription(editedSchedule, job.timezone)}
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col">
-            <div className="flex items-center">
-              <span className="font-medium text-gray-500 dark:text-gray-400 mr-2">Schedule:</span>
-              <span className="text-sm font-mono text-gray-500 dark:text-gray-400">
-                {editedSchedule || job.expression}
-              </span>
-              <button
-                onClick={() => {
-                  setIsEditingSchedule(true);
-                  setEditedSchedule(job.expression || '');
-                }}
-                className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <PencilIcon className="h-4 w-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
-              </button>
-            </div>
-            <div className="text-sm text-gray-600 dark:text-gray-300 italic mt-1">
-              {getScheduleDescription(editedSchedule || job.expression, job.timezone)}
-            </div>
-          </div>
-        )}
+                    ? 'text-gray-600 dark:text-gray-300' 
+                    : 'text-pink-500 dark:text-pink-400'
+                }`}>
+                  {getScheduleDescription(editedSchedule || job.expression, job.timezone)} <span className="text-gray-400 dark:text-gray-500">as "{job.run_as_user || 'default'}"</span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
-      {/* Line 4: Attributes */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm text-gray-500 dark:text-gray-400">
-        <div>
-          <span className="font-medium">Run As:</span> {job.run_as_user || 'default'}
-        </div>
-        <div>
-          <span className="font-medium">File:</span> {job.cron_file}
-        </div>
-        <div>
-          <span className="font-medium">Line:</span> {job.line_number}
-        </div>
-      </div>
-
-      {/* Line 5: Status Indicators */}
-      <div className="flex items-center justify-between text-sm">
-        <StatusIndicator job={job} />
+      {/* Line 4: Monitoring and Location Table */}
+      <div className="group relative">
+        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+          <thead>
+            <tr>
+              <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[25%] min-w-[200px]">Monitoring</th>
+              <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Location</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+            <tr>
+              <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                <div className="flex items-center space-x-2">
+                  <StatusIndicator job={job} mutate={mutate} allJobs={allJobs} />
+                </div>
+              </td>
+              <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                <div>
+                  {job.cron_file.startsWith('user') ? 'User' + job.cron_file.slice(4) : job.cron_file} L{job.line_number}
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       {/* Instances Table */}
@@ -607,10 +673,10 @@ function JobCard({ job }) {
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
             <thead>
               <tr>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   PID
                 </th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Started
                 </th>
                 <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -622,10 +688,10 @@ function JobCard({ job }) {
               {instances.length > 0 ? (
                 instances.map((instance) => (
                   <tr key={instance.pid}>
-                    <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                    <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
                       {instance.pid}
                     </td>
-                    <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                    <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
                       {instance.started}
                     </td>
                     <td className="px-4 py-2 text-right">
@@ -653,7 +719,7 @@ function JobCard({ job }) {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="3" className="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
+                  <td colSpan="3" className="py-2 text-sm text-gray-500 dark:text-gray-400">
                     None
                   </td>
                 </tr>
@@ -687,20 +753,20 @@ function JobCard({ job }) {
 }
 
 export default function Jobs() {
-  const { data: jobs, error } = useSWR('/api/jobs', fetcher, {
+  const { data: jobs, error, mutate } = useSWR('/api/jobs', fetcher, {
     refreshInterval: 5000, // Refresh every 5 seconds
     revalidateOnFocus: true, // Refresh when tab regains focus
   });
 
-  if (error) return <div>Failed to load jobs</div>;
-  if (!jobs) return <div>Loading...</div>;
+  if (error) return <div className="text-gray-600 dark:text-gray-300">Failed to load jobs</div>;
+  if (!jobs) return <div className="text-gray-600 dark:text-gray-300">Loading...</div>;
 
   return (
     <div>
       <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-6">Jobs</h1>
       <div className="space-y-4">
         {jobs.map((job, index) => (
-          <JobCard key={index} job={job} />
+          <JobCard key={index} job={job} mutate={mutate} allJobs={jobs} />
         ))}
       </div>
     </div>
