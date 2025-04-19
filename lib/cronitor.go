@@ -391,3 +391,30 @@ func (api CronitorApi) Signup(name string, email string, password string) (*Sign
 
 	return &signupResp, nil
 }
+
+// PauseMonitor pauses a monitor for a specified number of hours.
+// If hours is empty, the monitor is paused permanently.
+func (c *CronitorApi) PauseMonitor(code string, hours string) error {
+	url := fmt.Sprintf("%s/%s/pause", c.Url(), code)
+	if hours != "" {
+		url = fmt.Sprintf("%s/%s", url, hours)
+	}
+	fmt.Println("url", url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+
+	req.SetBasicAuth(viper.GetString(c.ApiKey), "")
+
+	_, err, statusCode := c.send("GET", url, "")
+	if err != nil {
+		return err
+	}
+
+	if statusCode != http.StatusOK {
+		return fmt.Errorf("failed to pause monitor: status code %d", statusCode)
+	}
+
+	return nil
+}

@@ -1,6 +1,6 @@
 import React from 'react';
 import useSWR from 'swr';
-import { CheckCircleIcon, XCircleIcon, PencilIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
+import { CheckCircleIcon, XCircleIcon, PencilIcon, ArrowPathIcon, BellSlashIcon } from '@heroicons/react/24/outline';
 import guru from '../lib/guru';
 
 const fetcher = url => fetch(url).then(res => res.json());
@@ -82,7 +82,7 @@ function StatusIndicator({ job, mutate, allJobs }) {
     statusText = 'Upgrade to activate';
   } else if (!!job.code && !job.initialized) {
     statusColor = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
-    statusText = 'Waiting for first run';
+    statusText = 'Waiting';
   } else if (!!job.code && !job.passing) {
     statusColor = 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400';
     statusText = 'Failing';
@@ -96,11 +96,11 @@ function StatusIndicator({ job, mutate, allJobs }) {
 
   return (
     <div className="flex items-center justify-between space-x-4">
-      <div className="flex items-center space-x-4">
+      <div className="flex items-center">
         <button
           onClick={handleToggle}
           disabled={isLoading}
-          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 mr-4 ${
             isMonitored ? 'bg-green-500' : 'bg-red-500'
           }`}
         >
@@ -110,15 +110,26 @@ function StatusIndicator({ job, mutate, allJobs }) {
             }`}
           />
         </button>
+        {isMonitored && (job.paused || job.disabled) && (
+          <a
+            href={`https://cronitor.io/app/monitors/${job.code}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center px-2.5 py-0.5 text-sm font-medium bg-red-100 text-red-600 dark:bg-gray-700 dark:text-red-400 rounded-l-full border-r border-gray-300 dark:border-gray-600"
+            title="Alerts: Off"
+          >
+            <BellSlashIcon className="h-5 w-5" />
+          </a>
+        )}
         {isMonitored && (
           <a
             href={`https://cronitor.io/app/monitors/${job.code}`}
             target="_blank"
             rel="noopener noreferrer"
-            className={`inline-flex items-center px-3 py-0.5 rounded-full text-sm font-medium ${statusColor}`}
+            className={`inline-flex items-center px-2.5 py-0.5 text-sm font-medium ${statusColor} ${(job.paused || job.disabled) ? 'rounded-l-none' : 'rounded-l-full'} rounded-r-full`}
           >
-            {statusText === 'Healthy' && <CheckCircleIcon className="h-4 w-4 mr-1" />}
-            {statusText === 'Failing' && <XCircleIcon className="h-4 w-4 mr-1" />}
+            {statusText === 'Healthy' && <CheckCircleIcon className="h-5 w-5 mr-1" />}
+            {statusText === 'Failing' && <XCircleIcon className="h-5 w-5 mr-1" />}
             <span>{statusText}</span>
           </a>
         )}
@@ -127,13 +138,13 @@ function StatusIndicator({ job, mutate, allJobs }) {
   );
 }
 
-function JobCard({ job, mutate, allJobs }) {
+function JobCard({ job: initialJob, mutate, allJobs }) {
   const [isEditing, setIsEditing] = React.useState(false);
-  const [editedName, setEditedName] = React.useState(job.name || job.default_name);
+  const [editedName, setEditedName] = React.useState(initialJob.name || initialJob.default_name);
   const [isEditingCommand, setIsEditingCommand] = React.useState(false);
-  const [editedCommand, setEditedCommand] = React.useState(job.command);
+  const [editedCommand, setEditedCommand] = React.useState(initialJob.command);
   const [isEditingSchedule, setIsEditingSchedule] = React.useState(false);
-  const [editedSchedule, setEditedSchedule] = React.useState(job.expression || '');
+  const [editedSchedule, setEditedSchedule] = React.useState(initialJob.expression || '');
   const [showInstances, setShowInstances] = React.useState(false);
   const [killingPids, setKillingPids] = React.useState(new Set());
   const [isKillingAll, setIsKillingAll] = React.useState(false);
@@ -141,11 +152,16 @@ function JobCard({ job, mutate, allJobs }) {
   const [isToastVisible, setIsToastVisible] = React.useState(false);
   const [toastMessage, setToastMessage] = React.useState('');
   const [toastType, setToastType] = React.useState('error');
-  const [isMonitored, setIsMonitored] = React.useState(job.is_monitored);
+  const [showSuspendedOverlay, setShowSuspendedOverlay] = React.useState(false);
+  const [isMonitored, setIsMonitored] = React.useState(initialJob.is_monitored);
   const [isLoading, setIsLoading] = React.useState(false);
   const inputRef = React.useRef(null);
   const commandInputRef = React.useRef(null);
   const scheduleInputRef = React.useRef(null);
+
+  // Get the current job data from allJobs
+  const job = allJobs.find(j => j.key === initialJob.key) || initialJob;
+
   const { mutate: jobsMutate, data: jobs } = useSWR('/api/jobs', fetcher, {
     refreshInterval: 5000, // Refresh every 5 seconds
     revalidateOnFocus: true, // Refresh when tab regains focus
@@ -505,247 +521,375 @@ function JobCard({ job, mutate, allJobs }) {
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-4 space-y-2 relative">
+    <div className={`bg-white dark:bg-gray-800 shadow rounded-lg p-4 relative ${job.suspended ? 'bg-gray-100 dark:bg-gray-700' : ''}`}>
       {isToastVisible && <Toast message={toastMessage} onClose={() => setIsToastVisible(false)} type={toastType} />}
       
-      {/* Running Indicator Tag */}
-      <button
-        onClick={() => setShowInstances(!showInstances)}
-        className={`absolute top-0 right-0 inline-flex items-center px-2.5 py-0.5 rounded-tr-lg rounded-bl-lg text-sm font-medium z-10 ${
-          instances.length > 0
-            ? 'bg-blue-400 text-white hover:bg-blue-400/90'
-            : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
-        }`}
-      >
-        {instances.length > 0 ? `RUNNING: ${instances.length}` : 'IDLE'}
-      </button>
-
-      {/* Line 1: Job Name */}
-      <div className="group relative">
-        {isEditing ? (
-          <input
-            ref={inputRef}
-            type="text"
-            value={editedName}
-            onChange={(e) => setEditedName(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onBlur={() => {
-              setIsEditing(false);
-              setEditedName(job.name || job.default_name);
-            }}
-            className="w-full text-lg font-medium text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500"
-          />
-        ) : (
-          <div className="flex items-center">
-            <div className="text-lg font-medium text-gray-900 dark:text-white truncate">
-              {job.name || job.default_name}
-            </div>
-            <button
-              onClick={() => setIsEditing(true)}
-              className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
+      <div className="space-y-2">
+        {/* Status Indicators */}
+        <div className="absolute top-0 right-0 flex items-center">
+          {job.suspended ? (
+            <div 
+              className="inline-flex items-center px-2.5 py-0.5 rounded-bl-lg text-sm font-medium bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300 cursor-pointer hover:bg-pink-200 dark:hover:bg-pink-800/30"
+              onClick={() => setShowSuspendedOverlay(true)}
+              title="This job will not run at the scheduled time"
             >
-              <PencilIcon className="h-4 w-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
-            </button>
+              SUSPENDED
+            </div>
+          ) : (
+            <div 
+              className="inline-flex items-center px-2.5 py-0.5 rounded-bl-lg text-sm font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-600 border-r border-gray-300 dark:border-gray-600"
+              onClick={() => setShowSuspendedOverlay(true)}
+              title="Job will run on schedule"
+            >
+              SCHEDULED
+            </div>
+          )}
+          <button
+            onClick={() => setShowInstances(!showInstances)}
+            title={instances.length > 0 ? `${instances.length} instances of this job are running` : 'Job is not currently running'}
+            className={`inline-flex items-center px-2.5 py-0.5 rounded-tr-lg text-sm font-medium ${
+              instances.length > 0
+                ? 'bg-blue-400 text-white hover:bg-blue-400/90'
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+            }`}
+          >
+            {instances.length > 0 ? `RUNNING: ${instances.length}` : 'IDLE'}
+          </button>
+        </div>
+
+        {/* Line 1: Job Name */}
+        <div className="group relative">
+          {isEditing ? (
+            <input
+              ref={inputRef}
+              type="text"
+              value={editedName}
+              onChange={(e) => setEditedName(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onBlur={() => {
+                setIsEditing(false);
+                setEditedName(job.name || job.default_name);
+              }}
+              className="w-full text-lg font-medium text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500"
+            />
+          ) : (
+            <div className="flex items-center">
+              <div className="text-lg font-medium text-gray-900 dark:text-white truncate">
+                {job.name || job.default_name}
+              </div>
+              <button
+                onClick={() => setIsEditing(true)}
+                className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <PencilIcon className="h-4 w-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Line 2: Command and Schedule Table */}
+        <div className="group relative">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+            <thead>
+              <tr>
+                <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[25%] min-w-[200px]">Schedule</th>
+                <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Command</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              <tr>
+                <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                  {isEditingSchedule ? (
+                    <div className="space-y-1">
+                      <input
+                        ref={scheduleInputRef}
+                        type="text"
+                        value={editedSchedule}
+                        onChange={(e) => {
+                          setEditedSchedule(e.target.value);
+                        }}
+                        onKeyDown={handleScheduleKeyDown}
+                        onBlur={handleScheduleBlur}
+                        className={`w-full text-sm font-mono bg-transparent border-b focus:outline-none ${
+                          isScheduleValid 
+                            ? 'text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-600 focus:border-blue-500' 
+                            : 'text-pink-500 dark:text-pink-400 border-pink-300 dark:border-pink-600 focus:border-pink-500'
+                        }`}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-center">
+                      <span className="text-sm font-mono text-gray-500 dark:text-gray-400">
+                        {editedSchedule || job.expression}
+                      </span>
+                      <button
+                        onClick={() => {
+                          setIsEditingSchedule(true);
+                          setEditedSchedule(job.expression || '');
+                        }}
+                        className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <PencilIcon className="h-4 w-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
+                      </button>
+                    </div>
+                  )}
+                </td>
+                <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                  {isEditingCommand ? (
+                    <input
+                      ref={commandInputRef}
+                      type="text"
+                      value={editedCommand}
+                      onChange={(e) => setEditedCommand(e.target.value)}
+                      onKeyDown={handleCommandKeyDown}
+                      onBlur={() => {
+                        setIsEditingCommand(false);
+                        setEditedCommand(job.command);
+                      }}
+                      className="w-full text-sm text-gray-600 dark:text-gray-300 font-mono bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500"
+                    />
+                  ) : (
+                    <div className="flex items-center">
+                      <div className="text-sm text-gray-600 dark:text-gray-300 font-mono truncate">
+                        {job.command}
+                      </div>
+                      <button
+                        onClick={() => setIsEditingCommand(true)}
+                        className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <PencilIcon className="h-4 w-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
+                      </button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+              <tr>
+                <td colSpan="2" className="py-2 text-sm text-gray-500 dark:text-gray-400">
+                  <div className={`text-sm ${
+                    isScheduleValid 
+                      ? 'text-gray-600 dark:text-gray-300' 
+                      : 'text-pink-500 dark:text-pink-400'
+                  }`}>
+                    {getScheduleDescription(editedSchedule || job.expression, job.timezone)} <span className="text-gray-400 dark:text-gray-500">as "{job.run_as_user || 'default'}"</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Line 4: Monitoring and Location Table */}
+        <div className="group relative">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+            <thead>
+              <tr>
+                <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[25%] min-w-[200px]">Monitoring</th>
+                <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Location</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              <tr>
+                <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                  <div className="flex items-center space-x-2">
+                    <StatusIndicator job={job} mutate={mutate} allJobs={allJobs} />
+                  </div>
+                </td>
+                <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                  <div>
+                    {job.cron_file.startsWith('user') ? 'User' + job.cron_file.slice(4) : job.cron_file} L{job.line_number}
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Instances Table */}
+        {showInstances && (
+          <div className="mt-2">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead>
+                <tr>
+                  <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    PID
+                  </th>
+                  <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Started
+                  </th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                {instances.length > 0 ? (
+                  instances.map((instance) => (
+                    <tr key={instance.pid}>
+                      <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                        {instance.pid}
+                      </td>
+                      <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                        {instance.started}
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        <button
+                          onClick={() => {
+                            console.log('Button clicked for PID:', instance.pid);
+                            handleKill([instance.pid]);
+                          }}
+                          disabled={killingPids.has(instance.pid)}
+                          className={`text-xs text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 inline-flex items-center space-x-1 ${
+                            killingPids.has(instance.pid) ? 'opacity-30 cursor-not-allowed' : ''
+                          }`}
+                        >
+                          {killingPids.has(instance.pid) ? (
+                            <>
+                              <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                              <span>Killing</span>
+                            </>
+                          ) : (
+                            'Kill Now'
+                          )}
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="3" className="py-2 text-sm text-gray-500 dark:text-gray-400">
+                      None
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            {instances.length > 1 && (
+              <div className="mt-2 text-right">
+                <button
+                  onClick={() => handleKill(instances.map(i => i.pid), true)}
+                  disabled={isKillingAll}
+                  className={`text-xs bg-red-600 hover:bg-red-700 text-white dark:bg-red-500 dark:hover:bg-red-600 px-3 py-1 rounded mr-1 ${
+                    isKillingAll ? 'opacity-30 cursor-not-allowed' : ''
+                  }`}
+                >
+                  {isKillingAll ? (
+                    <>
+                      <ArrowPathIcon className="h-4 w-4 animate-spin inline-block mr-1" />
+                      <span>Killing</span>
+                    </>
+                  ) : (
+                    'Kill All'
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Line 2: Command and Schedule Table */}
-      <div className="group relative">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-          <thead>
-            <tr>
-              <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[25%] min-w-[200px]">Schedule</th>
-              <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Command</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            <tr>
-              <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
-                {isEditingSchedule ? (
-                  <div className="space-y-1">
-                    <input
-                      ref={scheduleInputRef}
-                      type="text"
-                      value={editedSchedule}
-                      onChange={(e) => {
-                        setEditedSchedule(e.target.value);
-                      }}
-                      onKeyDown={handleScheduleKeyDown}
-                      onBlur={handleScheduleBlur}
-                      className={`w-full text-sm font-mono bg-transparent border-b focus:outline-none ${
-                        isScheduleValid 
-                          ? 'text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-600 focus:border-blue-500' 
-                          : 'text-pink-500 dark:text-pink-400 border-pink-300 dark:border-pink-600 focus:border-pink-500'
-                      }`}
-                    />
-                  </div>
-                ) : (
-                  <div className="flex items-center">
-                    <span className="text-sm font-mono text-gray-500 dark:text-gray-400">
-                      {editedSchedule || job.expression}
-                    </span>
-                    <button
-                      onClick={() => {
-                        setIsEditingSchedule(true);
-                        setEditedSchedule(job.expression || '');
-                      }}
-                      className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <PencilIcon className="h-4 w-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
-                    </button>
-                  </div>
-                )}
-              </td>
-              <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
-                {isEditingCommand ? (
-                  <input
-                    ref={commandInputRef}
-                    type="text"
-                    value={editedCommand}
-                    onChange={(e) => setEditedCommand(e.target.value)}
-                    onKeyDown={handleCommandKeyDown}
-                    onBlur={() => {
-                      setIsEditingCommand(false);
-                      setEditedCommand(job.command);
-                    }}
-                    className="w-full text-sm text-gray-600 dark:text-gray-300 font-mono bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500"
-                  />
-                ) : (
-                  <div className="flex items-center">
-                    <div className="text-sm text-gray-600 dark:text-gray-300 font-mono truncate">
-                      {job.command}
-                    </div>
-                    <button
-                      onClick={() => setIsEditingCommand(true)}
-                      className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <PencilIcon className="h-4 w-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
-                    </button>
-                  </div>
-                )}
-              </td>
-            </tr>
-            <tr>
-              <td colSpan="2" className="py-2 text-sm text-gray-500 dark:text-gray-400">
-                <div className={`text-sm ${
-                  isScheduleValid 
-                    ? 'text-gray-600 dark:text-gray-300' 
-                    : 'text-pink-500 dark:text-pink-400'
-                }`}>
-                  {getScheduleDescription(editedSchedule || job.expression, job.timezone)} <span className="text-gray-400 dark:text-gray-500">as "{job.run_as_user || 'default'}"</span>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      {/* Line 4: Monitoring and Location Table */}
-      <div className="group relative">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-          <thead>
-            <tr>
-              <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[25%] min-w-[200px]">Monitoring</th>
-              <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Location</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            <tr>
-              <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
-                <div className="flex items-center space-x-2">
-                  <StatusIndicator job={job} mutate={mutate} allJobs={allJobs} />
-                </div>
-              </td>
-              <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
-                <div>
-                  {job.cron_file.startsWith('user') ? 'User' + job.cron_file.slice(4) : job.cron_file} L{job.line_number}
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      {/* Instances Table */}
-      {showInstances && (
-        <div className="mt-2">
-          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-            <thead>
-              <tr>
-                <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  PID
-                </th>
-                <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Started
-                </th>
-                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {instances.length > 0 ? (
-                instances.map((instance) => (
-                  <tr key={instance.pid}>
-                    <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
-                      {instance.pid}
-                    </td>
-                    <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
-                      {instance.started}
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      <button
-                        onClick={() => {
-                          console.log('Button clicked for PID:', instance.pid);
-                          handleKill([instance.pid]);
-                        }}
-                        disabled={killingPids.has(instance.pid)}
-                        className={`text-xs text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 inline-flex items-center space-x-1 ${
-                          killingPids.has(instance.pid) ? 'opacity-30 cursor-not-allowed' : ''
-                        }`}
-                      >
-                        {killingPids.has(instance.pid) ? (
-                          <>
-                            <ArrowPathIcon className="h-4 w-4 animate-spin" />
-                            <span>Killing</span>
-                          </>
-                        ) : (
-                          'Kill Now'
-                        )}
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan="3" className="py-2 text-sm text-gray-500 dark:text-gray-400">
-                    None
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-          {instances.length > 1 && (
-            <div className="mt-2 text-right">
+      {/* Suspended Job Overlay */}
+      {showSuspendedOverlay && (
+        <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center z-10">
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-md w-full mx-4 relative">
+            <button
+              onClick={() => setShowSuspendedOverlay(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-500 dark:text-gray-500 dark:hover:text-gray-400"
+            >
+              <XCircleIcon className="h-6 w-6" />
+            </button>
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+              {job.suspended ? 'Suspended Job' : 'Scheduled Job'}
+            </h3>
+            <p className="text-gray-600 dark:text-gray-300 mb-4">
+              {job.suspended 
+                ? 'This job is suspended and will not be run at its scheduled time.'
+                : 'This job will run at its scheduled time. If you suspend this job, it will be commented-out in the crontab.'}
+            </p>
+            {!job.suspended && job.is_monitored && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Pause monitoring
+                </label>
+                <select
+                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  value={job.pause_hours || ''}
+                  onChange={(e) => {
+                    const updatedJobs = allJobs.map(j => {
+                      if (j.key === job.key) {
+                        return { ...j, pause_hours: e.target.value };
+                      }
+                      return j;
+                    });
+                    mutate(updatedJobs, false);
+                  }}
+                >
+                  <option value="">Indefinitely</option>
+                  <option value="1">1 hour</option>
+                  <option value="12">12 hours</option>
+                  <option value="24">1 day</option>
+                  <option value="48">2 days</option>
+                  <option value="120">5 days</option>
+                  <option value="240">10 days</option>
+                  <option value="720">30 days</option>
+                </select>
+              </div>
+            )}
+            <div className="flex justify-end">
               <button
-                onClick={() => handleKill(instances.map(i => i.pid), true)}
-                disabled={isKillingAll}
-                className={`text-xs bg-red-600 hover:bg-red-700 text-white dark:bg-red-500 dark:hover:bg-red-600 px-3 py-1 rounded mr-1 ${
-                  isKillingAll ? 'opacity-30 cursor-not-allowed' : ''
+                onClick={async () => {
+                  // Dismiss modal immediately
+                  setShowSuspendedOverlay(false);
+
+                  // Optimistic update
+                  const optimisticData = allJobs.map(j => {
+                    if (j.key === job.key) {
+                      return { ...j, suspended: !job.suspended };
+                    }
+                    return j;
+                  });
+                  mutate(optimisticData, false);
+
+                  try {
+                    const response = await fetch('/api/jobs', {
+                      method: 'PUT',
+                      headers: {
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify({
+                        ...job,
+                        suspended: !job.suspended,
+                        pause_hours: !job.suspended && job.is_monitored ? job.pause_hours : job.suspended && job.is_monitored ? "0" : null,
+                      }),
+                    });
+
+                    if (!response.ok) {
+                      throw new Error('Failed to update job status');
+                    }
+
+                    // Invalidate the cache to trigger a refresh
+                    mutate();
+                  } catch (error) {
+                    // Revert optimistic update on error
+                    const revertedData = allJobs.map(j => {
+                      if (j.key === job.key) {
+                        return { ...j, suspended: job.suspended };
+                      }
+                      return j;
+                    });
+                    mutate(revertedData, false);
+                    console.error('Error updating job status:', error);
+                  }
+                }}
+                className={`px-4 py-2 text-sm font-medium text-white rounded-md ${
+                  job.suspended 
+                    ? 'bg-green-600 hover:bg-green-700' 
+                    : 'bg-red-600 hover:bg-red-700'
                 }`}
               >
-                {isKillingAll ? (
-                  <>
-                    <ArrowPathIcon className="h-4 w-4 animate-spin inline-block mr-1" />
-                    <span>Killing</span>
-                  </>
-                ) : (
-                  'Kill All'
-                )}
+                {job.suspended ? 'Activate Job' : 'Suspend Job'}
               </button>
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>

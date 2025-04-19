@@ -53,7 +53,7 @@ function Sidebar({ isDark, toggleTheme }) {
               alt="LocalDash Logo" 
               className="h-8 w-8 object-contain"
             />
-            <span className="ml-3 text-xl font-bold text-gray-900 dark:text-white">LocalDash</span>
+            <span className="ml-3 text-xl font-bold text-gray-900 dark:text-white">Crontab Guru</span>
           </div>
           <nav className="mt-5 flex-1 space-y-1 bg-white dark:bg-gray-800 px-2">
             {navigation.map((item) => {

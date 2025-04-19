@@ -66,7 +66,7 @@ func (em ExistingMonitors) Get(key string, code string) lib.Monitor {
 			}
 		}
 	}
-	return lib.Monitor{Key: key, Code: code}
+	return lib.Monitor{}
 }
 
 func (em ExistingMonitors) GetNameForCurrent() (string, error) {

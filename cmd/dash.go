@@ -336,6 +336,8 @@ type Job struct {
 	Code        string        `json:"code"`
 	Key         string        `json:"key"`
 	Instances   []JobInstance `json:"instances"`
+	Suspended   bool          `json:"suspended"`
+	PauseHours  string        `json:"pause_hours"`
 }
 
 // handleJobs handles GET and PUT requests for jobs
@@ -384,7 +386,7 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 		hasChanges := false
 		for i := range crontab.Lines {
 			line := crontab.Lines[i]
-			if !line.IsMonitorable() {
+			if !line.IsJob {
 				continue
 			}
 
@@ -422,6 +424,7 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 				Code:        line.Code,
 				Key:         line.Key(crontab.CanonicalName()),
 				Instances:   findInstances(commandHistory.GetCommands(line.Key(crontab.CanonicalName()), line.CommandToRun)),
+				Suspended:   line.IsComment,
 			}
 
 			jobs = append(jobs, job)
@@ -491,9 +494,32 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 	// Update the line
 	hasChanges := false
 
+	// Handle suspended status
+	if job.Suspended != foundLine.IsComment {
+		foundLine.IsComment = job.Suspended
+		hasChanges = true
+
+		// If the job is monitored, handle pause/unpause
+		if job.IsMonitored {
+			if job.Suspended {
+				// Pause the monitor when suspending
+				if err := getCronitorApi().PauseMonitor(job.Code, job.PauseHours); err != nil {
+					http.Error(w, fmt.Sprintf("Failed to pause monitor: %v", err), http.StatusInternalServerError)
+					return
+				}
+			} else {
+				// Unpause the monitor when unsuspending
+				if err := getCronitorApi().PauseMonitor(job.Code, "0"); err != nil {
+					http.Error(w, fmt.Sprintf("Failed to unpause monitor: %v", err), http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+	}
+
 	// Collect all monitor updates
 	var monitor *lib.Monitor
-	if foundLine.Code != "" {
+	if job.IsMonitored {
 		monitor = &lib.Monitor{
 			Name:        job.Name,
 			DefaultName: createDefaultName(foundLine, foundCrontab, "", []string{}, map[string]bool{}),
@@ -502,8 +528,13 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 			Platform:    lib.CRON,
 			Timezone:    job.Timezone,
 			Code:        foundLine.Code,
-			Key:         foundLine.Code,
+			Key:         foundLine.Key(foundCrontab.CanonicalName()),
 		}
+
+	} else if foundLine.Code != "" {
+		foundCrontab.Lines[foundLineIndex].Code = ""
+		hasChanges = true
+		// TODO: Use cronitor API to pause the monitor
 	}
 
 	// Handle name update
@@ -542,7 +573,7 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 		hasChanges = true
 	}
 
-	// If monitor exists, update it with all changes
+	// If monitor exists or needs to be created, update it with all changes
 	if monitor != nil {
 		monitors := map[string]*lib.Monitor{
 			monitor.Key: monitor,
@@ -556,6 +587,7 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 
 		if updatedMonitor, exists := updatedMonitors[monitor.Key]; exists {
 			foundCrontab.Lines[foundLineIndex].Mon = *updatedMonitor
+			foundCrontab.Lines[foundLineIndex].Code = updatedMonitor.Code
 			hasChanges = true
 		}
 	}

@@ -51,52 +51,60 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 		var runAs string
 
 		fullLine = strings.TrimSpace(fullLine)
+		isComment := false
 
+		// Check for special Name: comment, handle other comments normally
+		if nameMatch := regexp.MustCompile(`^#\s*Name:\s*(.+)$`).FindStringSubmatch(fullLine); nameMatch != nil {
+			name = strings.TrimSpace(nameMatch[1])
+			continue
+		}
+
+		// If the line is a comment, see if it is a disabled job
 		if strings.HasPrefix(fullLine, "#") {
-			// Check for special Name: comment, ignore other comments
-			if nameMatch := regexp.MustCompile(`^#\s*Name:\s*(.+)$`).FindStringSubmatch(fullLine); nameMatch != nil {
-				name = strings.TrimSpace(nameMatch[1])
-				continue
-			}
-		} else {
-			// Handle regular cron lines
-			splitLine := strings.Fields(fullLine)
-			splitLineLen := len(splitLine)
-			if splitLineLen == 1 && strings.Contains(splitLine[0], "=") {
-				// Handling for environment variables... we're looking for timezone declarations
-				if splitExport := strings.Split(splitLine[0], "="); splitExport[0] == "TZ" || splitExport[0] == "CRON_TZ" {
-					c.TimezoneLocationName = &TimezoneLocationName{splitExport[1]}
-				}
-			} else if splitLineLen > 0 && strings.HasPrefix(splitLine[0], "@") {
-				// Handling for special cron @keyword
-				cronExpression = splitLine[0]
-				command = splitLine[1:]
-			} else if splitLineLen >= 6 {
-				// Handling for javacron-style 6 item cron expressions
-				c.UsesSixFieldExpressions = splitLineLen >= 7 && isSixFieldCronExpression(splitLine)
+			// Remove the # and trim whitespace before splitting
+			fullLine = strings.TrimSpace(strings.TrimPrefix(fullLine, "#"))
+			isComment = true
+		}
 
-				if c.UsesSixFieldExpressions {
-					cronExpression = strings.Join(splitLine[0:6], " ")
-					command = splitLine[6:]
-				} else {
-					cronExpression = strings.Join(splitLine[0:5], " ")
-					command = splitLine[5:]
-				}
+		splitLine := strings.Fields(fullLine)
+		splitLineLen := len(splitLine)
+		if splitLineLen == 1 && strings.Contains(splitLine[0], "=") {
+			// Handling for environment variables... we're looking for timezone declarations
+			if splitExport := strings.Split(splitLine[0], "="); splitExport[0] == "TZ" || splitExport[0] == "CRON_TZ" {
+				c.TimezoneLocationName = &TimezoneLocationName{splitExport[1]}
 			}
+		} else if splitLineLen > 0 && strings.HasPrefix(splitLine[0], "@") {
+			// Handling for special cron @keyword
+			cronExpression = splitLine[0]
+			command = splitLine[1:]
+		} else if splitLineLen >= 6 {
+			// Handling for javacron-style 6 item cron expressions
+			c.UsesSixFieldExpressions = splitLineLen >= 7 && isSixFieldCronExpression(splitLine)
 
-			// Try to determine if the command begins with a "run as" user designation. This is required for system-level crontabs.
-			// Basically, just see if the first word of the command is a valid user name. This is how vixie cron does it.
-			// https://github.com/rhuitl/uClinux/blob/master/user/vixie-cron/entry.c#L224
-			if runtime.GOOS != "windows" && len(command) > 1 && c.IsRoot() {
-				idOrError, _ := exec.Command("id", "-u", command[0]).CombinedOutput()
-				if _, err := strconv.Atoi(strings.TrimSpace(string(idOrError))); err == nil {
-					runAs = command[0]
-					command = command[1:]
-				}
+			if c.UsesSixFieldExpressions {
+				cronExpression = strings.Join(splitLine[0:6], " ")
+				command = splitLine[6:]
+			} else {
+				cronExpression = strings.Join(splitLine[0:5], " ")
+				command = splitLine[5:]
 			}
 		}
+
+		// Try to determine if the command begins with a "run as" user designation. This is required for system-level crontabs.
+		// Basically, just see if the first word of the command is a valid user name. This is how vixie cron does it.
+		// https://github.com/rhuitl/uClinux/blob/master/user/vixie-cron/entry.c#L224
+		if runtime.GOOS != "windows" && len(command) > 1 && c.IsRoot() {
+			idOrError, _ := exec.Command("id", "-u", command[0]).CombinedOutput()
+			if _, err := strconv.Atoi(strings.TrimSpace(string(idOrError))); err == nil {
+				runAs = command[0]
+				command = command[1:]
+			}
+		}
+
 		// Create a Line struct with details for this line so we can re-create it later
 		line := Line{
+			IsComment:      isComment,
+			IsJob:          len(command) > 0 && len(cronExpression) > 0,
 			Name:           name,
 			CronExpression: cronExpression,
 			FullLine:       fullLine,
@@ -268,6 +276,8 @@ func (c Crontab) load() ([]string, int, error) {
 }
 
 type Line struct {
+	IsComment      bool
+	IsJob          bool
 	Name           string
 	FullLine       string
 	LineNumber     int
@@ -281,7 +291,7 @@ type Line struct {
 
 func (l Line) IsMonitorable() bool {
 	// Users don't want to see "plumbing" cron jobs on their dashboard...
-	return len(l.CronExpression) > 0 && len(l.CommandToRun) > 0 && !l.IsMetaCronJob() && !l.HasLegacyIntegration()
+	return !l.IsComment && l.IsJob && !l.IsMetaCronJob() && !l.HasLegacyIntegration()
 }
 
 func (l Line) IsAutoDiscoverCommand() bool {
@@ -303,45 +313,46 @@ func (l Line) CommandIsComplex() bool {
 
 func (l Line) Write() string {
 	var outputLines []string
+	var lineParts []string
 
 	// Add the name comment if present
 	if len(l.Name) > 0 {
 		outputLines = append(outputLines, fmt.Sprintf("# Name: %s", l.Name))
 	}
 
-	// If not monitorable or has existing code, just return the original line with name comment
 	if !l.IsMonitorable() {
-		if len(outputLines) > 0 {
-			outputLines = append(outputLines, l.FullLine)
-			return strings.Join(outputLines, "\n")
+		// If this line is marked as a comment, ensure it is commented out in the crontab
+		if l.IsComment && !strings.HasPrefix(l.FullLine, "#") {
+			lineParts = append(lineParts, "#")
 		}
-		return l.FullLine
-	}
+		lineParts = append(lineParts, l.FullLine)
 
-	var lineParts []string
-	lineParts = append(lineParts, l.CronExpression)
-
-	if !l.Crontab.IsUserCrontab {
-		lineParts = append(lineParts, l.RunAs)
-	}
-
-	if len(l.Mon.Key) > 0 {
-		lineParts = append(lineParts, "cronitor")
-		if l.Mon.NoStdoutPassthru {
-			lineParts = append(lineParts, "--no-stdout")
-		}
-		lineParts = append(lineParts, "exec")
-		lineParts = append(lineParts, l.Mon.Attributes.Code)
-
-		if len(l.CommandToRun) > 0 {
-			if l.CommandIsComplex() {
-				lineParts = append(lineParts, "\""+strings.Replace(l.CommandToRun, "\"", "\\\"", -1)+"\"")
-			} else {
-				lineParts = append(lineParts, l.CommandToRun)
-			}
-		}
 	} else {
-		lineParts = append(lineParts, l.CommandToRun)
+
+		lineParts = append(lineParts, l.CronExpression)
+
+		if !l.Crontab.IsUserCrontab {
+			lineParts = append(lineParts, l.RunAs)
+		}
+
+		if code := l.GetCode(); code != "" {
+			lineParts = append(lineParts, "cronitor")
+			if l.Mon.NoStdoutPassthru {
+				lineParts = append(lineParts, "--no-stdout")
+			}
+			lineParts = append(lineParts, "exec")
+			lineParts = append(lineParts, code)
+
+			if len(l.CommandToRun) > 0 {
+				if l.CommandIsComplex() {
+					lineParts = append(lineParts, "\""+strings.Replace(l.CommandToRun, "\"", "\\\"", -1)+"\"")
+				} else {
+					lineParts = append(lineParts, l.CommandToRun)
+				}
+			}
+		} else {
+			lineParts = append(lineParts, l.CommandToRun)
+		}
 	}
 
 	outputLines = append(outputLines, strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1))
@@ -365,6 +376,20 @@ func (l Line) Key(CanonicalPath string) string {
 	hostname, _ := os.Hostname()
 	data := []byte(fmt.Sprintf("%s-%s-%s-%s", hostname, CommandToRun, CronExpression, RunAs))
 	return fmt.Sprintf("%x", sha1.Sum(data))
+}
+
+func (l Line) GetCode() string {
+	// Existing integrations will have a code already in the Line struct
+	if l.Code != "" {
+		return l.Code
+	}
+
+	// New integrations will get it from the Monitor struct
+	if l.Mon.Code != "" {
+		return l.Mon.Code
+	}
+
+	return ""
 }
 
 func createAutoDiscoverLine(crontab *Crontab) *Line {
