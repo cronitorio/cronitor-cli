@@ -1,7 +1,8 @@
 import React from 'react';
 import useSWR from 'swr';
-import { CheckCircleIcon, XCircleIcon, PencilIcon, ArrowPathIcon, BellSlashIcon } from '@heroicons/react/24/outline';
+import { CheckCircleIcon, XCircleIcon, PencilIcon, ArrowPathIcon, BellSlashIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import guru from '../lib/guru';
+import cronitorScreenshot from '../assets/cronitor-screenshot.png';
 
 const fetcher = url => fetch(url).then(res => res.json());
 
@@ -18,25 +19,106 @@ function Toast({ message, onClose, type = 'error' }) {
   );
 }
 
+function LearnMoreModal({ onClose }) {
+  const modalRef = React.useRef(null);
+
+  React.useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    const handleClickOutside = (e) => {
+      if (modalRef.current && !modalRef.current.contains(e.target)) {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    document.addEventListener('mousedown', handleClickOutside);
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style={{ margin: 0 }}>
+      <div ref={modalRef} className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full mx-4 relative">
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 text-gray-400 hover:text-gray-500 dark:text-gray-500 dark:hover:text-gray-400 z-10"
+        >
+          <XCircleIcon className="h-6 w-6" />
+        </button>
+        <div className="p-8">
+          <div className="flex">
+            <div className="w-2/3 pr-8">
+              <h2 className="text-2xl font-black text-gray-900 dark:text-white mb-8">Monitor your jobs with Cronitor</h2>
+              <ul className="space-y-6">
+                <li className="flex items-start">
+                  <CheckCircleIcon className="h-7 w-7 text-green-500 mr-3 flex-shrink-0 mt-0.5" />
+                  <span className="text-lg text-gray-700 dark:text-gray-300 leading-relaxed">Instant alerts if a job fails or never starts.</span>
+                </li>
+                <li className="flex items-start">
+                  <CheckCircleIcon className="h-7 w-7 text-green-500 mr-3 flex-shrink-0 mt-0.5" />
+                  <span className="text-lg text-gray-700 dark:text-gray-300 leading-relaxed">See the status, metrics and logs from every job.</span>
+                </li>
+                <li className="flex items-start">
+                  <CheckCircleIcon className="h-7 w-7 text-green-500 mr-3 flex-shrink-0 mt-0.5" />
+                  <span className="text-lg text-gray-700 dark:text-gray-300 leading-relaxed">Track performance with a full year of data retention.</span>
+                </li>
+                <li className="flex items-start">
+                  <CheckCircleIcon className="h-7 w-7 text-green-500 mr-3 flex-shrink-0 mt-0.5" />
+                  <span className="text-lg text-gray-700 dark:text-gray-300 leading-relaxed">Start for free, no credit card required.</span>
+                </li>
+              </ul>
+              <div className="mt-10">
+                <a
+                  href="https://cronitor.io/cron-job-monitoring?utm_source=cli&utm_campaign=modal&utm_content=1"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                >
+                  Learn More
+                </a>
+              </div>
+            </div>
+            <div className="w-1/3 overflow-hidden relative">
+              <a
+                href="https://cronitor.io/cron-job-monitoring?utm_source=cli&utm_campaign=modal&utm_content=1"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block"
+              >
+                <img
+                  src={cronitorScreenshot}
+                  alt="Cronitor Dashboard"
+                  className="w-full h-auto"
+                  style={{ 
+                    objectPosition: 'left center',
+                    width: '167%',
+                    maxWidth: 'none'
+                  }}
+                />
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StatusIndicator({ job, mutate, allJobs }) {
   const [isMonitored, setIsMonitored] = React.useState(job.is_monitored);
   const [isLoading, setIsLoading] = React.useState(false);
+  const [showLearnMore, setShowLearnMore] = React.useState(false);
 
   const handleToggle = async () => {
-    const newMonitoredState = !isMonitored;
-    
-    // Optimistic update
-    setIsMonitored(newMonitoredState);
-    
-    // Optimistically update the jobs list
-    const optimisticData = allJobs.map(j => {
-      if (j.key === job.key) {
-        return { ...j, is_monitored: newMonitoredState };
-      }
-      return j;
-    });
-    mutate(optimisticData, false);
-
+    setIsLoading(true);
     try {
       const response = await fetch('/api/jobs', {
         method: 'PUT',
@@ -50,7 +132,7 @@ function StatusIndicator({ job, mutate, allJobs }) {
           run_as_user: job.run_as_user,
           expression: job.expression,
           timezone: job.timezone,
-          is_monitored: newMonitoredState,
+          is_monitored: !isMonitored,
         }),
       });
 
@@ -58,19 +140,11 @@ function StatusIndicator({ job, mutate, allJobs }) {
         throw new Error('Failed to update job status');
       }
 
-      // Revalidate to ensure we have the latest data
-      mutate();
+      setIsMonitored(!isMonitored);
     } catch (error) {
-      // Revert optimistic update on error
-      setIsMonitored(!newMonitoredState);
-      const revertedData = allJobs.map(j => {
-        if (j.key === job.key) {
-          return { ...j, is_monitored: !newMonitoredState };
-        }
-        return j;
-      });
-      mutate(revertedData, false);
       console.error('Error updating job status:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -110,30 +184,40 @@ function StatusIndicator({ job, mutate, allJobs }) {
             }`}
           />
         </button>
-        {isMonitored && (job.paused || job.disabled) && (
-          <a
-            href={`https://cronitor.io/app/monitors/${job.code}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center px-2.5 py-0.5 text-sm font-medium bg-red-100 text-red-600 dark:bg-gray-700 dark:text-red-400 rounded-l-full border-r border-gray-300 dark:border-gray-600"
-            title="Alerts: Off"
+        {isMonitored ? (
+          <>
+            {job.paused || job.disabled ? (
+              <a
+                href={`https://cronitor.io/app/monitors/${job.code}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-2.5 py-0.5 text-sm font-medium bg-red-100 text-red-600 dark:bg-gray-700 dark:text-red-400 rounded-l-full border-r border-gray-300 dark:border-gray-600"
+                title="Alerts: Off"
+              >
+                <BellSlashIcon className="h-5 w-5" />
+              </a>
+            ) : null}
+            <a
+              href={`https://cronitor.io/app/monitors/${job.code}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`inline-flex items-center px-2.5 py-0.5 text-sm font-medium ${statusColor} ${(job.paused || job.disabled) ? 'rounded-l-none' : 'rounded-l-full'} rounded-r-full`}
+            >
+              {statusText === 'Healthy' && <CheckCircleIcon className="h-5 w-5 mr-1" />}
+              {statusText === 'Failing' && <XCircleIcon className="h-5 w-5 mr-1" />}
+              <span>{statusText}</span>
+            </a>
+          </>
+        ) : (
+          <button
+            onClick={() => setShowLearnMore(true)}
+            className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
           >
-            <BellSlashIcon className="h-5 w-5" />
-          </a>
-        )}
-        {isMonitored && (
-          <a
-            href={`https://cronitor.io/app/monitors/${job.code}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`inline-flex items-center px-2.5 py-0.5 text-sm font-medium ${statusColor} ${(job.paused || job.disabled) ? 'rounded-l-none' : 'rounded-l-full'} rounded-r-full`}
-          >
-            {statusText === 'Healthy' && <CheckCircleIcon className="h-5 w-5 mr-1" />}
-            {statusText === 'Failing' && <XCircleIcon className="h-5 w-5 mr-1" />}
-            <span>{statusText}</span>
-          </a>
+            Learn More
+          </button>
         )}
       </div>
+      {showLearnMore && <LearnMoreModal onClose={() => setShowLearnMore(false)} />}
     </div>
   );
 }
@@ -486,37 +570,6 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
     } catch (error) {
       console.error('Error parsing schedule:', error);
       return 'Invalid schedule format';
-    }
-  };
-
-  const handleToggle = async () => {
-    setIsLoading(true);
-    try {
-      const response = await fetch('/api/jobs', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          key: job.key,
-          code: job.code,
-          name: job.name,
-          run_as_user: job.run_as_user,
-          expression: job.expression,
-          timezone: job.timezone,
-          is_monitored: !isMonitored,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to update job status');
-      }
-
-      setIsMonitored(!isMonitored);
-    } catch (error) {
-      console.error('Error updating job status:', error);
-    } finally {
-      setIsLoading(false);
     }
   };
 
