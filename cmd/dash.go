@@ -336,7 +336,7 @@ type Job struct {
 	Code        string        `json:"code"`
 	Key         string        `json:"key"`
 	Instances   []JobInstance `json:"instances"`
-	Suspended   bool          `json:"suspended"`
+	Suspended   *bool         `json:"suspended"`
 	PauseHours  string        `json:"pause_hours"`
 }
 
@@ -424,7 +424,7 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 				Code:        line.Code,
 				Key:         line.Key(crontab.CanonicalName()),
 				Instances:   findInstances(commandHistory.GetCommands(line.Key(crontab.CanonicalName()), line.CommandToRun)),
-				Suspended:   line.IsComment,
+				Suspended:   &line.IsComment,
 			}
 
 			jobs = append(jobs, job)
@@ -495,13 +495,13 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 	hasChanges := false
 
 	// Handle suspended status
-	if job.Suspended != foundLine.IsComment {
-		foundLine.IsComment = job.Suspended
+	if job.Suspended != nil && *job.Suspended != foundLine.IsComment {
+		foundLine.IsComment = *job.Suspended
 		hasChanges = true
 
 		// If the job is monitored, handle pause/unpause
 		if job.IsMonitored {
-			if job.Suspended {
+			if *job.Suspended {
 				// Pause the monitor when suspending
 				if err := getCronitorApi().PauseMonitor(job.Code, job.PauseHours); err != nil {
 					http.Error(w, fmt.Sprintf("Failed to pause monitor: %v", err), http.StatusInternalServerError)

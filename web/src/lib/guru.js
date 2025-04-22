@@ -1,5 +1,8 @@
 "use strict";
 
+const normalize = require('./normalize');
+const nextDate = require('./nextDate');
+
 //
 // Normalize the input
 //
@@ -58,7 +61,7 @@ function substituteSpecialStrings(scheduleExpression) {
   return substitution !== undefined ? substitution : [scheduleExpression];
 }
 
-function prenormalize(scheduleExpression) {
+function prenormalizeSchedule(scheduleExpression) {
   const originalParts = scheduleExpression
     .trim()
     .split(/\s+/)
@@ -281,8 +284,50 @@ function describe(prenormalizedSchedule) {
   };
 }
 
+export function getNextExecutionTimes(cronExpression, options = {}) {
+  const {
+    startDate = new Date(),
+    count = 10,
+    timezone = 'UTC'  // Default to UTC
+  } = options;
+
+  // Convert start date to UTC if it's not already
+  const utcStartDate = new Date(startDate.toISOString());
+
+  // Normalize the cron expression
+  const prenormalized = prenormalizeSchedule(cronExpression);
+  const normalized = normalize(prenormalized);
+  
+  if (normalized.errors) {
+    throw new Error('Invalid cron expression');
+  }
+
+  // Calculate next execution times
+  const times = [];
+  let currentDate = utcStartDate;
+  
+  for (let i = 0; i < count; i++) {
+    const next = nextDate(normalized, currentDate);
+    if (!next) {
+      break; // No more valid execution times
+    }
+    times.push(next);
+    currentDate = new Date(next.getTime() + 1); // Add 1ms to get next time
+  }
+  
+  // Convert times to specified timezone if needed
+  if (timezone !== 'UTC') {
+    return times.map(date => {
+      const localDate = new Date(date.toLocaleString('en-US', { timeZone: timezone }));
+      return localDate;
+    });
+  }
+  
+  return times;
+}
+
 export default function (cron, timezone) {
-  const details = describe(prenormalize(cron));
+  const details = describe(prenormalizeSchedule(cron));
   const description = details.isTime
     ? `${details.start || ""} ${details.hours || ""}:${details.minutes || ""} ${timezone || ""} ${
         details.dates || ""

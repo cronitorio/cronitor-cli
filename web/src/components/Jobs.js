@@ -1,10 +1,21 @@
 import React from 'react';
 import useSWR from 'swr';
 import { CheckCircleIcon, XCircleIcon, PencilIcon, ArrowPathIcon, BellSlashIcon, XMarkIcon } from '@heroicons/react/24/outline';
-import guru from '../lib/guru';
+import guru, { getNextExecutionTimes } from '../lib/guru';
 import cronitorScreenshot from '../assets/cronitor-screenshot.png';
 
 const fetcher = url => fetch(url).then(res => res.json());
+
+function CloseButton({ onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="absolute top-0 right-8 bg-white dark:bg-gray-800 px-3 py-0 rounded-b-sm border border-t-0 border-gray-300 dark:border-gray-600 text-gray-400 hover:text-gray-500 dark:text-gray-400 dark:hover:text-gray-300 z-10 text-xl leading-none"
+    >
+      ×
+    </button>
+  );
+}
 
 function Toast({ message, onClose, type = 'error' }) {
   const bgColor = type === 'error' ? 'bg-red-500' : 'bg-green-500';
@@ -47,12 +58,7 @@ function LearnMoreModal({ onClose }) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style={{ margin: 0 }}>
       <div ref={modalRef} className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full mx-4 relative">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-gray-500 dark:text-gray-500 dark:hover:text-gray-400 z-10"
-        >
-          <XCircleIcon className="h-6 w-6" />
-        </button>
+        <CloseButton onClick={onClose} />
         <div className="p-8">
           <div className="flex">
             <div className="w-2/3 pr-8">
@@ -238,8 +244,6 @@ function StatusIndicator({ job, mutate, allJobs }) {
               className={`inline-flex items-center px-2.5 py-0.5 text-sm font-medium ${statusColor} ${(job.paused || job.disabled) ? 'rounded-l-none' : 'rounded-l-full'} rounded-r-full`}
               title={statusTitle}
             >
-              {statusText === 'Healthy' && <CheckCircleIcon className="h-5 w-5 mr-1" />}
-              {statusText === 'Failing' && <XCircleIcon className="h-5 w-5 mr-1" />}
               <span>{statusText}</span>
             </StatusTag>
           </>
@@ -266,6 +270,8 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
   const [isEditingSchedule, setIsEditingSchedule] = React.useState(false);
   const [editedSchedule, setEditedSchedule] = React.useState(initialJob.expression || '');
   const [showInstances, setShowInstances] = React.useState(false);
+  const [showNextTimes, setShowNextTimes] = React.useState(false);
+  const [nextExecutionTimes, setNextExecutionTimes] = React.useState([]);
   const [killingPids, setKillingPids] = React.useState(new Set());
   const [isKillingAll, setIsKillingAll] = React.useState(false);
   const [error, setError] = React.useState(null);
@@ -279,12 +285,74 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
 
   // Get the current job data from allJobs
   const job = allJobs.find(j => j.key === initialJob.key) || initialJob;
+  const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const showTimezoneTooltip = job.timezone !== browserTimezone;
 
   const { mutate: jobsMutate, data: jobs } = useSWR('/api/jobs', fetcher, {
     refreshInterval: 5000, // Refresh every 5 seconds
     revalidateOnFocus: true, // Refresh when tab regains focus
   });
   const [isScheduleValid, setIsScheduleValid] = React.useState(true);
+
+  const getTimezoneOffset = (date) => {
+    const browserDate = new Date(date.toLocaleString('en-US', { timeZone: browserTimezone }));
+    const jobDate = new Date(date.toLocaleString('en-US', { timeZone: job.timezone }));
+    const diff = jobDate.getTime() - browserDate.getTime();
+    const hours = Math.abs(Math.floor(diff / (1000 * 60 * 60)));
+    const minutes = Math.abs(Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)));
+    const sign = diff > 0 ? '+' : '-';
+    return {
+      offset: `${sign}${hours}:${minutes.toString().padStart(2, '0')}`,
+      diff: diff
+    };
+  };
+
+  const applyOffset = (date, offset) => {
+    const newDate = new Date(date.getTime() - offset);
+    return newDate.toLocaleString('en-US', { 
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: true,
+      timeZone: 'UTC'
+    });
+  };
+
+  // Calculate next execution times when schedule changes
+  React.useEffect(() => {
+    if (job.expression && isScheduleValid) {
+      try {
+        const times = getNextExecutionTimes(job.expression, {
+          startDate: new Date(),
+          count: 20,
+          timezone: 'UTC'
+        });
+        setNextExecutionTimes(times);
+      } catch (error) {
+        console.error('Error calculating next execution times:', error);
+        setNextExecutionTimes([]);
+      }
+    }
+  }, [job.expression, isScheduleValid]);
+
+  // Calculate next execution times when editing schedule
+  React.useEffect(() => {
+    if (isEditingSchedule && editedSchedule && isScheduleValid) {
+      try {
+        const times = getNextExecutionTimes(editedSchedule, {
+          startDate: new Date(),
+          count: 20,
+          timezone: 'UTC'
+        });
+        setNextExecutionTimes(times);
+      } catch (error) {
+        console.error('Error calculating next execution times:', error);
+        setNextExecutionTimes([]);
+      }
+    }
+  }, [isEditingSchedule, editedSchedule, isScheduleValid]);
 
   const showToast = (message, type = 'error') => {
     setToastMessage(message);
@@ -758,12 +826,89 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
                       : 'text-pink-500 dark:text-pink-400'
                   }`}>
                     {getScheduleDescription(editedSchedule || job.expression, job.timezone)} <span className="text-gray-400 dark:text-gray-500">as "{job.run_as_user || 'default'}"</span>
+                    {nextExecutionTimes.length > 0 ? (
+                      <span className="text-gray-400 dark:text-gray-500">
+                        {' '}<span className="text-gray-700 dark:text-gray-200 ml-4">Next at</span>{' '}
+                        <span className="relative">
+                          <span 
+                            className="text-gray-700 dark:text-gray-200 cursor-pointer hover:underline"
+                            onMouseEnter={(e) => {
+                              const tooltip = e.currentTarget.nextElementSibling;
+                              if (showTimezoneTooltip) {
+                                tooltip.classList.remove('hidden');
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              const tooltip = e.currentTarget.nextElementSibling;
+                              if (showTimezoneTooltip) {
+                                tooltip.classList.add('hidden');
+                              }
+                            }}
+                          >
+                            {nextExecutionTimes[0].toLocaleString('en-US', { timeZone: 'UTC' })}
+                          </span>
+                          {showTimezoneTooltip && (
+                            <div className="absolute left-0 bottom-full mb-2 hidden bg-gray-900 text-white text-xs rounded py-1 px-2 whitespace-nowrap z-10">
+                              {applyOffset(nextExecutionTimes[0], getTimezoneOffset(nextExecutionTimes[0]).diff)} ({getTimezoneOffset(nextExecutionTimes[0]).offset} from local)
+                            </div>
+                          )}
+                        </span>
+                        <button
+                          onClick={() => setShowNextTimes(!showNextTimes)}
+                          className="ml-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400"
+                        >
+                          {showNextTimes ? 'Hide More' : 'Show More'}
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 dark:text-gray-500">
+                        {' '}No upcoming executions
+                      </span>
+                    )}
                   </div>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
+
+        {/* Next Execution Times Table */}
+        {showNextTimes && nextExecutionTimes.length > 0 && (
+          <div className="mt-2">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead>
+                <tr>
+                  <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Job Time
+                  </th>
+                  <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Browser Time ({browserTimezone})
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                {nextExecutionTimes.slice(1, 11).map((time, index) => (
+                  <tr key={index}>
+                    <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                      {time.toLocaleString('en-US', { 
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: 'numeric',
+                        minute: 'numeric',
+                        hour12: true,
+                        timeZone: 'UTC'
+                      })}
+                    </td>
+                    <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                      {applyOffset(time, getTimezoneOffset(time).diff)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Line 4: Monitoring and Location Table */}
         <div className="group relative">
@@ -877,13 +1022,8 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
       {/* Suspended Job Overlay */}
       {showSuspendedOverlay && (
         <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center z-10">
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-lg w-full mx-4 relative">
-            <button
-              onClick={() => setShowSuspendedOverlay(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-500 dark:text-gray-500 dark:hover:text-gray-400"
-            >
-              <XCircleIcon className="h-6 w-6" />
-            </button>
+          <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl max-w-lg w-full mx-4 relative">
+            <CloseButton onClick={() => setShowSuspendedOverlay(false)} />
             <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
               {job.suspended ? 'Suspended Job' : 'Scheduled Job'}
             </h3>
@@ -994,7 +1134,7 @@ export default function Jobs() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-6">Jobs</h1>
+      <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-6 -mt-1.5">Jobs</h1>
       <div className="space-y-4">
         {jobs.map((job, index) => (
           <JobCard key={index} job={job} mutate={mutate} allJobs={jobs} />

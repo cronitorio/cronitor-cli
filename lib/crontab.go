@@ -297,7 +297,7 @@ type Line struct {
 
 func (l Line) IsMonitorable() bool {
 	// Users don't want to see "plumbing" cron jobs on their dashboard...
-	return !l.IsComment && l.IsJob && !l.IsMetaCronJob() && !l.HasLegacyIntegration()
+	return l.IsJob && !l.IsMetaCronJob() && !l.HasLegacyIntegration()
 }
 
 func (l Line) IsAutoDiscoverCommand() bool {
@@ -327,13 +327,12 @@ func (l Line) Write() string {
 	}
 
 	if !l.IsMonitorable() {
+		lineParts = append(lineParts, l.FullLine)
+	} else {
 		// If this line is marked as a comment, ensure it is commented out in the crontab
-		if l.IsComment && !strings.HasPrefix(l.FullLine, "#") {
+		if l.IsComment {
 			lineParts = append(lineParts, "#")
 		}
-		lineParts = append(lineParts, l.FullLine)
-
-	} else {
 
 		lineParts = append(lineParts, l.CronExpression)
 
