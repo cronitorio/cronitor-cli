@@ -419,7 +419,7 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 				Timezone:    timezone,
 				Passing:     line.Mon.Passing,
 				Disabled:    line.Mon.Disabled,
-				Paused:      line.Mon.Paused,
+				Paused:      line.Mon.Paused != nil && *line.Mon.Paused,
 				Initialized: line.Mon.Initialized,
 				Code:        line.Code,
 				Key:         line.Key(crontab.CanonicalName()),
@@ -527,14 +527,27 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 			Type:        "job",
 			Platform:    lib.CRON,
 			Timezone:    job.Timezone,
-			Code:        foundLine.Code,
-			Key:         foundLine.Key(foundCrontab.CanonicalName()),
+			Key:         foundLine.Code,
+		}
+
+		// If we're enabling monitoring for the first time, we won't have a code yet, use the key instead
+		// Ensure monitor is unpaused -- important if they have previously disabled monitoring and then re-enabled it
+		if foundLine.Code == "" {
+			monitor.Key = foundLine.Key(foundCrontab.CanonicalName())
+			paused := false
+			monitor.Paused = &paused
+			fmt.Println("Setting monitor key to", monitor.Key)
+			fmt.Println("Setting monitor paused to", *monitor.Paused)
 		}
 
 	} else if foundLine.Code != "" {
+		if err := getCronitorApi().PauseMonitor(foundLine.Code, ""); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to pause monitor: %v", err), http.StatusInternalServerError)
+			return
+		}
+
 		foundCrontab.Lines[foundLineIndex].Code = ""
 		hasChanges = true
-		// TODO: Use cronitor API to pause the monitor
 	}
 
 	// Handle name update
@@ -563,7 +576,6 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 	// Handle schedule update
 	if job.Expression != "" && foundLine.CronExpression != job.Expression {
 		foundCrontab.Lines[foundLineIndex].CronExpression = job.Expression
-		foundCrontab.Lines[foundLineIndex].FullLine = "" // Clear FullLine to force regeneration
 		hasChanges = true
 	}
 
@@ -587,7 +599,7 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 
 		if updatedMonitor, exists := updatedMonitors[monitor.Key]; exists {
 			foundCrontab.Lines[foundLineIndex].Mon = *updatedMonitor
-			foundCrontab.Lines[foundLineIndex].Code = updatedMonitor.Code
+			foundCrontab.Lines[foundLineIndex].Code = updatedMonitor.Attributes.Code
 			hasChanges = true
 		}
 	}
@@ -610,7 +622,7 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func findInstances(commandStrings []string) []JobInstance {
-	cmd := exec.Command("ps", "-eo", "pid,lstart,args")
+	cmd := exec.Command("ps", "-eo", "pgid,lstart,args")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -620,26 +632,31 @@ func findInstances(commandStrings []string) []JobInstance {
 
 	lines := strings.Split(out.String(), "\n")
 	instances := make([]JobInstance, 0)
-	seenPIDs := make(map[string]bool) // To avoid duplicate entries
+	seenPGIDs := make(map[string]bool) // To avoid duplicate entries
 
 	for _, line := range lines {
 		fields := strings.Fields(line)
 		if len(fields) < 8 {
 			continue
 		}
-		pid := fields[0]
+		pgid := fields[0] // Process group ID
 		// The start time is fields[1:6] (day month date time year)
 		started := strings.Join(fields[1:6], " ")
 		args := strings.Join(fields[6:], " ")
 
+		// Skip if this is a cronitor exec command
+		if strings.Contains(args, "cronitor exec") {
+			continue
+		}
+
 		// Check if any of the command strings match
 		for _, cmdStr := range commandStrings {
-			if strings.Contains(args, cmdStr) && !seenPIDs[pid] {
+			if strings.Contains(args, cmdStr) && !seenPGIDs[pgid] {
 				instances = append(instances, JobInstance{
-					PID:     pid,
+					PID:     pgid, // Now storing process group ID instead of PID
 					Started: started,
 				})
-				seenPIDs[pid] = true
+				seenPGIDs[pgid] = true
 				break
 			}
 		}
@@ -671,18 +688,19 @@ func handleKillJobs(w http.ResponseWriter, r *http.Request) {
 
 	var errors []KillError
 
-	for _, pid := range request.PIDs {
-		cmd := exec.Command("kill", "-9", pid)
+	for _, pgid := range request.PIDs {
+		// Use kill with -9 to send SIGKILL to the entire process group
+		cmd := exec.Command("kill", "-9", "-"+pgid) // The - before pgid indicates it's a process group
 		if err := cmd.Run(); err != nil {
-			// Check if the process has already exited
+			// Check if the process group has already exited
 			if strings.Contains(err.Error(), "No such process") {
 				continue
 			}
 			// If it's a permission error, add it to our error list
 			if strings.Contains(err.Error(), "Operation not permitted") {
 				errors = append(errors, KillError{
-					PID:   pid,
-					Error: "Insufficient privileges to kill process",
+					PID:   pgid,
+					Error: "Insufficient privileges to kill process group",
 				})
 			}
 		}

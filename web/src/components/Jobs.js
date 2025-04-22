@@ -113,12 +113,21 @@ function LearnMoreModal({ onClose }) {
 }
 
 function StatusIndicator({ job, mutate, allJobs }) {
-  const [isMonitored, setIsMonitored] = React.useState(job.is_monitored);
   const [isLoading, setIsLoading] = React.useState(false);
   const [showLearnMore, setShowLearnMore] = React.useState(false);
 
   const handleToggle = async () => {
     setIsLoading(true);
+    
+    // Optimistic update
+    const optimisticData = allJobs.map(j => {
+      if (j.key === job.key) {
+        return { ...j, is_monitored: !job.is_monitored };
+      }
+      return j;
+    });
+    mutate(optimisticData, false);
+
     try {
       const response = await fetch('/api/jobs', {
         method: 'PUT',
@@ -132,7 +141,7 @@ function StatusIndicator({ job, mutate, allJobs }) {
           run_as_user: job.run_as_user,
           expression: job.expression,
           timezone: job.timezone,
-          is_monitored: !isMonitored,
+          is_monitored: !job.is_monitored,
         }),
       });
 
@@ -140,8 +149,17 @@ function StatusIndicator({ job, mutate, allJobs }) {
         throw new Error('Failed to update job status');
       }
 
-      setIsMonitored(!isMonitored);
+      // Revalidate to ensure we have the latest data
+      mutate();
     } catch (error) {
+      // Revert optimistic update on error
+      const revertedData = allJobs.map(j => {
+        if (j.key === job.key) {
+          return { ...j, is_monitored: job.is_monitored };
+        }
+        return j;
+      });
+      mutate(revertedData, false);
       console.error('Error updating job status:', error);
     } finally {
       setIsLoading(false);
@@ -150,23 +168,44 @@ function StatusIndicator({ job, mutate, allJobs }) {
 
   let statusColor = '';
   let statusText = '';
+  let statusTitle = '';
 
   if (job.disabled) {
     statusColor = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
     statusText = 'Upgrade to activate';
+    statusTitle = 'You have exceeded your free tier limit. Upgrade to monitor all your jobs.';
   } else if (!!job.code && !job.initialized) {
     statusColor = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
     statusText = 'Waiting';
+    statusTitle = 'Monitoring will begin after the next scheduled run.';
   } else if (!!job.code && !job.passing) {
     statusColor = 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400';
     statusText = 'Failing';
+    statusTitle = 'There is a problem with this job. Check Cronitor for more details.';
   } else if (!!job.code) {
     statusColor = 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400';
     statusText = 'Healthy';
+    statusTitle = 'This job is running as expected.';
   } else {
     statusColor = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
-    statusText = 'Syncing...';    
+    statusText = 'Syncing...';
   }
+
+  const StatusTag = ({ children, ...props }) => {
+    if (job.code) {
+      return (
+        <a
+          href={`https://cronitor.io/app/monitors/${job.code}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          {...props}
+        >
+          {children}
+        </a>
+      );
+    }
+    return <div {...props}>{children}</div>;
+  };
 
   return (
     <div className="flex items-center justify-between space-x-4">
@@ -175,43 +214,40 @@ function StatusIndicator({ job, mutate, allJobs }) {
           onClick={handleToggle}
           disabled={isLoading}
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 mr-4 ${
-            isMonitored ? 'bg-green-500' : 'bg-red-500'
+            job.is_monitored ? 'bg-green-500' : 'bg-red-500'
           }`}
+          title={job.is_monitored ? 'Monitoring enabled' : 'Monitoring disabled'}
         >
           <span
             className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-              isMonitored ? 'translate-x-6' : 'translate-x-1'
+              job.is_monitored ? 'translate-x-6' : 'translate-x-1'
             }`}
           />
         </button>
-        {isMonitored ? (
+        {job.is_monitored ? (
           <>
             {job.paused || job.disabled ? (
-              <a
-                href={`https://cronitor.io/app/monitors/${job.code}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center px-2.5 py-0.5 text-sm font-medium bg-red-100 text-red-600 dark:bg-gray-700 dark:text-red-400 rounded-l-full border-r border-gray-300 dark:border-gray-600"
+              <StatusTag
+                className="inline-flex items-center px-2.5 py-0.5 text-sm font-medium bg-gray-100 text-red-600 dark:bg-gray-700 dark:text-red-400 rounded-l-full border-r border-white dark:border-gray-600"
                 title="Alerts: Off"
               >
                 <BellSlashIcon className="h-5 w-5" />
-              </a>
+              </StatusTag>
             ) : null}
-            <a
-              href={`https://cronitor.io/app/monitors/${job.code}`}
-              target="_blank"
-              rel="noopener noreferrer"
+            <StatusTag
               className={`inline-flex items-center px-2.5 py-0.5 text-sm font-medium ${statusColor} ${(job.paused || job.disabled) ? 'rounded-l-none' : 'rounded-l-full'} rounded-r-full`}
+              title={statusTitle}
             >
               {statusText === 'Healthy' && <CheckCircleIcon className="h-5 w-5 mr-1" />}
               {statusText === 'Failing' && <XCircleIcon className="h-5 w-5 mr-1" />}
               <span>{statusText}</span>
-            </a>
+            </StatusTag>
           </>
         ) : (
           <button
             onClick={() => setShowLearnMore(true)}
             className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            title="Learn more about monitoring"
           >
             Learn More
           </button>
@@ -237,8 +273,6 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
   const [toastMessage, setToastMessage] = React.useState('');
   const [toastType, setToastType] = React.useState('error');
   const [showSuspendedOverlay, setShowSuspendedOverlay] = React.useState(false);
-  const [isMonitored, setIsMonitored] = React.useState(initialJob.is_monitored);
-  const [isLoading, setIsLoading] = React.useState(false);
   const inputRef = React.useRef(null);
   const commandInputRef = React.useRef(null);
   const scheduleInputRef = React.useRef(null);
@@ -582,7 +616,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
         <div className="absolute top-0 right-0 flex items-center">
           {job.suspended ? (
             <div 
-              className="inline-flex items-center px-2.5 py-0.5 rounded-bl-lg text-sm font-medium bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300 cursor-pointer hover:bg-pink-200 dark:hover:bg-pink-800/30"
+              className="inline-flex items-center px-2.5 py-0.5 rounded-bl-lg text-sm font-medium bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300 cursor-pointer hover:bg-pink-200 dark:hover:bg-pink-800/30 border-r border-white dark:border-gray-600"
               onClick={() => setShowSuspendedOverlay(true)}
               title="This job will not run at the scheduled time"
             >
@@ -590,7 +624,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
             </div>
           ) : (
             <div 
-              className="inline-flex items-center px-2.5 py-0.5 rounded-bl-lg text-sm font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-600 border-r border-gray-300 dark:border-gray-600"
+              className="inline-flex items-center px-2.5 py-0.5 rounded-bl-lg text-sm font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-600 border-r border-white dark:border-gray-600"
               onClick={() => setShowSuspendedOverlay(true)}
               title="Job will run on schedule"
             >
@@ -843,7 +877,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
       {/* Suspended Job Overlay */}
       {showSuspendedOverlay && (
         <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center z-10">
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-md w-full mx-4 relative">
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-lg w-full mx-4 relative">
             <button
               onClick={() => setShowSuspendedOverlay(false)}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-500 dark:text-gray-500 dark:hover:text-gray-400"

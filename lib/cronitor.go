@@ -64,7 +64,7 @@ type Monitor struct {
 	Passing          bool     `json:"passing,omitempty"`
 	Initialized      bool     `json:"initialized,omitempty"`
 	Disabled         bool     `json:"disabled,omitempty"`
-	Paused           bool     `json:"paused,omitempty"`
+	Paused           *bool    `json:"paused,omitempty"`
 	NoStdoutPassthru bool     `json:"-"`
 }
 

@@ -122,6 +122,12 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 
 		line.CommandToRun = strings.Join(command, " ")
 
+		// If the command appears to be quoted (starts and ends with quotes), unquote it
+		if strings.HasPrefix(line.CommandToRun, "\"") && strings.HasSuffix(line.CommandToRun, "\"") {
+			line.CommandToRun = strings.Trim(line.CommandToRun, "\"")
+			line.CommandToRun = strings.Replace(line.CommandToRun, "\\\"", "\"", -1)
+		}
+
 		if line.IsAutoDiscoverCommand() {
 			autoDiscoverLine = &line
 			if noAutoDiscover {
