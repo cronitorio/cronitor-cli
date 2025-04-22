@@ -275,11 +275,17 @@ func makeCronLikeEnv() []string {
 func makeSubcommandExec(subcommand string) *exec.Cmd {
 	var execCmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		execCmd = exec.Command("powershell.exe", "-Command", subcommand)
-	} else if _, err := os.Stat("/bin/bash"); err == nil {
+		return exec.Command("powershell.exe", "-Command", subcommand)
+	}
+
+	if _, err := os.Stat("/bin/bash"); err == nil {
 		execCmd = exec.Command("bash", "-c", subcommand)
 	} else {
 		execCmd = exec.Command("sh", "-c", subcommand)
+	}
+
+	execCmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true, // Put child in its own process group
 	}
 
 	return execCmd
