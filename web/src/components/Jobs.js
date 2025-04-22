@@ -849,7 +849,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
                           </span>
                           {showTimezoneTooltip && (
                             <div className="absolute left-0 bottom-full mb-2 hidden bg-gray-900 text-white text-xs rounded py-1 px-2 whitespace-nowrap z-10">
-                              {applyOffset(nextExecutionTimes[0], getTimezoneOffset(nextExecutionTimes[0]).diff)} ({getTimezoneOffset(nextExecutionTimes[0]).offset} from local)
+                              {applyOffset(nextExecutionTimes[0], getTimezoneOffset(nextExecutionTimes[0]).diff)} Browser Time
                             </div>
                           )}
                         </span>

@@ -81,32 +81,43 @@ function Sidebar({ isDark, toggleTheme }) {
               );
             })}
           </nav>
-          {/* Version Info */}
-          <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700">
-            <a
-              href="https://cronitor.io/docs/using-cronitor-cli"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
-            >
-              CronitorCLI v{data?.version || '...'}
-            </a>
-          </div>
-          {/* Theme Toggle */}
-          <div className="px-4 py-4 border-t border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                {isDark ? (
-                  <MoonIcon className="h-5 w-5 text-gray-400 dark:text-gray-500" />
-                ) : (
-                  <SunIcon className="h-5 w-5 text-gray-400 dark:text-gray-500" />
-                )}
-                <span className="ml-3 text-sm font-medium text-gray-600 dark:text-gray-300">
-                  {isDark ? 'Dark Mode' : 'Light Mode'}
-                </span>
+        </div>
+        {/* Version Info */}
+        <div className="flex flex-col">
+          <div className="border-t border-gray-200 dark:border-gray-700">
+            <div className="px-4 py-2">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                {data?.hostname || '...'}
               </div>
-              <ToggleSwitch isOn={isDark} onChange={toggleTheme} />
             </div>
+          </div>
+          <div className="border-t border-gray-200 dark:border-gray-700">
+            <div className="px-4 py-2">
+              <a
+                href="https://cronitor.io/docs/using-cronitor-cli"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+              >
+                CronitorCLI v{data?.version || '...'}
+              </a>
+            </div>
+          </div>
+        </div>
+        {/* Theme Toggle */}
+        <div className="px-4 py-4 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              {isDark ? (
+                <MoonIcon className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+              ) : (
+                <SunIcon className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+              )}
+              <span className="ml-3 text-sm font-medium text-gray-600 dark:text-gray-300">
+                {isDark ? 'Dark Mode' : 'Light Mode'}
+              </span>
+            </div>
+            <ToggleSwitch isOn={isDark} onChange={toggleTheme} />
           </div>
         </div>
       </div>
