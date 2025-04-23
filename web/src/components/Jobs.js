@@ -6,6 +6,7 @@ import cronitorScreenshot from '../assets/cronitor-screenshot.png';
 
 const fetcher = url => fetch(url).then(res => res.json());
 
+
 function CloseButton({ onClick }) {
   return (
     <button
@@ -294,65 +295,32 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
   });
   const [isScheduleValid, setIsScheduleValid] = React.useState(true);
 
-  const getTimezoneOffset = (date) => {
-    const browserDate = new Date(date.toLocaleString('en-US', { timeZone: browserTimezone }));
-    const jobDate = new Date(date.toLocaleString('en-US', { timeZone: job.timezone }));
-    const diff = jobDate.getTime() - browserDate.getTime();
-    const hours = Math.abs(Math.floor(diff / (1000 * 60 * 60)));
-    const minutes = Math.abs(Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)));
-    const sign = diff > 0 ? '+' : '-';
-    return {
-      offset: `${sign}${hours}:${minutes.toString().padStart(2, '0')}`,
-      diff: diff
-    };
-  };
-
-  const applyOffset = (date, offset) => {
-    const newDate = new Date(date.getTime() - offset);
-    return newDate.toLocaleString('en-US', { 
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: 'numeric',
-      hour12: true,
-      timeZone: 'UTC'
-    });
-  };
-
   // Calculate next execution times when schedule changes
   React.useEffect(() => {
-    if (job.expression && isScheduleValid) {
-      try {
-        const times = getNextExecutionTimes(job.expression, {
-          startDate: new Date(),
-          count: 20,
-          timezone: 'UTC'
-        });
-        setNextExecutionTimes(times);
-      } catch (error) {
-        console.error('Error calculating next execution times:', error);
-        setNextExecutionTimes([]);
+    const calculateTimes = () => {
+      if ((isEditingSchedule ? editedSchedule : job.expression) && isScheduleValid) {
+        try {
+          const nextTimes = getNextExecutionTimes(
+            isEditingSchedule ? editedSchedule : job.expression,
+            job.timezone
+          );
+          setNextExecutionTimes(nextTimes);
+        } catch (error) {
+          console.error('Error calculating next execution times:', error);
+          setNextExecutionTimes([]);
+        }
       }
-    }
-  }, [job.expression, isScheduleValid]);
+    };
 
-  // Calculate next execution times when editing schedule
-  React.useEffect(() => {
-    if (isEditingSchedule && editedSchedule && isScheduleValid) {
-      try {
-        const times = getNextExecutionTimes(editedSchedule, {
-          startDate: new Date(),
-          count: 20,
-          timezone: 'UTC'
-        });
-        setNextExecutionTimes(times);
-      } catch (error) {
-        console.error('Error calculating next execution times:', error);
-        setNextExecutionTimes([]);
-      }
-    }
-  }, [isEditingSchedule, editedSchedule, isScheduleValid]);
+    // Calculate immediately
+    calculateTimes();
+
+    // Set up interval to recalculate every minute
+    const interval = setInterval(calculateTimes, 60000);
+
+    // Clean up interval on unmount or when dependencies change
+    return () => clearInterval(interval);
+  }, [job.expression, editedSchedule, isEditingSchedule, isScheduleValid, job.timezone]);
 
   const showToast = (message, type = 'error') => {
     setToastMessage(message);
@@ -663,12 +631,12 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
     }
   };
 
-  const getScheduleDescription = (schedule, timezone) => {
+  const getScheduleDescription = (schedule) => {
     if (!schedule || typeof schedule !== 'string' || !schedule.trim()) {
       return 'Enter a valid cron schedule';
     }
     try {
-      return guru(schedule, timezone);
+      return guru(schedule, job.timezone);
     } catch (error) {
       console.error('Error parsing schedule:', error);
       return 'Invalid schedule format';
@@ -825,13 +793,13 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
                       ? 'text-gray-600 dark:text-gray-300' 
                       : 'text-pink-500 dark:text-pink-400'
                   }`}>
-                    {getScheduleDescription(editedSchedule || job.expression, job.timezone)} <span className="text-gray-400 dark:text-gray-500">as "{job.run_as_user || 'default'}"</span>
+                    {getScheduleDescription(editedSchedule || job.expression)} <span className="text-gray-400 dark:text-gray-500">as "{job.run_as_user || 'default'}"</span>
                     {nextExecutionTimes.length > 0 ? (
                       <span className="text-gray-400 dark:text-gray-500">
                         {' '}<span className="text-gray-700 dark:text-gray-200 ml-4">Next at</span>{' '}
                         <span className="relative">
                           <span 
-                            className="text-gray-700 dark:text-gray-200 cursor-pointer hover:underline"
+                            className="text-gray-700 dark:text-gray-200 cursor-pointer"
                             onMouseEnter={(e) => {
                               const tooltip = e.currentTarget.nextElementSibling;
                               if (showTimezoneTooltip) {
@@ -845,11 +813,11 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
                               }
                             }}
                           >
-                            {nextExecutionTimes[0].toLocaleString('en-US', { timeZone: 'UTC' })}
+                            {nextExecutionTimes[0].job} {nextExecutionTimes[0].jobTimezone}
                           </span>
                           {showTimezoneTooltip && (
                             <div className="absolute left-0 bottom-full mb-2 hidden bg-gray-900 text-white text-xs rounded py-1 px-2 whitespace-nowrap z-10">
-                              {applyOffset(nextExecutionTimes[0], getTimezoneOffset(nextExecutionTimes[0]).diff)} Browser Time
+                              {nextExecutionTimes[0].local} {nextExecutionTimes[0].localTimezone} Browser Time
                             </div>
                           )}
                         </span>
@@ -879,7 +847,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
               <thead>
                 <tr>
                   <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Job Time
+                    Job Time ({job.timezone})
                   </th>
                   <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Browser Time ({browserTimezone})
@@ -887,21 +855,13 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                {nextExecutionTimes.slice(1, 11).map((time, index) => (
+                {nextExecutionTimes.map((time, index) => (
                   <tr key={index}>
                     <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
-                      {time.toLocaleString('en-US', { 
-                        weekday: 'short',
-                        month: 'short',
-                        day: 'numeric',
-                        hour: 'numeric',
-                        minute: 'numeric',
-                        hour12: true,
-                        timeZone: 'UTC'
-                      })}
+                      {time.job}
                     </td>
                     <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
-                      {applyOffset(time, getTimezoneOffset(time).diff)}
+                      {time.local}
                     </td>
                   </tr>
                 ))}
@@ -1038,7 +998,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
                   Pause monitoring
                 </label>
                 <select
-                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236B7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22M6%208l4%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.5rem_center] bg-no-repeat"
                   value={job.pause_hours || ''}
                   onChange={(e) => {
                     const updatedJobs = allJobs.map(j => {

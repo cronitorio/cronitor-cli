@@ -1,8 +1,10 @@
 "use strict";
 
-const normalize = require('./normalize');
-const nextDate = require('./nextDate');
-
+import { formatTimeFromDate } from './dateFormatter';
+import normalize from './normalize';
+import prenormalize from './prenormalize';
+import nextDate from './nextDate';
+import dateFormatter from './dateFormatter';
 //
 // Normalize the input
 //
@@ -61,37 +63,6 @@ function substituteSpecialStrings(scheduleExpression) {
   return substitution !== undefined ? substitution : [scheduleExpression];
 }
 
-function prenormalizeSchedule(scheduleExpression) {
-  const originalParts = scheduleExpression
-    .trim()
-    .split(/\s+/)
-    .filter((p) => p);
-  if (originalParts.length === 1 && originalParts[0] === "@reboot") {
-    return { originalParts, parts: [] };
-  }
-  const preppedParts = originalParts.length === 1 ? substituteSpecialStrings(originalParts[0]) : originalParts;
-  const parts = preppedParts.map((part, index) => {
-    switch (index) {
-      case 3:
-        return substituteMonths(part);
-      case 4:
-        return substituteWeekdays(part);
-      default:
-        return part;
-    }
-  });
-
-  // if date or weekday starts with *, they're ANDed, otherwise ORed
-  // only looking Runs at the first character regardless of rest of string, just like Vixie cron
-  // comment from Paul Vixie: "yes, it's bizarre. like many bizarre things, it's the standard."
-  const daysAnded = (!!parts[2] && parts[2][0] === "*") || (!!parts[4] && parts[4][0] === "*");
-
-  return {
-    originalParts,
-    parts,
-    daysAnded,
-  };
-}
 
 //
 // Create Description
@@ -284,50 +255,42 @@ function describe(prenormalizedSchedule) {
   };
 }
 
-export function getNextExecutionTimes(cronExpression, options = {}) {
-  const {
-    startDate = new Date(),
-    count = 10,
-    timezone = 'UTC'  // Default to UTC
-  } = options;
-
-  // Convert start date to UTC if it's not already
-  const utcStartDate = new Date(startDate.toISOString());
-
-  // Normalize the cron expression
-  const prenormalized = prenormalizeSchedule(cronExpression);
-  const normalized = normalize(prenormalized);
+export function getNextExecutionTimes(expression, jobTimezone, count = 10) {
+  const schedule = normalize(prenormalize(expression));
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: jobTimezone })) // Pretend the local time is in the job timezone
   
-  if (normalized.errors) {
-    throw new Error('Invalid cron expression');
-  }
+  let times = [];
+  let date = nextDate(
+    schedule, 
+    new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes(), now.getSeconds())) // now pretend the job time is UTC for easier interpretation of the results
+  )
 
-  // Calculate next execution times
-  const times = [];
-  let currentDate = utcStartDate;
   
-  for (let i = 0; i < count; i++) {
-    const next = nextDate(normalized, currentDate);
-    if (!next) {
-      break; // No more valid execution times
+  if (date) {
+    let dates = [date]
+    while (--count > 0) {
+      date = nextDate(schedule, new Date(date.getTime() + 1))
+      dates.push(date)
     }
-    times.push(next);
-    currentDate = new Date(next.getTime() + 1); // Add 1ms to get next time
+
+    times = dates.map((date) => {
+      const formattedDate = dateFormatter(date, jobTimezone)
+      return {
+        job: `${formattedDate.job.year}-${formattedDate.job.month}-${formattedDate.job.date} ${formattedDate.job.hour}:${formattedDate.job.minute}:00`, 
+        jobTimezone: formattedDate.job.zone,
+
+        local: `${formattedDate.local.year}-${formattedDate.local.month}-${formattedDate.local.date} ${formattedDate.local.hour}:${formattedDate.local.minute}:00`,
+        localTimezone: formattedDate.local.zone
+      }
+    })
   }
-  
-  // Convert times to specified timezone if needed
-  if (timezone !== 'UTC') {
-    return times.map(date => {
-      const localDate = new Date(date.toLocaleString('en-US', { timeZone: timezone }));
-      return localDate;
-    });
-  }
-  
-  return times;
+  return times
+
+
 }
 
 export default function (cron, timezone) {
-  const details = describe(prenormalizeSchedule(cron));
+  const details = describe(prenormalize(cron));
   const description = details.isTime
     ? `${details.start || ""} ${details.hours || ""}:${details.minutes || ""} ${timezone || ""} ${
         details.dates || ""
@@ -335,5 +298,6 @@ export default function (cron, timezone) {
     : `${details.start || ""} ${details.minutes || ""} ${details.hours || ""} ${details.dates || ""} ${
         details.datesWeekdays || ""
       } ${details.weekdays || ""} ${details.months || ""} ${details.end || ""}`;
+
   return description.replace("at every", "every");
 }
