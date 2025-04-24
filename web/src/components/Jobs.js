@@ -1,6 +1,6 @@
 import React from 'react';
 import useSWR from 'swr';
-import { CheckCircleIcon, XCircleIcon, PencilIcon, ArrowPathIcon, BellSlashIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { CheckCircleIcon, XCircleIcon, PencilIcon, ArrowPathIcon, BellSlashIcon } from '@heroicons/react/24/outline';
 import guru, { getNextExecutionTimes } from '../lib/guru';
 import cronitorScreenshot from '../assets/cronitor-screenshot.png';
 
@@ -280,6 +280,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
   const [toastMessage, setToastMessage] = React.useState('');
   const [toastType, setToastType] = React.useState('error');
   const [showSuspendedOverlay, setShowSuspendedOverlay] = React.useState(false);
+  const [savingStatus, setSavingStatus] = React.useState(null);
   const inputRef = React.useRef(null);
   const commandInputRef = React.useRef(null);
   const scheduleInputRef = React.useRef(null);
@@ -315,11 +316,22 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
     // Calculate immediately
     calculateTimes();
 
-    // Set up interval to recalculate every minute
-    const interval = setInterval(calculateTimes, 60000);
+    // Calculate the time until the next minute
+    const now = new Date();
+    const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
 
-    // Clean up interval on unmount or when dependencies change
-    return () => clearInterval(interval);
+    // Set initial timeout to align with the next minute
+    const initialTimeout = setTimeout(() => {
+      calculateTimes();
+      // Then set up interval for every minute
+      const interval = setInterval(calculateTimes, 60000);
+      return () => clearInterval(interval);
+    }, msUntilNextMinute);
+
+    // Clean up timeout and interval on unmount or when dependencies change
+    return () => {
+      clearTimeout(initialTimeout);
+    };
   }, [job.expression, editedSchedule, isEditingSchedule, isScheduleValid, job.timezone]);
 
   const showToast = (message, type = 'error') => {
@@ -337,8 +349,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
     const originalName = job.name || job.default_name;
     const newName = editedName;
     
-    // Show saving toast
-    showToast('Saving...', 'success');
+    setSavingStatus('saving');
     
     // Optimistic update using SWR's mutate
     const optimisticData = jobs.map(j => {
@@ -367,8 +378,12 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
         throw new Error('Failed to update job name');
       }
 
-      setIsEditing(false);
-      showToast('Changes saved', 'success');
+      // Set saved state before updating editing state
+      setSavingStatus('saved');
+      // Wait a moment before clearing editing state
+      setTimeout(() => {
+        setIsEditing(false);
+      }, 100);
       // Revalidate to ensure we have the latest data
       mutate();
     } catch (error) {
@@ -380,6 +395,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
         return j;
       });
       mutate(revertedData, false);
+      setSavingStatus(null);
       showToast('Failed to update job name: ' + error.message);
     }
   };
@@ -388,8 +404,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
     const originalCommand = job.command;
     const newCommand = editedCommand;
     
-    // Show saving toast
-    showToast('Saving...', 'success');
+    setSavingStatus('saving');
     
     // Optimistic update using SWR's mutate
     const optimisticData = jobs.map(j => {
@@ -418,8 +433,12 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
         throw new Error('Failed to update job command');
       }
 
-      setIsEditingCommand(false);
-      showToast('Changes saved', 'success');
+      // Set saved state before updating editing state
+      setSavingStatus('saved');
+      // Wait a moment before clearing editing state
+      setTimeout(() => {
+        setIsEditingCommand(false);
+      }, 100);
       // Revalidate to ensure we have the latest data
       mutate();
     } catch (error) {
@@ -431,6 +450,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
         return j;
       });
       mutate(revertedData, false);
+      setSavingStatus(null);
       showToast('Failed to update job command: ' + error.message);
     }
   };
@@ -451,8 +471,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
     const originalSchedule = job.expression;
     const newSchedule = editedSchedule;
     
-    // Show saving toast
-    showToast('Saving...', 'success');
+    setSavingStatus('saving');
     
     // Optimistic update using SWR's mutate
     const optimisticData = jobs.map(j => {
@@ -481,9 +500,13 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
         throw new Error('Failed to update job schedule');
       }
 
-      setIsEditingSchedule(false);
-      setIsScheduleValid(true);
-      showToast('Changes saved', 'success');
+      // Set saved state before updating editing state
+      setSavingStatus('saved');
+      // Wait a moment before clearing editing state
+      setTimeout(() => {
+        setIsEditingSchedule(false);
+        setIsScheduleValid(true);
+      }, 100);
       // Revalidate to ensure we have the latest data
       mutate();
     } catch (error) {
@@ -495,12 +518,27 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
         return j;
       });
       mutate(revertedData, false);
+      setSavingStatus(null);
       showToast('Failed to update job schedule: ' + error.message);
     }
   };
 
+  // Add effect to handle the fade out of the saved status
+  React.useEffect(() => {
+    let timer;
+    if (savingStatus === 'saved') {
+      timer = setTimeout(() => {
+        setSavingStatus(null);
+      }, 4000);
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [savingStatus]);
+
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
+      e.preventDefault();
       handleSave();
     } else if (e.key === 'Escape') {
       setIsEditing(false);
@@ -510,6 +548,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
 
   const handleCommandKeyDown = (e) => {
     if (e.key === 'Enter') {
+      e.preventDefault();
       handleCommandSave();
     } else if (e.key === 'Escape') {
       setIsEditingCommand(false);
@@ -519,6 +558,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
 
   const handleScheduleKeyDown = (e) => {
     if (e.key === 'Enter') {
+      e.preventDefault();
       if (validateSchedule(editedSchedule)) {
         handleScheduleSave();
       }
@@ -615,22 +655,6 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
     }
   };
 
-  const handleRunNow = async (job) => {
-    try {
-      const response = await fetch(`/api/jobs/${job.key}/run`, {
-        method: 'POST',
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to run job');
-      }
-
-      // Optionally, refresh the job list or update the job state
-    } catch (error) {
-      console.error('Error running job:', error);
-    }
-  };
-
   const getScheduleDescription = (schedule) => {
     if (!schedule || typeof schedule !== 'string' || !schedule.trim()) {
       return 'Enter a valid cron schedule';
@@ -652,16 +676,16 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
         <div className="absolute top-0 right-0 flex items-center">
           {job.suspended ? (
             <div 
-              className="inline-flex items-center px-2.5 py-0.5 rounded-bl-lg text-sm font-medium bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300 cursor-pointer hover:bg-pink-200 dark:hover:bg-pink-800/30 border-r border-white dark:border-gray-600"
-              onClick={() => setShowSuspendedOverlay(true)}
+              className="inline-flex items-center px-2.5 py-0.5 rounded-bl-lg text-sm font-medium bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300 cursor-pointer hover:bg-pink-200 dark:hover:bg-pink-800/30 border-r border-white dark:border-gray-600 z-20"
+              onClick={() => setShowSuspendedOverlay(!showSuspendedOverlay)}
               title="This job will not run at the scheduled time"
             >
               SUSPENDED
             </div>
           ) : (
             <div 
-              className="inline-flex items-center px-2.5 py-0.5 rounded-bl-lg text-sm font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-600 border-r border-white dark:border-gray-600"
-              onClick={() => setShowSuspendedOverlay(true)}
+              className="inline-flex items-center px-2.5 py-0.5 rounded-bl-lg text-sm font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-600 border-r border-white dark:border-gray-600 z-20"
+              onClick={() => setShowSuspendedOverlay(!showSuspendedOverlay)}
               title="Job will run on schedule"
             >
               SCHEDULED
@@ -674,7 +698,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
               instances.length > 0
                 ? 'bg-blue-400 text-white hover:bg-blue-400/90'
                 : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-            }`}
+            } z-20`}
           >
             {instances.length > 0 ? `RUNNING: ${instances.length}` : 'IDLE'}
           </button>
@@ -975,6 +999,33 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Editing Indicator */}
+        {(isEditing || isEditingCommand || isEditingSchedule || savingStatus === 'saved') && (
+          <div className="absolute bottom-0 right-0">
+            <button
+              onClick={() => {
+                if (savingStatus === 'saved') return;
+                if (isEditing) handleSave();
+                else if (isEditingCommand) handleCommandSave();
+                else if (isEditingSchedule) handleScheduleSave();
+              }}
+              className={`inline-flex items-center px-2.5 py-0.5 rounded-tl-lg rounded-br-lg text-sm font-medium ${
+                savingStatus === 'saving' 
+                  ? 'bg-yellow-400 text-white hover:bg-yellow-500'
+                  : savingStatus === 'saved'
+                  ? 'bg-green-400 text-white hover:bg-green-500'
+                  : 'bg-green-400 text-white hover:bg-green-500'
+              } z-20`}
+              style={{ 
+                opacity: 1,
+                pointerEvents: savingStatus === 'saved' ? 'none' : 'auto'
+              }}
+            >
+              {savingStatus === 'saving' ? 'Saving...' : savingStatus === 'saved' ? 'Saved!' : 'Editing...'}
+            </button>
           </div>
         )}
       </div>

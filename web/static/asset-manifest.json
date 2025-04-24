@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/static/css/main.bb277de8.css",
+    "main.js": "/static/js/main.e0c651b6.js",
+    "static/media/cronitor-screenshot.png": "/static/media/cronitor-screenshot.6101d4163e37020459b5.png",
+    "static/media/cronitor.png": "/static/media/cronitor.0324b892ae4bc2ccc08d.png",
+    "index.html": "/index.html"
+  },
+  "entrypoints": [
+    "static/css/main.bb277de8.css",
+    "static/js/main.e0c651b6.js"
+  ]
+}

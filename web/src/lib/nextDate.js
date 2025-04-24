@@ -1,5 +1,3 @@
-'use strict';
-
 function roundUpMillis(date) {
   const millis = date.getUTCMilliseconds();
   return millis !== 0 ? new Date(date.getTime() + (1000 - millis)) : date;
@@ -14,7 +12,6 @@ function roundUpSeconds(date) {
 function utcDate(year, month, date, hours, minutes) {
   return new Date(Date.UTC(year, month, date, hours, minutes));
 }
-
 
 function nextDate(normalizedSchedule, startDate, invocation) {
   if (invocation > (12 + 31 + 24 + 60)) {  // to protect against endless recursion in case of a bug

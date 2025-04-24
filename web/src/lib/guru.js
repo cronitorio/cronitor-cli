@@ -12,7 +12,7 @@ function replaceFromHash(string, hash) {
   const saveReplace = (text, searchText, replacement) => {
     const regex = new RegExp(`(^|[ ,-/])${searchText}($|[ ,-/])`, "gi");
     const fullReplacement = `$1${replacement}$2`;
-    return text.replace(regex, fullReplacement).replace(regex, fullReplacement); // twice due to potentially overlapping separators such as in '*,*'
+    return text.replace(regex, fullReplacement).replace(regex, fullReplacement);
   };
   return Object.keys(hash).reduce((text, key) => saveReplace(text, key, hash[key]), string);
 }
@@ -289,7 +289,7 @@ export function getNextExecutionTimes(expression, jobTimezone, count = 10) {
 
 }
 
-export default function (cron, timezone) {
+const guru = (cron, timezone) => {
   const details = describe(prenormalize(cron));
   const description = details.isTime
     ? `${details.start || ""} ${details.hours || ""}:${details.minutes || ""} ${timezone || ""} ${
@@ -300,4 +300,6 @@ export default function (cron, timezone) {
       } ${details.weekdays || ""} ${details.months || ""} ${details.end || ""}`;
 
   return description.replace("at every", "every");
-}
+};
+
+export default guru;

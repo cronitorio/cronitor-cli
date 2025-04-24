@@ -1,5 +1,3 @@
-'use strict';
-
 function intSort(a, b) {
   return a - b;
 }

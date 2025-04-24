@@ -22,8 +22,11 @@ import (
 	"github.com/spf13/viper"
 )
 
-//go:embed web/dist
 var webAssets embed.FS
+
+func SetWebAssets(assets embed.FS) {
+	webAssets = assets
+}
 
 type CommandHistory struct {
 	history map[string][]string
@@ -129,7 +132,7 @@ The dashboard provides a web interface for managing your Cronitor monitors and c
 		}
 
 		// Get the embedded filesystem
-		fsys, err := fs.Sub(webAssets, "web/dist")
+		fsys, err := fs.Sub(webAssets, "web/static")
 		if err != nil {
 			fatal(err.Error(), 1)
 		}
@@ -138,9 +141,14 @@ The dashboard provides a web interface for managing your Cronitor monitors and c
 		fileServer := http.FileServer(http.FS(fsys))
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Don't serve index.html for API routes or static assets
-			if strings.HasPrefix(r.URL.Path, "/api/") ||
-				strings.HasPrefix(r.URL.Path, "/assets/") ||
-				strings.Contains(r.URL.Path, ".") {
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+
+			// For static assets, remove the /static prefix since it's already in our filesystem
+			if strings.HasPrefix(r.URL.Path, "/static/") {
+				r.URL.Path = strings.TrimPrefix(r.URL.Path, "/static")
 				fileServer.ServeHTTP(w, r)
 				return
 			}

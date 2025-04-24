@@ -1,12 +1,10 @@
-'use strict';
-
 function replaceFromHash(string, hash) {
   const saveReplace = (text, searchText, replacement) => {
     const regex = new RegExp(`(^|[ ,-/])${searchText}($|[ ,-/])`, 'gi');
     const fullReplacement = `$1${replacement}$2`;
     return text
     .replace(regex, fullReplacement)
-    .replace(regex, fullReplacement); // twice due to potentially overlapping separators such as in '*,*'
+    .replace(regex, fullReplacement);
   }
   return Object.keys(hash).reduce((text, key) => saveReplace(text, key, hash[key]), string);
 }
