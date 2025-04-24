@@ -15,7 +15,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "GENERATE_SOURCEMAP=false react-scripts build && rm -rf static/* && cp -r build/static/* static/ && cp build/index.html static/ && cp build/asset-manifest.json static/",
+    "build": "GENERATE_SOURCEMAP=false react-scripts build && mkdir -p static && cp -r build/static/* static/ && cp build/index.html static/ && cp build/asset-manifest.json static/",
     "analyze": "source-map-explorer 'build/static/js/*.js'",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
