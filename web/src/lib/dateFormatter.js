@@ -3,7 +3,6 @@ function padded2 (number) {
 }
 
 function getTimezoneOffset (date, browserTimezone, jobTimezone) {
-  console.log(date, browserTimezone, jobTimezone)
   const browserDate = new Date(date.toLocaleString('en-US', { timeZone: browserTimezone }));
   const jobDate = new Date(date.toLocaleString('en-US', { timeZone: jobTimezone }));
   const diff = jobDate.getTime() - browserDate.getTime();

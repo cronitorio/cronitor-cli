@@ -207,13 +207,28 @@ function simpleTime(minutes, hours) {
 const REBOOT = "After rebooting.";
 
 function describe(prenormalizedSchedule) {
+  if (!prenormalizedSchedule || !prenormalizedSchedule.originalParts) {
+    return {
+      full: "Invalid schedule",
+      special: "Invalid schedule"
+    };
+  }
+
   if (prenormalizedSchedule.originalParts[0] === "@reboot") {
     return {
       full: REBOOT,
       special: REBOOT,
     };
   }
-  const parts = prenormalizedSchedule.parts;
+
+  const parts = prenormalizedSchedule.parts || [];
+  if (parts.length < 5) {
+    return {
+      full: "Invalid schedule",
+      special: "Invalid schedule"
+    };
+  }
+
   const dateText = datesDescription(parts[2]);
   const monthText = monthsDescription(parts[3]);
   const weekdayText = weekdaysDescription(parts[4]);

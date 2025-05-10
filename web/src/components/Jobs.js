@@ -119,11 +119,20 @@ function LearnMoreModal({ onClose }) {
   );
 }
 
-function StatusIndicator({ job, mutate, allJobs }) {
+function StatusIndicator({ job, mutate, allJobs, isNew = false, onFormChange }) {
   const [isLoading, setIsLoading] = React.useState(false);
   const [showLearnMore, setShowLearnMore] = React.useState(false);
 
   const handleToggle = async () => {
+    if (isNew) {
+      // For new jobs, just update the form state
+      onFormChange({
+        ...job,
+        is_monitored: !job.is_monitored
+      });
+      return;
+    }
+
     setIsLoading(true);
     
     // Optimistic update
@@ -193,7 +202,7 @@ function StatusIndicator({ job, mutate, allJobs }) {
     statusColor = 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400';
     statusText = 'Healthy';
     statusTitle = 'This job is running as expected.';
-  } else {
+  } else if (!isNew) {
     statusColor = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
     statusText = 'Syncing...';
   }
@@ -263,38 +272,360 @@ function StatusIndicator({ job, mutate, allJobs }) {
   );
 }
 
-function JobCard({ job: initialJob, mutate, allJobs }) {
-  const [isEditing, setIsEditing] = React.useState(false);
+function ConsoleModal({ job, onClose, isNew = false, onFormChange }) {
+  const [output, setOutput] = React.useState('');
+  const [isRunning, setIsRunning] = React.useState(false);
+  const [currentPid, setCurrentPid] = React.useState(null);
+  const [command, setCommand] = React.useState(job.command);
+  const [hasChanges, setHasChanges] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const outputRef = React.useRef(null);
+  const commandInputRef = React.useRef(null);
+  const eventSourceRef = React.useRef(null);
+  const outputLinesRef = React.useRef([]);
+
+  // Update hasChanges when command changes
+  React.useEffect(() => {
+    setHasChanges(command !== job.command);
+  }, [command, job.command]);
+
+  React.useEffect(() => {
+    if (commandInputRef.current) {
+      commandInputRef.current.focus();
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  }, [output]);
+
+  // Cleanup event source on unmount
+  React.useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+    };
+  }, []);
+
+  const addOutput = (newOutput) => {
+    if (!newOutput) return;
+
+    // Split the new output into lines
+    const newLines = newOutput.split('\n');
+    
+    // Add new lines to our array
+    outputLinesRef.current = [...outputLinesRef.current, ...newLines];
+    
+    // Keep only the last 1000 lines
+    if (outputLinesRef.current.length > 1000) {
+      outputLinesRef.current = outputLinesRef.current.slice(-1000);
+    }
+    
+    // Update the output state
+    setOutput(outputLinesRef.current.join('\n'));
+  };
+
+  const runCommand = async () => {
+    setIsRunning(true);
+    setOutput('');
+    outputLinesRef.current = [];
+    setCurrentPid(null);
+
+    // Close any existing event source
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+
+    try {
+      const eventSource = new EventSource(`/api/jobs/run?command=${encodeURIComponent(command)}`);
+      eventSourceRef.current = eventSource;
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.pid) {
+            setCurrentPid(data.pid);
+          } else if (data.output) {
+            addOutput(data.output);
+          } else if (data.error) {
+            addOutput(data.error);
+          } else if (data.completion) {
+            addOutput(data.completion);
+            setIsRunning(false);
+          }
+        } catch (e) {
+          console.error('Failed to parse SSE data:', e);
+        }
+      };
+
+      eventSource.onerror = (error) => {
+        console.error('EventSource failed:', error);
+        eventSource.close();
+        setIsRunning(false);
+      };
+    } catch (error) {
+      addOutput(`Error: ${error.message}\n`);
+      setIsRunning(false);
+    }
+  };
+
+  const handleKill = async () => {
+    if (!currentPid) return;
+
+    try {
+      await fetch('/api/jobs/kill', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ pids: [currentPid] }), // Send the PID directly, not as a string
+      });
+      
+      // Close the event source
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+      setIsRunning(false);
+    } catch (error) {
+      console.error('Failed to kill process:', error);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      runCommand();
+    }
+  };
+
+  const handleCommandBlur = () => {
+    if (command === job.command) {
+      setHasChanges(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      if (isNew) {
+        // For new jobs, just update the form state
+        onFormChange({
+          ...job,
+          command: command,
+        });
+        setHasChanges(false);
+      } else {
+        const response = await fetch('/api/jobs', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ...job,
+            command: command,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to update job command');
+        }
+
+        // Update the job in the parent component
+        job.command = command;
+        setHasChanges(false);
+      }
+    } catch (error) {
+      console.error('Error saving command:', error);
+      addOutput(`Error saving command: ${error.message}\n`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg shadow-xl w-[calc(100%-2rem)] max-w-6xl mx-4 relative">
+        <CloseButton onClick={onClose} />
+        <div className="p-4">
+          <div className="mb-4">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Command</span>
+            </div>
+            <div className="flex items-center space-x-2 mt-1">
+              <span className="text-green-500">$</span>
+              <input
+                ref={commandInputRef}
+                type="text"
+                value={command}
+                onChange={(e) => setCommand(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onBlur={handleCommandBlur}
+                className="w-full text-sm text-gray-900 dark:text-gray-100 font-mono bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none"
+                disabled={isRunning}
+              />
+            </div>
+          </div>
+          
+          <div className="mb-2">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Output</span>
+          </div>
+          <div
+            ref={outputRef}
+            className="bg-black p-4 rounded font-mono text-sm h-96 overflow-y-auto whitespace-pre-wrap"
+          >
+            {output}
+          </div>
+          
+          <div className="mt-4 flex justify-end space-x-2">
+            {hasChanges && !isRunning && (
+              <button
+                onClick={handleSave}
+                disabled={isSaving}
+                className={`px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium ${
+                  isSaving ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                {isSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+            )}
+            {isRunning ? (
+              <button
+                onClick={handleKill}
+                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 font-medium"
+              >
+                Kill Now
+              </button>
+            ) : (
+              <button
+                onClick={runCommand}
+                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 font-medium"
+              >
+                Run Command
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSave, onDiscard, onFormChange, showToast }) {
+  const [isEditing, setIsEditing] = React.useState(isNew);
+  const [isEditingCommand, setIsEditingCommand] = React.useState(isNew);
+  const [isEditingSchedule, setIsEditingSchedule] = React.useState(isNew);
   const [editedName, setEditedName] = React.useState(initialJob.name || initialJob.default_name);
-  const [isEditingCommand, setIsEditingCommand] = React.useState(false);
   const [editedCommand, setEditedCommand] = React.useState(initialJob.command);
-  const [isEditingSchedule, setIsEditingSchedule] = React.useState(false);
   const [editedSchedule, setEditedSchedule] = React.useState(initialJob.expression || '');
+  const [editedCronFile, setEditedCronFile] = React.useState(initialJob.crontab_filename || '');
+  const [editedRunAsUser, setEditedRunAsUser] = React.useState(initialJob.run_as_user || '');
+  const [isScheduleValid, setIsScheduleValid] = React.useState(true);
+  const [cronFiles, setCronFiles] = React.useState([]);
+  const [users, setUsers] = React.useState([]);
+  const [selectedLocation, setSelectedLocation] = React.useState('');
+  const [selectedTimezone, setSelectedTimezone] = React.useState('');
+  const [selectedUser, setSelectedUser] = React.useState('');
+  const [isUserCrontab, setIsUserCrontab] = React.useState(false);
   const [showInstances, setShowInstances] = React.useState(false);
   const [showNextTimes, setShowNextTimes] = React.useState(false);
   const [nextExecutionTimes, setNextExecutionTimes] = React.useState([]);
   const [killingPids, setKillingPids] = React.useState(new Set());
   const [isKillingAll, setIsKillingAll] = React.useState(false);
   const [error, setError] = React.useState(null);
-  const [isToastVisible, setIsToastVisible] = React.useState(false);
-  const [toastMessage, setToastMessage] = React.useState('');
-  const [toastType, setToastType] = React.useState('error');
   const [showSuspendedOverlay, setShowSuspendedOverlay] = React.useState(false);
   const [savingStatus, setSavingStatus] = React.useState(null);
+  const [showConsole, setShowConsole] = React.useState(false);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = React.useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = React.useState('');
+  const [job, setJob] = React.useState(initialJob);
+  const [scheduleDescription, setScheduleDescription] = React.useState('');
   const inputRef = React.useRef(null);
   const commandInputRef = React.useRef(null);
   const scheduleInputRef = React.useRef(null);
 
-  // Get the current job data from allJobs
-  const job = allJobs.find(j => j.key === initialJob.key) || initialJob;
+  // Get the current job data from allJobs and update local state
+  React.useEffect(() => {
+    const currentJob = allJobs.find(j => j.key === initialJob.key) || initialJob;
+    setJob(currentJob);
+  }, [allJobs, initialJob]);
+
+  // Update schedule description when job or editedSchedule changes
+  React.useEffect(() => {
+    if (job.timezone) {
+      const { description, isValid } = getScheduleDescription(editedSchedule || job.expression);
+      setScheduleDescription(description);
+      setIsScheduleValid(isValid);
+    }
+  }, [job.timezone, editedSchedule, job.expression]);
+
   const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const showTimezoneTooltip = job.timezone !== browserTimezone;
+
+  // Ensure instances is always an array
+  const instances = job.instances || [];
 
   const { mutate: jobsMutate, data: jobs } = useSWR('/api/jobs', fetcher, {
     refreshInterval: 5000, // Refresh every 5 seconds
     revalidateOnFocus: true, // Refresh when tab regains focus
   });
-  const [isScheduleValid, setIsScheduleValid] = React.useState(true);
+
+  React.useEffect(() => {
+    // Fetch cron files and users when component mounts
+    const fetchData = async () => {
+      try {
+        const [cronFilesRes, usersRes] = await Promise.all([
+          fetch('/api/crontabs'),
+          fetch('/api/users')
+        ]);
+        
+        if (cronFilesRes.ok) {
+          const data = await cronFilesRes.json();
+          setCronFiles(data);
+        }
+        
+        if (usersRes.ok) {
+          const data = await usersRes.json();
+          setUsers(data);
+        }
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  const getScheduleDescription = (schedule) => {
+    if (!schedule || typeof schedule !== 'string' || !schedule.trim()) {
+      return { description: 'Enter a valid cron schedule', isValid: false };
+    }
+    try {
+      const description = guru(schedule, job.timezone);
+      return { description, isValid: true };
+    } catch (error) {
+      console.error('Error parsing schedule:', error);
+      return { description: 'Invalid schedule format', isValid: false };
+    }
+  };
+
+  // Update parent form state when local state changes
+  React.useEffect(() => {
+    if (isNew && onFormChange) {
+      onFormChange({
+        name: editedName,
+        expression: editedSchedule,
+        command: editedCommand,
+        crontab_filename: editedCronFile,
+        run_as_user: editedRunAsUser,
+        is_monitored: job.is_monitored,
+        is_draft: true
+      });
+    }
+  }, [isNew, onFormChange, editedName, editedSchedule, editedCommand, editedCronFile, editedRunAsUser, job.is_monitored]);
 
   // Calculate next execution times when schedule changes
   React.useEffect(() => {
@@ -334,82 +665,48 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
     };
   }, [job.expression, editedSchedule, isEditingSchedule, isScheduleValid, job.timezone]);
 
-  const showToast = (message, type = 'error') => {
-    setToastMessage(message);
-    setToastType(type);
-    setIsToastVisible(true);
-    // Auto-hide toast after 3 seconds
-    setTimeout(() => setIsToastVisible(false), 3000);
-  };
+  // Initialize timezone when component mounts or when cronFiles changes
+  React.useEffect(() => {
+    if (isNew && cronFiles.length > 0) {
+      const defaultCronFile = cronFiles[0];
+      const timezone = defaultCronFile.timezone || 'UTC';
+      setSelectedTimezone(timezone);
+      setJob(prev => ({ ...prev, timezone }));
+      onFormChange(prev => ({
+        ...prev,
+        timezone
+      }));
+    }
+  }, [isNew, cronFiles]);
 
-  // Ensure instances is always an array
-  const instances = job.instances || [];
+  // Update job state when timezone changes
+  React.useEffect(() => {
+    if (selectedTimezone) {
+      setJob(prev => ({ ...prev, timezone: selectedTimezone }));
+      onFormChange(prev => ({
+        ...prev,
+        timezone: selectedTimezone
+      }));
+    }
+  }, [selectedTimezone]);
 
   const handleSave = async () => {
     const originalName = job.name || job.default_name;
     const newName = editedName;
-    
-    setSavingStatus('saving');
-    
-    // Optimistic update using SWR's mutate
-    const optimisticData = jobs.map(j => {
-      if (j.key === job.key) {
-        return { ...j, name: newName };
-      }
-      return j;
-    });
-    
-    // Optimistically update the UI
-    mutate(optimisticData, false);
-
-    try {
-      const response = await fetch('/api/jobs', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          ...job,
-          name: newName,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to update job name');
-      }
-
-      // Set saved state before updating editing state
-      setSavingStatus('saved');
-      // Wait a moment before clearing editing state
-      setTimeout(() => {
-        setIsEditing(false);
-      }, 100);
-      // Revalidate to ensure we have the latest data
-      mutate();
-    } catch (error) {
-      // Revert optimistic update on error
-      const revertedData = jobs.map(j => {
-        if (j.key === job.key) {
-          return { ...j, name: originalName };
-        }
-        return j;
-      });
-      mutate(revertedData, false);
-      setSavingStatus(null);
-      showToast('Failed to update job name: ' + error.message);
-    }
-  };
-
-  const handleCommandSave = async () => {
-    const originalCommand = job.command;
     const newCommand = editedCommand;
+    const newSchedule = editedSchedule;
     
     setSavingStatus('saving');
     
     // Optimistic update using SWR's mutate
     const optimisticData = jobs.map(j => {
       if (j.key === job.key) {
-        return { ...j, command: newCommand };
+        return { 
+          ...j, 
+          name: isEditing ? newName : j.name,
+          command: isEditingCommand ? newCommand : j.command,
+          expression: isEditingSchedule ? newSchedule : j.expression
+        };
       }
       return j;
     });
@@ -425,19 +722,23 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
         },
         body: JSON.stringify({
           ...job,
-          command: newCommand,
+          name: isEditing ? newName : job.name,
+          command: isEditingCommand ? newCommand : job.command,
+          expression: isEditingSchedule ? newSchedule : job.expression,
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to update job command');
+        throw new Error('Failed to update job');
       }
 
       // Set saved state before updating editing state
       setSavingStatus('saved');
       // Wait a moment before clearing editing state
       setTimeout(() => {
-        setIsEditingCommand(false);
+        if (isEditing) setIsEditing(false);
+        if (isEditingCommand) setIsEditingCommand(false);
+        if (isEditingSchedule) setIsEditingSchedule(false);
       }, 100);
       // Revalidate to ensure we have the latest data
       mutate();
@@ -445,13 +746,18 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
       // Revert optimistic update on error
       const revertedData = jobs.map(j => {
         if (j.key === job.key) {
-          return { ...j, command: originalCommand };
+          return { 
+            ...j, 
+            name: originalName,
+            command: job.command,
+            expression: job.expression
+          };
         }
         return j;
       });
       mutate(revertedData, false);
       setSavingStatus(null);
-      showToast('Failed to update job command: ' + error.message);
+      showToast('Failed to update job: ' + error.message);
     }
   };
 
@@ -549,7 +855,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
   const handleCommandKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      handleCommandSave();
+      handleSave();
     } else if (e.key === 'Escape') {
       setIsEditingCommand(false);
       setEditedCommand(job.command);
@@ -570,31 +876,22 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
   };
 
   const handleScheduleBlur = () => {
-    // Only revert if we haven't just saved
-    if (!editedSchedule || editedSchedule === job.expression) {
+    if (editedSchedule === job.expression) {
       setIsEditingSchedule(false);
-      setEditedSchedule(job.expression || '');
-      setIsScheduleValid(true);
     }
   };
 
-  React.useEffect(() => {
-    if (isEditing && inputRef.current) {
-      inputRef.current.focus();
+  const handleNameBlur = () => {
+    if (editedName === (job.name || job.default_name)) {
+      setIsEditing(false);
     }
-  }, [isEditing]);
+  };
 
-  React.useEffect(() => {
-    if (isEditingCommand && commandInputRef.current) {
-      commandInputRef.current.focus();
+  const handleCommandBlur = () => {
+    if (editedCommand === job.command) {
+      setIsEditingCommand(false);
     }
-  }, [isEditingCommand]);
-
-  React.useEffect(() => {
-    if (isEditingSchedule && scheduleInputRef.current) {
-      scheduleInputRef.current.focus();
-    }
-  }, [isEditingSchedule]);
+  };
 
   // Reset error state when editing starts
   React.useEffect(() => {
@@ -655,75 +952,197 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
     }
   };
 
-  const getScheduleDescription = (schedule) => {
-    if (!schedule || typeof schedule !== 'string' || !schedule.trim()) {
-      return 'Enter a valid cron schedule';
+  const handleDiscard = () => {
+    // Reset all local state
+    setEditedName('');
+    setEditedCommand('');
+    setEditedSchedule('');
+    setEditedCronFile('');
+    setEditedRunAsUser('');
+    setIsEditing(false);
+    setIsEditingCommand(false);
+    setIsEditingSchedule(false);
+    setShowConsole(false);
+    setShowSuspendedOverlay(false);
+    setSavingStatus(null);
+    
+    // Reset the parent form state
+    onFormChange({
+      name: '',
+      expression: '',
+      command: '',
+      crontab_filename: '',
+      run_as_user: '',
+      is_monitored: false,
+      is_draft: true
+    });
+    
+    // Call the parent's discard handler
+    onDiscard();
+  };
+
+  const handleLocationChange = (e) => {
+    const location = e.target.value;
+    setSelectedLocation(location);
+    setEditedCronFile(location);
+    
+    // Special case for /etc/cron.d (New Crontab)
+    if (location === "/etc/cron.d") {
+      setIsUserCrontab(false);
+      setSelectedUser('');
+      // Set default timezone for new crontab
+      const timezone = 'UTC';
+      setSelectedTimezone(timezone);
+      setJob(prev => ({ ...prev, timezone }));
+      onFormChange(prev => ({
+        ...prev,
+        timezone,
+        crontab_filename: location
+      }));
+      return;
     }
-    try {
-      return guru(schedule, job.timezone);
-    } catch (error) {
-      console.error('Error parsing schedule:', error);
-      return 'Invalid schedule format';
+    
+    // Find the crontab info for the selected location
+    const selectedCronFile = cronFiles.find(file => file.filename === location);
+    console.log('Selected crontab:', selectedCronFile); // Debug log
+    
+    if (selectedCronFile) {
+      setIsUserCrontab(selectedCronFile.isUserCrontab);
+      // Reset user selection when location changes
+      setSelectedUser('');
+      
+      // Set timezone and cronFile from the selected crontab
+      const timezone = selectedCronFile.timezone || 'UTC';
+      console.log('Setting timezone to:', timezone); // Debug log
+      setSelectedTimezone(timezone);
+      setJob(prev => ({ ...prev, timezone }));
+
+      onFormChange(prev => ({
+        ...prev,
+        timezone,
+        crontab_filename: location
+      }));
     }
   };
 
+  const handleUserChange = (e) => {
+    const user = e.target.value;
+    setSelectedUser(user);
+    setEditedRunAsUser(user);
+    setJob(prev => ({ ...prev, run_as_user: user }));
+    onFormChange(prev => ({
+      ...prev,
+      run_as_user: user
+    }));
+  };
+
+  // Add debug logging for form state
+  React.useEffect(() => {
+    console.log('Form state:', {
+      editedName,
+      editedSchedule,
+      editedCommand,
+      editedCronFile,
+      editedRunAsUser,
+      isUserCrontab,
+      selectedLocation
+    });
+  }, [editedName, editedSchedule, editedCommand, editedCronFile, editedRunAsUser, isUserCrontab, selectedLocation]);
+
   return (
     <div className={`bg-white dark:bg-gray-800 shadow rounded-lg p-4 relative ${job.suspended ? 'bg-gray-100 dark:bg-gray-700' : ''}`}>
-      {isToastVisible && <Toast message={toastMessage} onClose={() => setIsToastVisible(false)} type={toastType} />}
-      
-      <div className="space-y-2">
-        {/* Status Indicators */}
-        <div className="absolute top-0 right-0 flex items-center">
-          {job.suspended ? (
-            <div 
-              className="inline-flex items-center px-2.5 py-0.5 rounded-bl-lg text-sm font-medium bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300 cursor-pointer hover:bg-pink-200 dark:hover:bg-pink-800/30 border-r border-white dark:border-gray-600 z-20"
-              onClick={() => setShowSuspendedOverlay(!showSuspendedOverlay)}
-              title="This job will not run at the scheduled time"
+      {/* Status Indicators */}
+      <div className="absolute top-0 right-0 flex items-center">
+        {isNew ? (
+          <div className="inline-flex items-center px-2.5 py-0.5 rounded-tr-lg rounded-bl-lg text-sm font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 z-20">
+            DRAFT
+          </div>
+        ) : (
+          <>
+            {job.suspended ? (
+              <div 
+                onClick={() => setShowSuspendedOverlay(prev => !prev)}
+                className="inline-flex items-center px-2.5 py-0.5 rounded-bl-lg text-sm font-medium bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300 cursor-pointer hover:bg-pink-200 dark:hover:bg-pink-800/30 border-r border-white dark:border-gray-600 z-20"
+              >
+                SUSPENDED
+              </div>
+            ) : (
+              <div 
+                onClick={() => setShowSuspendedOverlay(prev => !prev)}
+                className="inline-flex items-center px-2.5 py-0.5 rounded-bl-lg text-sm font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-600 border-r border-white dark:border-gray-600 z-20"
+              >
+                SCHEDULED
+              </div>
+            )}
+            <button
+              onClick={() => setShowInstances(!showInstances)}
+              title={instances.length > 0 ? `${instances.length} instances of this job are running` : 'Job is not currently running'}
+              className={`inline-flex items-center px-2.5 py-0.5 rounded-tr-lg text-sm font-medium ${
+                instances.length > 0
+                  ? 'bg-blue-400 text-white hover:bg-blue-400/90'
+                  : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+              } z-20`}
             >
-              SUSPENDED
-            </div>
-          ) : (
-            <div 
-              className="inline-flex items-center px-2.5 py-0.5 rounded-bl-lg text-sm font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-600 border-r border-white dark:border-gray-600 z-20"
-              onClick={() => setShowSuspendedOverlay(!showSuspendedOverlay)}
-              title="Job will run on schedule"
-            >
-              SCHEDULED
-            </div>
-          )}
-          <button
-            onClick={() => setShowInstances(!showInstances)}
-            title={instances.length > 0 ? `${instances.length} instances of this job are running` : 'Job is not currently running'}
-            className={`inline-flex items-center px-2.5 py-0.5 rounded-tr-lg text-sm font-medium ${
-              instances.length > 0
-                ? 'bg-blue-400 text-white hover:bg-blue-400/90'
-                : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-            } z-20`}
-          >
-            {instances.length > 0 ? `RUNNING: ${instances.length}` : 'IDLE'}
-          </button>
-        </div>
+              {instances.length > 0 ? `RUNNING: ${instances.length}` : 'IDLE'}
+            </button>
+          </>
+        )}
+      </div>
 
+      {/* Editing Indicator */}
+      {!isNew && (isEditing || isEditingCommand || isEditingSchedule || savingStatus === 'saved') && (
+        <div className="absolute top-0 left-0 right-0 flex items-center justify-center">
+          <div 
+            className={`inline-flex items-center px-2.5 py-0.5 rounded-b-lg text-sm font-medium z-20 ${
+              savingStatus === 'saving' 
+                ? 'bg-amber-400 text-white' 
+                : savingStatus === 'saved'
+                ? 'bg-green-400 text-white'
+                : 'bg-green-400 text-green-900'
+            } ${savingStatus === 'saved' ? 'pointer-events-none' : 'cursor-pointer'}`}
+            onClick={() => {
+              if (savingStatus === 'saved') return;
+              if (isEditing) handleSave();
+              else if (isEditingCommand) handleSave();
+              else if (isEditingSchedule) handleScheduleSave();
+            }}
+          >
+            {savingStatus === 'saving' ? 'Saving' : savingStatus === 'saved' ? 'Saved' : 'Editing'}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
         {/* Line 1: Job Name */}
         <div className="group relative">
-          {isEditing ? (
+          {isNew ? (
             <input
               ref={inputRef}
               type="text"
               value={editedName}
               onChange={(e) => setEditedName(e.target.value)}
               onKeyDown={handleKeyDown}
-              onBlur={() => {
-                setIsEditing(false);
-                setEditedName(job.name || job.default_name);
-              }}
-              className="w-full text-lg font-medium text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500"
+              onBlur={handleNameBlur}
+              placeholder="Job Name"
+              className="w-[80%] block text-lg font-medium text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700/50 border-0 rounded-md px-3 py-2 focus:outline-none"
             />
           ) : (
             <div className="flex items-center">
-              <div className="text-lg font-medium text-gray-900 dark:text-white truncate">
-                {job.name || job.default_name}
-              </div>
+              {isEditing ? (
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={editedName}
+                  onChange={(e) => setEditedName(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  onBlur={handleNameBlur}
+                  className="w-full text-lg font-medium text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none"
+                />
+              ) : (
+                <div className="text-lg font-medium text-gray-900 dark:text-white truncate">
+                  {job.name || job.default_name}
+                </div>
+              )}
               <button
                 onClick={() => setIsEditing(true)}
                 className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -746,7 +1165,7 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               <tr>
                 <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
-                  {isEditingSchedule ? (
+                  {isNew ? (
                     <div className="space-y-1">
                       <input
                         ref={scheduleInputRef}
@@ -757,18 +1176,29 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
                         }}
                         onKeyDown={handleScheduleKeyDown}
                         onBlur={handleScheduleBlur}
-                        className={`w-full text-sm font-mono bg-transparent border-b focus:outline-none ${
-                          isScheduleValid 
-                            ? 'text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-600 focus:border-blue-500' 
-                            : 'text-pink-500 dark:text-pink-400 border-pink-300 dark:border-pink-600 focus:border-pink-500'
-                        }`}
+                        placeholder="* * * * *"
+                        className="w-full text-sm font-mono bg-gray-50 dark:bg-gray-700/50 border-0 rounded-l-md rounded-r-none px-3 py-2 focus:outline-none"
                       />
                     </div>
                   ) : (
                     <div className="flex items-center">
-                      <span className="text-sm font-mono text-gray-500 dark:text-gray-400">
-                        {editedSchedule || job.expression}
-                      </span>
+                      {isEditingSchedule ? (
+                        <input
+                          ref={scheduleInputRef}
+                          type="text"
+                          value={editedSchedule}
+                          onChange={(e) => {
+                            setEditedSchedule(e.target.value);
+                          }}
+                          onKeyDown={handleScheduleKeyDown}
+                          onBlur={handleScheduleBlur}
+                          className="w-full text-sm font-mono bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none"
+                        />
+                      ) : (
+                        <span className="text-sm font-mono text-gray-500 dark:text-gray-400">
+                          {editedSchedule || job.expression}
+                        </span>
+                      )}
                       <button
                         onClick={() => {
                           setIsEditingSchedule(true);
@@ -782,32 +1212,52 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
                   )}
                 </td>
                 <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
-                  {isEditingCommand ? (
-                    <input
-                      ref={commandInputRef}
-                      type="text"
-                      value={editedCommand}
-                      onChange={(e) => setEditedCommand(e.target.value)}
-                      onKeyDown={handleCommandKeyDown}
-                      onBlur={() => {
-                        setIsEditingCommand(false);
-                        setEditedCommand(job.command);
-                      }}
-                      className="w-full text-sm text-gray-600 dark:text-gray-300 font-mono bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500"
-                    />
-                  ) : (
-                    <div className="flex items-center">
-                      <div className="text-sm text-gray-600 dark:text-gray-300 font-mono truncate">
-                        {job.command}
-                      </div>
-                      <button
-                        onClick={() => setIsEditingCommand(true)}
-                        className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <PencilIcon className="h-4 w-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
-                      </button>
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      {isNew ? (
+                        <input
+                          ref={commandInputRef}
+                          type="text"
+                          value={editedCommand}
+                          onChange={(e) => setEditedCommand(e.target.value)}
+                          onKeyDown={handleCommandKeyDown}
+                          onBlur={handleCommandBlur}
+                          placeholder="Command to run"
+                          className="w-full text-sm text-gray-900 dark:text-gray-100 font-mono bg-gray-50 dark:bg-gray-700/50 border-0 rounded-r-md rounded-l-none px-3 py-2 focus:outline-none"
+                        />
+                      ) : (
+                        <div className="flex items-center">
+                          {isEditingCommand ? (
+                            <input
+                              ref={commandInputRef}
+                              type="text"
+                              value={editedCommand}
+                              onChange={(e) => setEditedCommand(e.target.value)}
+                              onKeyDown={handleCommandKeyDown}
+                              onBlur={handleCommandBlur}
+                              className="w-full text-sm text-gray-900 dark:text-gray-100 font-mono bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none"
+                            />
+                          ) : (
+                            <div className="text-sm text-gray-900 dark:text-gray-100 font-mono truncate">
+                              {job.command}
+                            </div>
+                          )}
+                          <button
+                            onClick={() => setIsEditingCommand(true)}
+                            className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <PencilIcon className="h-4 w-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  )}
+                    <button
+                      onClick={() => setShowConsole(true)}
+                      className="ml-4 text-sm text-gray-900 hover:text-black dark:text-gray-300 dark:hover:text-white"
+                    >
+                      Console
+                    </button>
+                  </div>
                 </td>
               </tr>
               <tr>
@@ -817,7 +1267,8 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
                       ? 'text-gray-600 dark:text-gray-300' 
                       : 'text-pink-500 dark:text-pink-400'
                   }`}>
-                    {getScheduleDescription(editedSchedule || job.expression)} <span className="text-gray-400 dark:text-gray-500">as "{job.run_as_user || 'default'}"</span>
+                    {scheduleDescription}
+                    {job.run_as_user && <span className="text-gray-400 dark:text-gray-500"> as "{job.run_as_user}"</span>}
                     {nextExecutionTimes.length > 0 ? (
                       <span className="text-gray-400 dark:text-gray-500">
                         {' '}<span className="text-gray-700 dark:text-gray-200 ml-4">Next at</span>{' '}
@@ -900,21 +1351,60 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
             <thead>
               <tr>
                 <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[25%] min-w-[200px]">Monitoring</th>
-                <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Location</th>
+                <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[37.5%]">Location</th>
+                {isNew && selectedLocation && !isUserCrontab && (
+                  <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[37.5%]">User</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               <tr>
                 <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
                   <div className="flex items-center space-x-2">
-                    <StatusIndicator job={job} mutate={mutate} allJobs={allJobs} />
+                    <StatusIndicator job={job} mutate={mutate} allJobs={allJobs} isNew={isNew} onFormChange={onFormChange} />
                   </div>
                 </td>
                 <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
-                  <div>
-                    {job.cron_file.startsWith('user') ? 'User' + job.cron_file.slice(4) : job.cron_file} L{job.line_number}
-                  </div>
+                  {isNew ? (
+                    <div className="mb-4">
+                      <select
+                        value={selectedLocation}
+                        onChange={handleLocationChange}
+                        className="w-full bg-gray-50 dark:bg-gray-700/50 border-0 focus:ring-1 focus:ring-blue-500/50 rounded-md px-3 py-2"
+                      >
+                        <option value="">Select a location</option>
+                        {cronFiles.map((file) => (
+                          <option key={file.filename} value={file.filename}>
+                            {file.display_name}
+                          </option>
+                        ))}
+                        <option value="/etc/cron.d">/etc/cron.d (New Crontab)</option>
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      {job.crontab_filename.startsWith('user') ? 'User' + job.crontab_filename.slice(4) : job.crontab_filename} L{job.line_number}
+                    </div>
+                  )}
                 </td>
+                {isNew && (
+                  <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                    <div className="mb-4">
+                      {selectedLocation && !isUserCrontab ? (
+                        <select
+                          value={selectedUser}
+                          onChange={handleUserChange}
+                          className="w-full bg-gray-50 dark:bg-gray-700/50 border-0 focus:ring-1 focus:ring-blue-500/50 rounded-md px-3 py-2"
+                        >
+                          <option value="">Select a user</option>
+                          {users.map((user) => (
+                            <option key={user} value={user}>{user}</option>
+                          ))}
+                        </select>
+                      ) : null}
+                    </div>
+                  </td>
+                )}
               </tr>
             </tbody>
           </table>
@@ -1002,134 +1492,213 @@ function JobCard({ job: initialJob, mutate, allJobs }) {
           </div>
         )}
 
-        {/* Editing Indicator */}
-        {(isEditing || isEditingCommand || isEditingSchedule || savingStatus === 'saved') && (
-          <div className="absolute bottom-0 right-0">
+        {/* Suspended Job Overlay */}
+        {showSuspendedOverlay && (
+          <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center z-10">
+            <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl max-w-lg w-full mx-4 relative">
+              <CloseButton onClick={() => setShowSuspendedOverlay(false)} />
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+                {job.suspended ? 'Suspended Job' : 'Scheduled Job'}
+              </h3>
+              <p className="text-gray-600 dark:text-gray-300 mb-4">
+                {job.suspended 
+                  ? 'This job is suspended and will not be run at its scheduled time.'
+                  : 'This job will run at its scheduled time. If you suspend this job, it will be commented-out in the crontab.'}
+              </p>
+              {!job.suspended && job.is_monitored && (
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Pause monitoring
+                  </label>
+                  <select
+                    className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236B7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22M6%208l4%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.5rem_center] bg-no-repeat"
+                    value={job.pause_hours || ''}
+                    onChange={(e) => {
+                      const updatedJobs = allJobs.map(j => {
+                        if (j.key === job.key) {
+                          return { ...j, pause_hours: e.target.value };
+                        }
+                        return j;
+                      });
+                      mutate(updatedJobs, false);
+                    }}
+                  >
+                    <option value="">Indefinitely</option>
+                    <option value="1">1 hour</option>
+                    <option value="12">12 hours</option>
+                    <option value="24">1 day</option>
+                    <option value="48">2 days</option>
+                    <option value="120">5 days</option>
+                    <option value="240">10 days</option>
+                    <option value="720">30 days</option>
+                  </select>
+                </div>
+              )}
+              <div className="flex justify-end space-x-4">
+                <button
+                  onClick={async () => {
+                    // Dismiss modal immediately
+                    setShowSuspendedOverlay(false);
+
+                    // Optimistic update
+                    const optimisticData = allJobs.map(j => {
+                      if (j.key === job.key) {
+                        return { ...j, suspended: !job.suspended };
+                      }
+                      return j;
+                    });
+                    mutate(optimisticData, false);
+
+                    try {
+                      const response = await fetch('/api/jobs', {
+                        method: 'PUT',
+                        headers: {
+                          'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                          ...job,
+                          suspended: !job.suspended,
+                          pause_hours: !job.suspended && job.is_monitored ? job.pause_hours : job.suspended && job.is_monitored ? "0" : null,
+                        }),
+                      });
+
+                      if (!response.ok) {
+                        throw new Error('Failed to update job status');
+                      }
+
+                      // Invalidate the cache to trigger a refresh
+                      mutate();
+                    } catch (error) {
+                      // Revert optimistic update on error
+                      const revertedData = allJobs.map(j => {
+                        if (j.key === job.key) {
+                          return { ...j, suspended: job.suspended };
+                        }
+                        return j;
+                      });
+                      mutate(revertedData, false);
+                      console.error('Error updating job status:', error);
+                    }
+                  }}
+                  className={`px-4 py-2 text-sm font-medium text-white rounded-md ${
+                    job.suspended 
+                      ? 'bg-green-600 hover:bg-green-700' 
+                      : 'bg-red-600 hover:bg-red-700'
+                  }`}
+                >
+                  {job.suspended ? 'Activate Job' : 'Suspend Job'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSuspendedOverlay(false);
+                    setShowDeleteConfirmation(true);
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md"
+                >
+                  Delete Job
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteConfirmation && (
+          <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center z-10">
+            <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl max-w-lg w-full mx-4 relative">
+              <CloseButton onClick={() => setShowDeleteConfirmation(false)} />
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+                Delete Job
+              </h3>
+              <p className="text-gray-600 dark:text-gray-300 mb-4">
+                Type DELETE to confirm. This cannot be undone.
+              </p>
+              <input
+                type="text"
+                placeholder="DELETE"
+                value={deleteConfirmation}
+                onChange={(e) => setDeleteConfirmation(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-red-500 focus:border-red-500"
+              />
+              <div className="mt-4 flex justify-end">
+                <button
+                  onClick={async () => {
+                    if (deleteConfirmation.toLowerCase() !== 'delete') {
+                      return;
+                    }
+
+                    // Optimistic update - remove the job from the list
+                    const optimisticData = allJobs.filter(j => j.key !== job.key);
+                    mutate(optimisticData, false);
+
+                    try {
+                      const response = await fetch('/api/jobs', {
+                        method: 'DELETE',
+                        headers: {
+                          'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(job),
+                      });
+
+                      if (!response.ok) {
+                        throw new Error('Failed to delete job');
+                      }
+
+                      // Invalidate the cache to trigger a refresh
+                      mutate();
+                    } catch (error) {
+                      // Revert optimistic update on error
+                      mutate(allJobs, false);
+                      console.error('Error deleting job:', error);
+                    }
+
+                    setShowDeleteConfirmation(false);
+                    setDeleteConfirmation('');
+                  }}
+                  disabled={deleteConfirmation.toLowerCase() !== 'delete'}
+                  className={`px-4 py-2 text-sm font-medium text-white rounded-md ${
+                    deleteConfirmation.toLowerCase() === 'delete'
+                      ? 'bg-red-600 hover:bg-red-700'
+                      : 'bg-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  Delete Job
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showConsole && <ConsoleModal 
+          job={job} 
+          onClose={() => setShowConsole(false)} 
+          isNew={isNew}
+          onFormChange={onFormChange}
+        />}
+
+        {/* Save/Discard Buttons for New Jobs */}
+        {isNew && (
+          <div className="mt-4 flex justify-end space-x-4">
             <button
-              onClick={() => {
-                if (savingStatus === 'saved') return;
-                if (isEditing) handleSave();
-                else if (isEditingCommand) handleCommandSave();
-                else if (isEditingSchedule) handleScheduleSave();
-              }}
-              className={`inline-flex items-center px-2.5 py-0.5 rounded-tl-lg rounded-br-lg text-sm font-medium ${
-                savingStatus === 'saving' 
-                  ? 'bg-yellow-400 text-white hover:bg-yellow-500'
-                  : savingStatus === 'saved'
-                  ? 'bg-green-400 text-white hover:bg-green-500'
-                  : 'bg-green-400 text-white hover:bg-green-500'
-              } z-20`}
-              style={{ 
-                opacity: 1,
-                pointerEvents: savingStatus === 'saved' ? 'none' : 'auto'
-              }}
+              onClick={handleDiscard}
+              className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             >
-              {savingStatus === 'saving' ? 'Saving...' : savingStatus === 'saved' ? 'Saved!' : 'Editing...'}
+              Discard
+            </button>
+            <button
+              onClick={onSave}
+              disabled={!editedName || !editedSchedule || !editedCommand || !editedCronFile || (!editedCronFile.startsWith('user') && !editedRunAsUser)}
+              className={`px-4 py-2 text-sm font-medium text-white rounded-md ${
+                !editedName || !editedSchedule || !editedCommand || !editedCronFile || (!editedCronFile.startsWith('user') && !editedRunAsUser)
+                  ? 'bg-gray-400 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
+            >
+              Save
             </button>
           </div>
         )}
       </div>
-
-      {/* Suspended Job Overlay */}
-      {showSuspendedOverlay && (
-        <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center z-10">
-          <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl max-w-lg w-full mx-4 relative">
-            <CloseButton onClick={() => setShowSuspendedOverlay(false)} />
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-              {job.suspended ? 'Suspended Job' : 'Scheduled Job'}
-            </h3>
-            <p className="text-gray-600 dark:text-gray-300 mb-4">
-              {job.suspended 
-                ? 'This job is suspended and will not be run at its scheduled time.'
-                : 'This job will run at its scheduled time. If you suspend this job, it will be commented-out in the crontab.'}
-            </p>
-            {!job.suspended && job.is_monitored && (
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Pause monitoring
-                </label>
-                <select
-                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236B7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22M6%208l4%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.5rem_center] bg-no-repeat"
-                  value={job.pause_hours || ''}
-                  onChange={(e) => {
-                    const updatedJobs = allJobs.map(j => {
-                      if (j.key === job.key) {
-                        return { ...j, pause_hours: e.target.value };
-                      }
-                      return j;
-                    });
-                    mutate(updatedJobs, false);
-                  }}
-                >
-                  <option value="">Indefinitely</option>
-                  <option value="1">1 hour</option>
-                  <option value="12">12 hours</option>
-                  <option value="24">1 day</option>
-                  <option value="48">2 days</option>
-                  <option value="120">5 days</option>
-                  <option value="240">10 days</option>
-                  <option value="720">30 days</option>
-                </select>
-              </div>
-            )}
-            <div className="flex justify-end">
-              <button
-                onClick={async () => {
-                  // Dismiss modal immediately
-                  setShowSuspendedOverlay(false);
-
-                  // Optimistic update
-                  const optimisticData = allJobs.map(j => {
-                    if (j.key === job.key) {
-                      return { ...j, suspended: !job.suspended };
-                    }
-                    return j;
-                  });
-                  mutate(optimisticData, false);
-
-                  try {
-                    const response = await fetch('/api/jobs', {
-                      method: 'PUT',
-                      headers: {
-                        'Content-Type': 'application/json',
-                      },
-                      body: JSON.stringify({
-                        ...job,
-                        suspended: !job.suspended,
-                        pause_hours: !job.suspended && job.is_monitored ? job.pause_hours : job.suspended && job.is_monitored ? "0" : null,
-                      }),
-                    });
-
-                    if (!response.ok) {
-                      throw new Error('Failed to update job status');
-                    }
-
-                    // Invalidate the cache to trigger a refresh
-                    mutate();
-                  } catch (error) {
-                    // Revert optimistic update on error
-                    const revertedData = allJobs.map(j => {
-                      if (j.key === job.key) {
-                        return { ...j, suspended: job.suspended };
-                      }
-                      return j;
-                    });
-                    mutate(revertedData, false);
-                    console.error('Error updating job status:', error);
-                  }
-                }}
-                className={`px-4 py-2 text-sm font-medium text-white rounded-md ${
-                  job.suspended 
-                    ? 'bg-green-600 hover:bg-green-700' 
-                    : 'bg-red-600 hover:bg-red-700'
-                }`}
-              >
-                {job.suspended ? 'Activate Job' : 'Suspend Job'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1139,18 +1708,96 @@ export default function Jobs() {
     refreshInterval: 5000, // Refresh every 5 seconds
     revalidateOnFocus: true, // Refresh when tab regains focus
   });
+  const [showNewJob, setShowNewJob] = React.useState(false);
+  const [newJobForm, setNewJobForm] = React.useState({
+    name: '',
+    expression: '',
+    command: '',
+    crontab_filename: '',
+    run_as_user: '',
+    is_monitored: false,
+    is_draft: true
+  });
+  const [isToastVisible, setIsToastVisible] = React.useState(false);
+  const [toastMessage, setToastMessage] = React.useState('');
+  const [toastType, setToastType] = React.useState('error');
+
+  const showToast = (message, type = 'error') => {
+    setToastMessage(message);
+    setToastType(type);
+    setIsToastVisible(true);
+    setTimeout(() => setIsToastVisible(false), 3000);
+  };
 
   if (error) return <div className="text-gray-600 dark:text-gray-300">Failed to load jobs</div>;
   if (!jobs) return <div className="text-gray-600 dark:text-gray-300">Loading...</div>;
 
+  const handleSaveNewJob = async () => {
+    try {
+      const response = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(newJobForm),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create job');
+      }
+
+      setShowNewJob(false);
+      setNewJobForm({
+        name: '',
+        expression: '',
+        command: '',
+        crontab_filename: '',
+        run_as_user: '',
+        is_monitored: false,
+        is_draft: true
+      });
+      mutate();
+    } catch (error) {
+      console.error('Error creating job:', error);
+      showToast('Failed to create job: ' + error.message);
+    }
+  };
+
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-6 -mt-1.5">Jobs</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white -mt-1.5">Jobs</h1>
+        <button
+          onClick={() => setShowNewJob(true)}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium"
+        >
+          Add Job
+        </button>
+      </div>
       <div className="space-y-4">
+        {showNewJob && (
+          <JobCard 
+            job={newJobForm} 
+            mutate={mutate} 
+            allJobs={jobs} 
+            isNew={true}
+            onSave={handleSaveNewJob}
+            onDiscard={() => setShowNewJob(false)}
+            onFormChange={setNewJobForm}
+            showToast={showToast}
+          />
+        )}
         {jobs.map((job, index) => (
-          <JobCard key={index} job={job} mutate={mutate} allJobs={jobs} />
+          <JobCard 
+            key={index} 
+            job={job} 
+            mutate={mutate} 
+            allJobs={jobs} 
+            showToast={showToast}
+          />
         ))}
       </div>
+      {isToastVisible && <Toast message={toastMessage} onClose={() => setIsToastVisible(false)} type={toastType} />}
     </div>
   );
 } 

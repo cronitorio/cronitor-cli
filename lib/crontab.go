@@ -2,6 +2,7 @@ package lib
 
 import (
 	"crypto/sha1"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -23,13 +24,13 @@ type TimezoneLocationName struct {
 }
 
 type Crontab struct {
-	User                    string
-	IsUserCrontab           bool
-	IsSaved                 bool
-	Filename                string
-	Lines                   []*Line
-	TimezoneLocationName    *TimezoneLocationName
-	UsesSixFieldExpressions bool
+	User                    string                `json:"-"`
+	IsUserCrontab           bool                  `json:"isUserCrontab"`
+	IsSaved                 bool                  `json:"-"`
+	Filename                string                `json:"filename"`
+	Lines                   []*Line               `json:"-"`
+	TimezoneLocationName    *TimezoneLocationName `json:"timezone,omitempty"`
+	UsesSixFieldExpressions bool                  `json:"-"`
 }
 
 func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
@@ -188,10 +189,10 @@ func (c Crontab) Save(crontabLines string) error {
 
 func (c Crontab) DisplayName() string {
 	if c.IsUserCrontab {
-		if u, err := user.Current(); err == nil {
-			return fmt.Sprintf("user \"%s\" crontab", u.Username)
+		if strings.HasPrefix(c.Filename, "user:") {
+			username := strings.TrimPrefix(c.Filename, "user:")
+			return fmt.Sprintf("user \"%s\" crontab", username)
 		}
-
 		return "user crontab"
 	}
 
@@ -279,6 +280,20 @@ func (c Crontab) load() ([]string, int, error) {
 	}
 
 	return strings.Split(string(crontabBytes), "\n"), 0, nil
+}
+
+// MarshalJSON implements custom JSON marshaling to include both Filename and DisplayName
+func (c Crontab) MarshalJSON() ([]byte, error) {
+	type Alias Crontab
+	return json.Marshal(&struct {
+		Alias
+		DisplayName string `json:"display_name"`
+		Timezone    string `json:"timezone,omitempty"`
+	}{
+		Alias:       Alias(c),
+		DisplayName: c.DisplayName(),
+		Timezone:    c.TimezoneLocationName.Name,
+	})
 }
 
 type Line struct {
@@ -432,35 +447,23 @@ func isSixFieldCronExpression(splitLine []string) bool {
 	return matchDigitOrWildcard || matchDayOfWeekStringRange || matchDayOfWeekStringList
 }
 
-func EnumerateCrontabFiles(dirToEnumerate string) []string {
-	var fileList []string
-	files, err := ioutil.ReadDir(dirToEnumerate)
-	if err != nil {
-		return fileList
+func CurrentUserCrontab() string {
+	if u, err := user.Current(); err == nil {
+		return fmt.Sprintf("user:%s", u.Username)
 	}
-
-	for _, f := range files {
-		firstChar := string([]rune(f.Name())[0])
-		if firstChar == "." {
-			continue
-		}
-
-		fileList = append(fileList, filepath.Join(dirToEnumerate, f.Name()))
-	}
-
-	return fileList
+	return ""
 }
 
 func CrontabFactory(username, filename string) *Crontab {
 	return &Crontab{
 		User:          username,
-		IsUserCrontab: filename == "",
+		IsUserCrontab: strings.HasPrefix(filename, "user:"),
 		Filename:      filename,
 	}
 }
 
 func ReadCrontabsInDirectory(username, directory string, crontabs []*Crontab) []*Crontab {
-	files := EnumerateCrontabFiles(directory)
+	files := EnumerateFiles(directory)
 	if len(files) > 0 {
 		for _, crontabFile := range files {
 			crontab := CrontabFactory(username, crontabFile)
@@ -473,7 +476,7 @@ func ReadCrontabsInDirectory(username, directory string, crontabs []*Crontab) []
 }
 
 func ReadCrontabFromFile(username, filename string, crontabs []*Crontab) []*Crontab {
-	if _, err := os.Stat(filename); filename != "" && os.IsNotExist(err) {
+	if _, err := os.Stat(filename); !strings.HasPrefix(filename, "user:") && os.IsNotExist(err) {
 		return crontabs
 	}
 
@@ -481,4 +484,46 @@ func ReadCrontabFromFile(username, filename string, crontabs []*Crontab) []*Cron
 	crontab.Parse(true)
 	crontabs = append(crontabs, crontab)
 	return crontabs
+}
+
+// GetAllCrontabs returns a slice of all available Crontab objects.
+func GetAllCrontabs() ([]*Crontab, error) {
+	var crontabs []*Crontab
+	var username string
+
+	// Get current username for user crontabs
+	if u, err := user.Current(); err == nil {
+		username = u.Username
+	}
+
+	// Read user crontab
+	crontabs = ReadCrontabFromFile(username, CurrentUserCrontab(), crontabs)
+
+	// Read system crontab if it exists
+	if systemCrontab := CrontabFactory(username, SYSTEM_CRONTAB); systemCrontab.Exists() {
+		crontabs = ReadCrontabFromFile(username, SYSTEM_CRONTAB, crontabs)
+	}
+
+	// Read crontabs from drop-in directory
+	crontabs = ReadCrontabsInDirectory(username, DROP_IN_DIRECTORY, crontabs)
+
+	return crontabs, nil
+}
+
+// GetCrontab returns a single Crontab object for the specified filename.
+// The filename can be either a full path to a crontab file or a user crontab in the form "user:<username>".
+func GetCrontab(filename string) (*Crontab, error) {
+	var username string
+
+	if strings.HasPrefix(filename, "user:") {
+		username = strings.TrimPrefix(filename, "user:")
+	} else if u, err := user.Current(); err == nil {
+		username = u.Username
+	}
+
+	crontabs := ReadCrontabFromFile(username, filename, []*Crontab{})
+	if len(crontabs) == 0 {
+		return nil, fmt.Errorf("no crontab found at %s", filename)
+	}
+	return crontabs[0], nil
 }

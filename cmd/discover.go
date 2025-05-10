@@ -214,7 +214,7 @@ Example where you perform a dry-run without any crontab modifications:
 func processDirectory(username, directory string) {
 	// Look for crontab files in the system drop-in directory but only prompt to import them
 	// if the directory is writable for this user.
-	files := lib.EnumerateCrontabFiles(directory)
+	files := lib.EnumerateFiles(directory)
 	if len(files) > 0 {
 		testCrontab := lib.CrontabFactory(username, files[0])
 		if !testCrontab.IsWritable() {

@@ -47,8 +47,22 @@ function nextDate(normalizedSchedule, startDate, invocation) {
 }
 
 module.exports = function(normalizedSchedule, startDate) {
-  if (!Object.keys(normalizedSchedule).length || !normalizedSchedule.months.length || !normalizedSchedule.dates.length || !normalizedSchedule.weekdays.length || !normalizedSchedule.hours.length || !normalizedSchedule.minutes.length) {
+  if (!normalizedSchedule || typeof normalizedSchedule !== 'object') {
     return null;
   }
+
+  // Check if all required arrays exist and have length
+  const requiredArrays = ['months', 'dates', 'weekdays', 'hours', 'minutes'];
+  for (const arrayName of requiredArrays) {
+    if (!Array.isArray(normalizedSchedule[arrayName]) || normalizedSchedule[arrayName].length === 0) {
+      return null;
+    }
+  }
+
+  // Check if daysAnded property exists
+  if (typeof normalizedSchedule.daysAnded !== 'boolean') {
+    return null;
+  }
+
   return nextDate(normalizedSchedule, roundUpSeconds(startDate), 1);
 };
