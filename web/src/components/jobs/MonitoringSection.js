@@ -1,0 +1,85 @@
+import React from 'react';
+import { useJobMonitoring } from '../../hooks/useJobMonitoring';
+import { BellSlashIcon } from '@heroicons/react/24/outline';
+
+export function MonitoringSection({ job, onUpdate, onShowLearnMore }) {
+  const { isLoading, handleToggle, getStatusInfo } = useJobMonitoring(job, onUpdate);
+  const statusInfo = getStatusInfo();
+
+  if (!statusInfo) return null;
+
+  const StatusTag = ({ children, ...props }) => {
+    if (job.code) {
+      return (
+        <a
+          href={`https://cronitor.io/app/monitors/${job.code}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          {...props}
+        >
+          {children}
+        </a>
+      );
+    }
+    return <div {...props}>{children}</div>;
+  };
+
+  const handleLearnMoreClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof onShowLearnMore === 'function') {
+      onShowLearnMore();
+    } else {
+      console.error('onShowLearnMore is not a function:', onShowLearnMore);
+    }
+  };
+
+  return (
+    <div className="flex items-center space-x-2">
+      <div className="flex items-center justify-between space-x-4">
+        <div className="flex items-center">
+          <button
+            onClick={handleToggle}
+            disabled={isLoading}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 mr-4 ${
+              job.is_monitored ? 'bg-green-500' : 'bg-red-500'
+            }`}
+            title={job.is_monitored ? 'Monitoring enabled' : 'Monitoring disabled'}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                job.is_monitored ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+          {job.is_monitored ? (
+            <>
+              {job.paused || job.disabled ? (
+                <StatusTag
+                  className="inline-flex items-center px-2.5 py-0.5 text-sm font-medium bg-gray-100 text-red-600 dark:bg-gray-700 dark:text-red-400 rounded-l-full border-r border-white dark:border-gray-600"
+                  title="Alerts: Off"
+                >
+                  <BellSlashIcon className="h-5 w-5" />
+                </StatusTag>
+              ) : null}
+              <StatusTag
+                className={`inline-flex items-center px-2.5 py-0.5 text-sm font-medium ${statusInfo.color} ${(job.paused || job.disabled) ? 'rounded-l-none' : 'rounded-l-full'} rounded-r-full`}
+                title={statusInfo.title}
+              >
+                <span>{statusInfo.text}</span>
+              </StatusTag>
+            </>
+          ) : (
+            <button
+              onClick={handleLearnMoreClick}
+              className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+              title="Learn more about monitoring"
+            >
+              Learn More
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+} 
