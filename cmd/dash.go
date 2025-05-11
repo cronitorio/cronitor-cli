@@ -470,7 +470,7 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 				Command:            line.CommandToRun,
 				Expression:         line.CronExpression,
 				RunAsUser:          runAsUser,
-				CrontabDisplayName: crontab.DisplayName(),
+				CrontabDisplayName: strings.Replace(crontab.DisplayName(), "user ", "User ", 1),
 				CrontabFilename:    crontab.Filename,
 				LineNumber:         line.LineNumber + 1,
 				IsMonitored:        len(line.Code) > 0,

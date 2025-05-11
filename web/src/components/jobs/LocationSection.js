@@ -43,7 +43,7 @@ export function LocationSection({
         </>
       ) : (
         <div>
-          {job.crontab_filename.startsWith('user') ? 'User' + job.crontab_filename.slice(4) : job.crontab_filename} L{job.line_number}
+          {job.crontab_display_name} L{job.line_number}
         </div>
       )}
     </div>

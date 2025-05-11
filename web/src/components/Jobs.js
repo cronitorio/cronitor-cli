@@ -13,7 +13,7 @@ const fetcher = async url => {
     return res.json();
   } catch (error) {
     if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
-      throw new Error('Unable to connect to server. Please check if the server is running and try again.');
+      throw new Error(`Unable to connect to the dash server.  Check that it's running and try again.`);
     }
     throw error;
   }
@@ -54,7 +54,7 @@ export default function Jobs() {
   };
 
   if (error) return (
-    <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+    <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
       <div className="flex">
         <div className="flex-shrink-0">
           <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
@@ -66,12 +66,13 @@ export default function Jobs() {
           <div className="mt-2 text-sm text-red-700 dark:text-red-300">
             <pre className="whitespace-pre-wrap break-words">{error.message}</pre>
           </div>
-          {error.message.includes('Unable to connect to server') && (
+          {error.message.includes('Unable to connect') && (
             <div className="mt-2 text-sm text-red-700 dark:text-red-300">
               <p>Possible causes:</p>
               <ul className="list-disc list-inside mt-1">
-                <li>The server is not running</li>
-                <li>Network connectivity issues</li>
+                <li>The dash server is not running</li>
+                <li>Your IP is not whitelisted</li>
+                <li>A VPN connection is required</li>
                 <li>Server is restarting</li>
               </ul>
             </div>

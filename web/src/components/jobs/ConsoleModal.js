@@ -176,7 +176,7 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style={{ margin: '0px' }}>
       <div className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg shadow-xl w-[calc(100%-2rem)] max-w-6xl mx-4 relative">
         <CloseButton onClick={onClose} />
         <div className="p-4">

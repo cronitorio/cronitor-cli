@@ -196,12 +196,15 @@ export function useJobOperations() {
 
   const killJobProcess = useCallback(async (pids) => {
     try {
+      // Convert string PIDs to integers
+      const numericPids = pids.map(pid => parseInt(pid, 10));
+      
       const response = await fetch('/api/jobs/kill', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ pids }),
+        body: JSON.stringify({ pids: numericPids }),
       });
 
       if (!response.ok) {

@@ -10,7 +10,7 @@ export function SuspendOverlay({
   mutate
 }) {
   return (
-    <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center z-10">
+    <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center z-10" style={{ top: '-8px' }}>
       <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl max-w-lg w-full mx-4 relative">
         <CloseButton onClick={onClose} />
         <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
@@ -53,10 +53,10 @@ export function SuspendOverlay({
         <div className="flex justify-end space-x-4">
           <button
             onClick={onToggleSuspension}
-            className={`px-4 py-2 text-sm font-medium text-white rounded-md ${
+            className={`px-4 py-2 text-sm font-medium rounded-md ${
               job.suspended 
-                ? 'bg-green-600 hover:bg-green-700' 
-                : 'bg-red-600 hover:bg-red-700'
+                ? 'bg-green-600 hover:bg-green-700 text-white' 
+                : 'bg-red-50 text-red-500 border-[4px] border-red-600 hover:bg-red-100'
             }`}
           >
             {job.suspended ? 'Activate Job' : 'Suspend Job'}
