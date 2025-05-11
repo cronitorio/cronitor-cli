@@ -56,7 +56,7 @@ export function SuspendOverlay({
             className={`px-4 py-2 text-sm font-medium rounded-md ${
               job.suspended 
                 ? 'bg-green-600 hover:bg-green-700 text-white' 
-                : 'bg-red-50 text-red-500 border-[4px] border-red-600 hover:bg-red-100'
+                : 'bg-red-50 text-red-500 border-[3px] border-red-600 hover:bg-red-100'
             }`}
           >
             {job.suspended ? 'Activate Job' : 'Suspend Job'}

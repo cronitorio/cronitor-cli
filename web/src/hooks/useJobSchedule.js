@@ -40,19 +40,22 @@ export function useJobSchedule(expression, timezone) {
     // Calculate immediately
     calculateTimes();
 
-    // Calculate the time until the next minute
+    // If the expression is being edited, update more frequently
+    if (expression && isValid) {
+      const interval = setInterval(calculateTimes, 1000);
+      return () => clearInterval(interval);
+    }
+
+    // For non-editing state, update every minute
     const now = new Date();
     const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
 
-    // Set initial timeout to align with the next minute
     const initialTimeout = setTimeout(() => {
       calculateTimes();
-      // Then set up interval for every minute
       const interval = setInterval(calculateTimes, 60000);
       return () => clearInterval(interval);
     }, msUntilNextMinute);
 
-    // Clean up timeout and interval on unmount or when dependencies change
     return () => {
       clearTimeout(initialTimeout);
     };
