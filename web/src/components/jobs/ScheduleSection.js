@@ -11,7 +11,8 @@ export function ScheduleSection({
   onEditStart,
   onEditEnd,
   onKeyDown,
-  showDescription = true
+  showDescription = true,
+  isNew = false
 }) {
   const [showNextTimes, setShowNextTimes] = React.useState(false);
   const { scheduleDescription, isValid, nextExecutionTimes } = useJobSchedule(
@@ -32,19 +33,25 @@ export function ScheduleSection({
             onChange={(e) => onScheduleChange(e.target.value)}
             onKeyDown={onKeyDown}
             onBlur={onEditEnd}
-            className="w-full text-sm font-mono bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none"
+            className={isNew 
+              ? "w-full text-sm font-mono rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white px-3 py-2" 
+              : "w-full text-sm font-mono bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none"
+            }
+            placeholder={isNew ? "* * * * *" : ""}
           />
         ) : (
           <span className="text-sm font-mono text-gray-500 dark:text-gray-400">
             {editedSchedule || job.expression}
           </span>
         )}
-        <button
-          onClick={onEditStart}
-          className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
-        >
-          <PencilIcon className="h-4 w-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
-        </button>
+        {!isNew && (
+          <button
+            onClick={onEditStart}
+            className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
+          >
+            <PencilIcon className="h-4 w-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
+          </button>
+        )}
       </div>
     );
   }
@@ -96,9 +103,7 @@ export function ScheduleSection({
           )}
         </span>
       ) : (
-        <span className="text-gray-400 dark:text-gray-500">
-          {' '}No upcoming executions
-        </span>
+        <span className="text-gray-400 dark:text-gray-500"></span>
       )}
       {showNextTimes && nextExecutionTimes.length > 0 && (
         <div className="mt-2">

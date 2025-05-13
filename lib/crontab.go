@@ -162,10 +162,6 @@ func (c Crontab) Write() string {
 }
 
 func (c Crontab) Save(crontabLines string) error {
-	if crontabLines == "" {
-		return errors.New("cannot save crontab, file is empty")
-	}
-
 	if c.IsUserCrontab {
 		cmd := exec.Command("crontab", "-")
 
@@ -285,6 +281,10 @@ func (c Crontab) load() ([]string, int, error) {
 // MarshalJSON implements custom JSON marshaling to include both Filename and DisplayName
 func (c Crontab) MarshalJSON() ([]byte, error) {
 	type Alias Crontab
+	timezone := ""
+	if c.TimezoneLocationName != nil {
+		timezone = c.TimezoneLocationName.Name
+	}
 	return json.Marshal(&struct {
 		Alias
 		DisplayName string `json:"display_name"`
@@ -292,7 +292,7 @@ func (c Crontab) MarshalJSON() ([]byte, error) {
 	}{
 		Alias:       Alias(c),
 		DisplayName: c.DisplayName(),
-		Timezone:    c.TimezoneLocationName.Name,
+		Timezone:    timezone,
 	})
 }
 

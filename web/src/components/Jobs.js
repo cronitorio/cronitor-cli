@@ -2,6 +2,10 @@ import React from 'react';
 import useSWR from 'swr';
 import { JobCard } from './jobs/JobCard';
 import { Toast } from './Toast';
+import { Dialog } from '@headlessui/react';
+import { XMarkIcon } from '@heroicons/react/24/outline';
+import { CloseButton } from './CloseButton';
+import { NewCrontabOverlay } from './jobs/NewCrontabOverlay';
 
 const fetcher = async url => {
   try {
@@ -24,7 +28,14 @@ export default function Jobs() {
     refreshInterval: 5000,
     revalidateOnFocus: true
   });
+  const { data: settings } = useSWR('/api/settings', fetcher);
   const [showNewJob, setShowNewJob] = React.useState(false);
+  const [showNewCrontab, setShowNewCrontab] = React.useState(false);
+  const [newCrontabForm, setNewCrontabForm] = React.useState({
+    filename: '',
+    timezone: '',
+    comments: ''
+  });
   const [newJobForm, setNewJobForm] = React.useState({
     name: '',
     expression: '',
@@ -39,6 +50,16 @@ export default function Jobs() {
   const [toastType, setToastType] = React.useState('error');
   const [isReloading, setIsReloading] = React.useState(false);
 
+  // Update timezone when settings are loaded
+  React.useEffect(() => {
+    if (settings?.timezone) {
+      setNewCrontabForm(prev => ({
+        ...prev,
+        timezone: settings.timezone
+      }));
+    }
+  }, [settings]);
+
   const showToast = (message, type = 'error') => {
     setToastMessage(message);
     setToastType(type);
@@ -51,6 +72,71 @@ export default function Jobs() {
     await mutate();
     // Ensure loading state shows for at least 1 second
     setTimeout(() => setIsReloading(false), 1000);
+  };
+
+  const handleCreateCrontab = async () => {
+    try {
+      if (!newCrontabForm.timezone && settings?.timezone) {
+        // Ensure timezone is set even if the form wasn't updated
+        setNewCrontabForm(prev => ({
+          ...prev,
+          timezone: settings.timezone
+        }));
+      }
+      
+      const response = await fetch('/api/crontabs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          filename: newCrontabForm.filename,
+          TimezoneLocationName: {
+            Name: newCrontabForm.timezone
+          }
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create crontab');
+      }
+
+      const crontab = await response.json();
+      
+      // Update the job form with the new crontab details
+      setNewJobForm(prev => ({
+        ...prev,
+        crontab_filename: crontab.filename,
+        crontab_display_name: crontab.display_name,
+        timezone: crontab.timezone,
+        run_as_user: crontab.is_user_crontab ? crontab.user : ''
+      }));
+
+      setShowNewCrontab(false);
+      showToast(
+        response.status === 201 ? 'Crontab Created' : 'Crontab Already Exists',
+        'success'
+      );
+    } catch (error) {
+      console.error('Error creating crontab:', error);
+      showToast('Failed to create crontab: ' + error.message);
+    }
+  };
+
+  const handleLocationChange = (location) => {
+    if (location === '/etc/cron.d (New Crontab)') {
+      setShowNewCrontab(true);
+      return;
+    }
+
+    // Handle existing crontab selection
+    const isUserCrontab = location.startsWith('user:');
+    setNewJobForm(prev => ({
+      ...prev,
+      crontab_filename: location,
+      crontab_display_name: isUserCrontab ? `User ${location.split(':')[1]} Crontab` : location,
+      run_as_user: isUserCrontab ? location.split(':')[1] : ''
+    }));
   };
 
   if (error) return (
@@ -132,6 +218,7 @@ export default function Jobs() {
         is_draft: true
       });
       mutate();
+      showToast('Job created successfully', 'success');
     } catch (error) {
       console.error('Error creating job:', error);
       showToast('Failed to create job: ' + error.message);
@@ -149,18 +236,42 @@ export default function Jobs() {
           Add Job
         </button>
       </div>
+
       <div className="space-y-4">
         {showNewJob && (
-          <JobCard 
-            job={newJobForm} 
-            mutate={mutate} 
-            allJobs={jobs} 
-            isNew={true}
-            onSave={handleSaveNewJob}
-            onDiscard={() => setShowNewJob(false)}
-            onFormChange={setNewJobForm}
-            showToast={showToast}
-          />
+          <div className="relative">
+            <JobCard 
+              job={newJobForm} 
+              mutate={mutate} 
+              allJobs={jobs} 
+              isNew={true}
+              onSave={handleSaveNewJob}
+              onDiscard={() => setShowNewJob(false)}
+              onFormChange={setNewJobForm}
+              onLocationChange={handleLocationChange}
+              showToast={showToast}
+              isMacOS={settings?.os === 'darwin'}
+              key={showNewCrontab ? 'new-crontab' : 'no-crontab'}
+            />
+            {showNewCrontab && (
+              <NewCrontabOverlay
+                formData={newCrontabForm}
+                onFormChange={setNewCrontabForm}
+                onClose={() => {
+                  setShowNewCrontab(false);
+                  setNewJobForm(prev => ({
+                    ...prev,
+                    crontab_filename: '',
+                    crontab_display_name: '',
+                    run_as_user: ''
+                  }));
+                  handleLocationChange({ target: { value: '' } });
+                }}
+                onCreateCrontab={handleCreateCrontab}
+                timezones={settings?.timezones}
+              />
+            )}
+          </div>
         )}
         {jobs.map((job, index) => (
           <JobCard 
@@ -169,6 +280,7 @@ export default function Jobs() {
             mutate={mutate} 
             allJobs={jobs} 
             showToast={showToast}
+            isMacOS={settings?.os === 'darwin'}
           />
         ))}
       </div>

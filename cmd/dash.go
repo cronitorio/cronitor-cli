@@ -189,9 +189,6 @@ The dashboard provides a web interface for managing your Cronitor monitors and c
 		// Add run job endpoint
 		http.Handle("/api/jobs/run", authMiddleware(http.HandlerFunc(handleRunJob)))
 
-		// Add create job endpoint
-		http.Handle("/api/jobs/create", authMiddleware(http.HandlerFunc(handlePostJob)))
-
 		// Start the server in a goroutine
 		go func() {
 			fmt.Printf("Starting Cronitor dashboard on port %d...\n", port)
@@ -262,6 +259,9 @@ type SettingsResponse struct {
 	ConfigFilePath string          `json:"config_file_path"`
 	Version        string          `json:"version"`
 	Hostname       string          `json:"hostname"`
+	Timezone       string          `json:"timezone"`
+	Timezones      []string        `json:"timezones"`
+	OS             string          `json:"os"`
 }
 
 // handleSettings handles GET and POST requests for settings
@@ -284,12 +284,77 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Get list of timezones
+		timezones := []string{}
+
+		// Get the system's timezone first
+		systemTZ := effectiveTimezoneLocationName().Name
+
+		// Try to read from system timezone database
+		zoneDirs := []string{
+			"/usr/share/zoneinfo",
+			"/usr/lib/zoneinfo",
+			"/usr/share/lib/zoneinfo",
+			"/etc/zoneinfo",
+			"/var/db/timezone/zoneinfo", // macOS location
+		}
+
+		var zoneDir string
+		for _, dir := range zoneDirs {
+			if _, err := os.Stat(dir); err == nil {
+				// Follow symlinks to get the actual directory
+				realPath, err := filepath.EvalSymlinks(dir)
+				if err == nil {
+					zoneDir = realPath
+					break
+				}
+			}
+		}
+
+		if zoneDir != "" {
+			err := filepath.Walk(zoneDir, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return nil
+				}
+				// Skip the root directory itself
+				if path == zoneDir {
+					return nil
+				}
+				if !info.IsDir() {
+					// Convert path to timezone name by removing the zoneDir prefix
+					tz := strings.TrimPrefix(path, zoneDir+"/")
+					// Skip any files that don't look like timezone files
+					if strings.HasPrefix(tz, ".") {
+						return nil
+					}
+					if _, err := time.LoadLocation(tz); err == nil {
+						// Skip the system timezone as we'll add it at the top
+						if tz != systemTZ {
+							timezones = append(timezones, tz)
+						}
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				fmt.Printf("Error walking timezone directory: %v\n", err)
+			}
+		}
+
+		// Sort the timezones alphabetically
+		sort.Strings(timezones)
+
+		// Add system timezone at the top
+		timezones = append([]string{systemTZ}, timezones...)
+
 		// Create response with env var information
 		response := SettingsResponse{
 			ConfigFile:     configData,
 			ConfigFilePath: configPath,
 			Version:        Version,
 			Hostname:       effectiveHostname(),
+			Timezone:       effectiveTimezoneLocationName().Name,
+			Timezones:      timezones,
 			EnvVars: map[string]bool{
 				"CRONITOR_API_KEY":      os.Getenv(varApiKey) != "",
 				"CRONITOR_PING_API_KEY": os.Getenv(varPingApiKey) != "",
@@ -300,6 +365,7 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 				"CRONITOR_DASH_USER":    os.Getenv(varDashUsername) != "",
 				"CRONITOR_DASH_PASS":    os.Getenv(varDashPassword) != "",
 			},
+			OS: runtime.GOOS,
 		}
 
 		// Override config values with environment variables if they exist
@@ -417,6 +483,8 @@ func handleJobs(w http.ResponseWriter, r *http.Request) {
 		handlePutJob(w, r)
 	case "DELETE":
 		handleDeleteJob(w, r)
+	case "POST":
+		handlePostJob(w, r)
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -968,13 +1036,18 @@ func handlePostJob(w http.ResponseWriter, r *http.Request) {
 		job.CrontabFilename = filepath.Join("/etc/cron.d", filename)
 	}
 
-	// Check if the crontab exists
-	_, err := lib.GetCrontab(job.CrontabFilename)
+	// Get the crontab
+	crontab, err := lib.GetCrontab(job.CrontabFilename)
 	if err != nil {
-		// If the file doesn't exist and it's in /etc/cron.d, create it
-		if strings.HasPrefix(job.CrontabFilename, "/etc/cron.d") {
+		// If the file doesn't exist, create it (for both /etc/crontab and files in /etc/cron.d)
+		if os.IsNotExist(err) && (job.CrontabFilename == "/etc/crontab" || strings.HasPrefix(job.CrontabFilename, "/etc/cron.d")) {
 			// Create an empty file
 			if err := os.WriteFile(job.CrontabFilename, []byte{}, 0644); err != nil {
+				http.Error(w, fmt.Sprintf("Failed to create crontab file: %v", err), http.StatusInternalServerError)
+				return
+			}
+			crontab, err = lib.GetCrontab(job.CrontabFilename)
+			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -985,10 +1058,33 @@ func handlePostJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create the cron line
-	cronLine := fmt.Sprintf("%s %s %s", job.Expression, job.RunAsUser, job.Command)
+	if strings.HasPrefix(job.CrontabFilename, "user:") {
+		// For user crontabs, don't include the username in the command
+		// No need to use a separate cronLine variable
+	} else {
+		// For system crontabs, ensure run_as_user is included when appropriate
+		if job.RunAsUser == "" {
+			// Get current user if not specified
+			if currentUser, err := user.Current(); err == nil {
+				job.RunAsUser = currentUser.Username
+			}
+		}
+	}
 
-	// Add the line to the crontab file
-	if err := addLineToCrontab(job.CrontabFilename, cronLine); err != nil {
+	// Add the line to the crontab
+	line := &lib.Line{
+		IsJob:          true,
+		Name:           job.Name,
+		CronExpression: job.Expression,
+		CommandToRun:   job.Command,
+		RunAs:          job.RunAsUser,
+		Crontab:        *crontab,
+	}
+
+	crontab.Lines = append(crontab.Lines, line)
+
+	// Save the crontab
+	if err := crontab.Save(crontab.Write()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -1015,8 +1111,8 @@ func handlePostJob(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-// handleCrontabs handles GET requests for crontabs
-func handleCrontabs(w http.ResponseWriter, r *http.Request) {
+// handleGetCrontabs handles GET requests for crontabs
+func handleGetCrontabs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1029,8 +1125,76 @@ func handleCrontabs(w http.ResponseWriter, r *http.Request) {
 		fatal(err.Error(), 1)
 	}
 
+	// Check if /etc/crontab is already in the list
+	hasSystemCrontab := false
+	for _, crontab := range crontabs {
+		if crontab.Filename == "/etc/crontab" {
+			hasSystemCrontab = true
+			break
+		}
+	}
+
+	// Always add /etc/crontab if it's not already in the list
+	if !hasSystemCrontab {
+		username := ""
+		if u, err := user.Current(); err == nil {
+			username = u.Username
+		}
+		systemCrontab := lib.CrontabFactory(username, "/etc/crontab")
+		crontabs = append(crontabs, systemCrontab)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(crontabs)
+}
+
+// handlePostCrontabs handles POST requests to create a new crontab
+func handlePostCrontabs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var crontab lib.Crontab
+	if err := json.NewDecoder(r.Body).Decode(&crontab); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if crontab.Filename == "" {
+		http.Error(w, "Filename is required", http.StatusBadRequest)
+		return
+	}
+
+	// Try to load the crontab first to check if it exists
+	existingCrontab, err := lib.GetCrontab(crontab.Filename)
+	if err == nil {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(existingCrontab)
+		return
+	}
+
+	// Create a new crontab
+	username := ""
+	if u, err := user.Current(); err == nil {
+		username = u.Username
+	}
+
+	newCrontab := lib.CrontabFactory(username, crontab.Filename)
+
+	// Set timezone if provided
+	content := ""
+	if crontab.TimezoneLocationName != nil && crontab.TimezoneLocationName.Name != "" {
+		content = fmt.Sprintf("CRON_TZ=%s\nTZ=%s\n", crontab.TimezoneLocationName.Name, crontab.TimezoneLocationName.Name)
+	}
+
+	if err := newCrontab.Save(content); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create crontab file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(newCrontab)
 }
 
 // handleUsers handles GET requests for system users
@@ -1090,4 +1254,26 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(users)
+}
+
+// handleCrontabs handles requests for crontabs
+func handleCrontabs(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		handleGetCrontabs(w, r)
+	case "POST":
+		handlePostCrontabs(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// Helper function to check if a slice contains a string
+func contains(slice []string, str string) bool {
+	for _, v := range slice {
+		if v == str {
+			return true
+		}
+	}
+	return false
 }

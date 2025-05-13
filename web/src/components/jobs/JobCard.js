@@ -10,8 +10,10 @@ import { SuspendOverlay } from './SuspendOverlay';
 import { DeleteConfirmation } from './DeleteConfirmation';
 import { ConsoleModal } from './ConsoleModal';
 import { useJobOperations } from '../../hooks/useJobOperations';
+import { Switch } from '@headlessui/react';
+import { ClockIcon, UserIcon, DocumentTextIcon } from '@heroicons/react/24/outline';
 
-export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSave, onDiscard, onFormChange, showToast }) {
+export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSave, onDiscard, onFormChange, onLocationChange, showToast, isMacOS }) {
   const [isEditing, setIsEditing] = React.useState(isNew);
   const [isEditingCommand, setIsEditingCommand] = React.useState(isNew);
   const [isEditingSchedule, setIsEditingSchedule] = React.useState(isNew);
@@ -36,6 +38,15 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
   const [deleteConfirmation, setDeleteConfirmation] = React.useState('');
   const [showLearnMore, setShowLearnMore] = React.useState(false);
   const [job, setJob] = React.useState(initialJob);
+  const [isSuspended, setIsSuspended] = React.useState(initialJob.is_suspended);
+  const [isScheduled, setIsScheduled] = React.useState(initialJob.is_scheduled);
+  const [showSuspendedDialog, setShowSuspendedDialog] = React.useState(false);
+  const [showScheduledDialog, setShowScheduledDialog] = React.useState(false);
+  const [suspendedReason, setSuspendedReason] = React.useState('');
+  const [scheduledTime, setScheduledTime] = React.useState('');
+  const [scheduledReason, setScheduledReason] = React.useState('');
+  const [formData, setFormData] = React.useState(initialJob);
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
 
   const { jobs, createJob, updateJob, deleteJob, toggleJobMonitoring, toggleJobSuspension, killJobProcess } = useJobOperations();
 
@@ -86,6 +97,14 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     }
   }, [isNew, onFormChange, editedName, editedSchedule, editedCommand, editedCronFile, editedRunAsUser, job.is_monitored]);
 
+  const handleFormChange = (field, value) => {
+    const newData = { ...formData, [field]: value };
+    setFormData(newData);
+    if (onFormChange) {
+      onFormChange(newData);
+    }
+  };
+
   const handleSave = async () => {
     setSavingStatus('saving');
     try {
@@ -97,36 +116,125 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
       });
       setSavingStatus('saved');
       setTimeout(() => {
+        setSavingStatus(null);
         if (isEditing) setIsEditing(false);
         if (isEditingCommand) setIsEditingCommand(false);
         if (isEditingSchedule) setIsEditingSchedule(false);
-      }, 100);
+      }, 1000);
     } catch (error) {
       setSavingStatus(null);
       showToast('Failed to update job: ' + error.message);
     }
   };
 
-  const handleKill = async (pids, isAll = false) => {
-    setKillingPids(prev => new Set([...prev, ...pids]));
-    if (isAll) {
-      setIsKillingAll(true);
+  const handleDiscard = () => {
+    if (isNew) {
+      onDiscard();
+    } else {
+      setFormData(initialJob);
+      setIsEditing(false);
     }
+  };
+
+  const handleSuspendedToggle = async () => {
+    if (!isSuspended) {
+      setShowSuspendedDialog(true);
+      return;
+    }
+
     try {
-      await killJobProcess(pids);
+      const response = await fetch(`/api/jobs/${job.id}/unsuspend`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to unsuspend job');
+      }
+
+      setIsSuspended(false);
+      mutate();
+      showToast('Job unsuspended successfully', 'success');
     } catch (error) {
-      showToast('Failed to kill processes: ' + error.message);
-    } finally {
-      setTimeout(() => {
-        setKillingPids(prev => {
-          const newSet = new Set(prev);
-          pids.forEach(pid => newSet.delete(pid));
-          return newSet;
-        });
-        if (isAll) {
-          setIsKillingAll(false);
-        }
-      }, 2000);
+      console.error('Error unsuspending job:', error);
+      showToast('Failed to unsuspend job: ' + error.message);
+    }
+  };
+
+  const handleScheduledToggle = async () => {
+    if (!isScheduled) {
+      setShowScheduledDialog(true);
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/jobs/${job.id}/unschedule`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to unschedule job');
+      }
+
+      setIsScheduled(false);
+      mutate();
+      showToast('Job unscheduled successfully', 'success');
+    } catch (error) {
+      console.error('Error unscheduling job:', error);
+      showToast('Failed to unschedule job: ' + error.message);
+    }
+  };
+
+  const handleSuspendedSubmit = async () => {
+    try {
+      const response = await fetch(`/api/jobs/${job.id}/suspend`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ reason: suspendedReason }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to suspend job');
+      }
+
+      setIsSuspended(true);
+      setShowSuspendedDialog(false);
+      setSuspendedReason('');
+      mutate();
+      showToast('Job suspended successfully', 'success');
+    } catch (error) {
+      console.error('Error suspending job:', error);
+      showToast('Failed to suspend job: ' + error.message);
+    }
+  };
+
+  const handleScheduledSubmit = async () => {
+    try {
+      const response = await fetch(`/api/jobs/${job.id}/schedule`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          time: scheduledTime,
+          reason: scheduledReason,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to schedule job');
+      }
+
+      setIsScheduled(true);
+      setShowScheduledDialog(false);
+      setScheduledTime('');
+      setScheduledReason('');
+      mutate();
+      showToast('Job scheduled successfully', 'success');
+    } catch (error) {
+      console.error('Error scheduling job:', error);
+      showToast('Failed to schedule job: ' + error.message);
     }
   };
 
@@ -135,16 +243,8 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     setSelectedLocation(location);
     setEditedCronFile(location);
     
-    if (location === "/etc/cron.d") {
-      setIsUserCrontab(false);
-      setSelectedUser('');
-      const timezone = 'UTC';
-      setJob(prev => ({ ...prev, timezone }));
-      onFormChange(prev => ({
-        ...prev,
-        timezone,
-        crontab_filename: location
-      }));
+    if (location === "/etc/cron.d (New Crontab)") {
+      onLocationChange(location);
       return;
     }
     
@@ -173,6 +273,33 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     }));
   };
 
+  const handleKill = async (pids, isAll = false) => {
+    setKillingPids(prev => new Set([...prev, ...pids]));
+    if (isAll) {
+      setIsKillingAll(true);
+    }
+    try {
+      await killJobProcess(pids);
+    } catch (error) {
+      showToast('Failed to kill processes: ' + error.message);
+    } finally {
+      setTimeout(() => {
+        setKillingPids(prev => {
+          const newSet = new Set(prev);
+          pids.forEach(pid => newSet.delete(pid));
+          return newSet;
+        });
+        if (isAll) {
+          setIsKillingAll(false);
+        }
+      }, 2000);
+    }
+  };
+
+  const handleToggleSuspendedOverlay = () => {
+    setShowSuspendedOverlay(!showSuspendedOverlay);
+  };
+
   return (
     <div className={`bg-white dark:bg-gray-800 shadow rounded-lg p-4 relative ${job.suspended ? 'bg-gray-100 dark:bg-gray-700' : ''}`}>
       <StatusBadges
@@ -180,7 +307,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         instances={job.instances || []}
         showInstances={showInstances}
         onToggleInstances={() => setShowInstances(!showInstances)}
-        onToggleSuspended={() => setShowSuspendedOverlay(true)}
+        onToggleSuspended={handleToggleSuspendedOverlay}
       />
 
       {!isNew && (isEditing || isEditingCommand || isEditingSchedule || savingStatus === 'saved') && (
@@ -188,10 +315,10 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
           <div 
             className={`inline-flex items-center px-2.5 py-0.5 rounded-b-lg text-sm font-medium z-20 ${
               savingStatus === 'saving' 
-                ? 'bg-amber-400 text-white' 
+                ? 'bg-amber-400 text-gray-900' 
                 : savingStatus === 'saved'
-                ? 'bg-green-400 text-white'
-                : 'bg-green-400 text-green-900'
+                ? 'bg-green-400 text-green-950'
+                : 'bg-green-400 text-gray-900'
             } ${savingStatus === 'saved' ? 'pointer-events-none' : 'cursor-pointer'}`}
             onClick={handleSave}
           >
@@ -207,7 +334,11 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
           editedName={editedName}
           onNameChange={setEditedName}
           onEditStart={() => setIsEditing(true)}
-          onEditEnd={() => setIsEditing(false)}
+          onEditEnd={() => {
+            if (!isNew) {
+              setIsEditing(false);
+            }
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault();
@@ -217,6 +348,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
               setEditedName(job.name || job.default_name);
             }
           }}
+          isNew={isNew}
         />
 
         <div className="group relative">
@@ -239,7 +371,11 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                       setIsEditingSchedule(true);
                       setEditedSchedule(job.expression || '');
                     }}
-                    onEditEnd={() => setIsEditingSchedule(false)}
+                    onEditEnd={() => {
+                      if (!isNew) {
+                        setIsEditingSchedule(false);
+                      }
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -250,6 +386,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                       }
                     }}
                     showDescription={false}
+                    isNew={isNew}
                   />
                 </td>
                 <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
@@ -259,7 +396,11 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                     editedCommand={editedCommand}
                     onCommandChange={setEditedCommand}
                     onEditStart={() => setIsEditingCommand(true)}
-                    onEditEnd={() => setIsEditingCommand(false)}
+                    onEditEnd={() => {
+                      if (!isNew) {
+                        setIsEditingCommand(false);
+                      }
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -270,6 +411,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                       }
                     }}
                     onShowConsole={() => setShowConsole(true)}
+                    isNew={isNew}
                   />
                 </td>
               </tr>
@@ -284,7 +426,11 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                       setIsEditingSchedule(true);
                       setEditedSchedule(job.expression || '');
                     }}
-                    onEditEnd={() => setIsEditingSchedule(false)}
+                    onEditEnd={() => {
+                      if (!isNew) {
+                        setIsEditingSchedule(false);
+                      }
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -295,6 +441,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                       }
                     }}
                     showDescription={true}
+                    isNew={isNew}
                   />
                 </td>
               </tr>
@@ -303,19 +450,19 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         </div>
 
         <div className="group relative">
-          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700" style={{ tableLayout: 'fixed' }}>
             <thead>
               <tr>
                 <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[25%] min-w-[200px]">Monitoring</th>
-                <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[37.5%]">Location</th>
-                {isNew && selectedLocation && !isUserCrontab && (
-                  <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[37.5%]">User</th>
-                )}
+                <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: 'calc(75% * 0.5)' }}>Location</th>
+                <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '37.5%' }}>
+                  {isNew && selectedLocation && !isUserCrontab && <>User</>}
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               <tr>
-                <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                <td className="py-2 text-sm text-gray-900 dark:text-gray-100" style={{ width: '25%' }}>
                   <MonitoringSection
                     job={job}
                     onUpdate={async (updatedJob) => {
@@ -328,7 +475,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                     onShowLearnMore={() => setShowLearnMore(true)}
                   />
                 </td>
-                <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
+                <td className="py-2 text-sm text-gray-900 dark:text-gray-100" style={{ width: '37.5%' }}>
                   <LocationSection
                     job={job}
                     isNew={isNew}
@@ -339,8 +486,23 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                     isUserCrontab={isUserCrontab}
                     onLocationChange={handleLocationChange}
                     onUserChange={handleUserChange}
+                    isMacOS={isMacOS}
                   />
                 </td>
+                {isNew && selectedLocation && !isUserCrontab && (
+                  <td className="py-2 text-sm text-gray-900 dark:text-gray-100" style={{ width: '37.5%' }}>
+                    <select
+                      value={selectedUser}
+                      onChange={handleUserChange}
+                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236B7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22M6%208l4%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.5rem_center] bg-no-repeat"
+                    >
+                      <option value="">Select a user</option>
+                      {users.map((user) => (
+                        <option key={user} value={user}>{user}</option>
+                      ))}
+                    </select>
+                  </td>
+                )}
               </tr>
             </tbody>
           </table>
@@ -482,6 +644,89 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
           </div>
         )}
       </div>
+
+      {/* Suspended Dialog */}
+      {showSuspendedDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-lg font-medium mb-4">Suspend Job</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Reason
+                </label>
+                <input
+                  type="text"
+                  value={suspendedReason}
+                  onChange={(e) => setSuspendedReason(e.target.value)}
+                  className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white sm:text-sm"
+                />
+              </div>
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setShowSuspendedDialog(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSuspendedSubmit}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700"
+                >
+                  Suspend
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scheduled Dialog */}
+      {showScheduledDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-lg font-medium mb-4">Schedule Job</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={scheduledTime}
+                  onChange={(e) => setScheduledTime(e.target.value)}
+                  className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white sm:text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Reason
+                </label>
+                <input
+                  type="text"
+                  value={scheduledReason}
+                  onChange={(e) => setScheduledReason(e.target.value)}
+                  className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white sm:text-sm"
+                />
+              </div>
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setShowScheduledDialog(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleScheduledSubmit}
+                  className="px-4 py-2 text-sm font-medium text-white bg-yellow-600 rounded-md hover:bg-yellow-700"
+                >
+                  Schedule
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 } 

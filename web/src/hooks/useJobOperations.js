@@ -91,6 +91,12 @@ export function useJobOperations() {
   }, [jobs, mutate]);
 
   const deleteJob = useCallback(async (jobKey) => {
+    // Find the full job object to get the crontab_filename
+    const job = jobs.find(j => j.key === jobKey);
+    if (!job) {
+      throw new Error('Job not found');
+    }
+
     // Optimistic update
     const optimisticData = jobs.filter(j => j.key !== jobKey);
     mutate(optimisticData, false);
@@ -101,7 +107,12 @@ export function useJobOperations() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ key: jobKey }),
+        body: JSON.stringify({
+          key: jobKey,
+          crontab_filename: job.crontab_filename,
+          is_monitored: job.is_monitored,
+          code: job.code
+        }),
       });
 
       if (!response.ok) {
