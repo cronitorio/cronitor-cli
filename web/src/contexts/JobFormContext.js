@@ -8,7 +8,7 @@ const initialState = {
   command: '',
   crontab_filename: '',
   run_as_user: '',
-  is_monitored: false,
+  monitored: false,
   is_draft: true,
   timezone: 'UTC',
   errors: {},

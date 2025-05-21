@@ -3,9 +3,11 @@ import useSWR from 'swr';
 import { JobCard } from './jobs/JobCard';
 import { Toast } from './Toast';
 import { Dialog } from '@headlessui/react';
-import { XMarkIcon } from '@heroicons/react/24/outline';
+import { XMarkIcon, CheckIcon } from '@heroicons/react/24/outline';
 import { CloseButton } from './CloseButton';
 import { NewCrontabOverlay } from './jobs/NewCrontabOverlay';
+import { useSearchParams } from 'react-router-dom';
+import { FilterBar, FILTER_OPTIONS } from './jobs/FilterBar';
 
 const fetcher = async url => {
   try {
@@ -29,6 +31,7 @@ export default function Jobs() {
     revalidateOnFocus: true
   });
   const { data: settings } = useSWR('/api/settings', fetcher);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showNewJob, setShowNewJob] = React.useState(false);
   const [showNewCrontab, setShowNewCrontab] = React.useState(false);
   const [newCrontabForm, setNewCrontabForm] = React.useState({
@@ -42,14 +45,75 @@ export default function Jobs() {
     command: '',
     crontab_filename: '',
     run_as_user: '',
-    is_monitored: false,
+    monitored: false,
     is_draft: true
   });
   const [isToastVisible, setIsToastVisible] = React.useState(false);
   const [toastMessage, setToastMessage] = React.useState('');
   const [toastType, setToastType] = React.useState('error');
   const [isReloading, setIsReloading] = React.useState(false);
+  
+  const [inputValue, setInputValue] = React.useState(searchParams.get('search') || '');
+  const [searchTerm, setSearchTerm] = React.useState(searchParams.get('search') || '');
 
+  const [activeFilters, setActiveFilters] = React.useState(() => {
+    const initialFilters = {};
+    FILTER_OPTIONS.forEach(filter => {
+      initialFilters[filter.id] = searchParams.get(filter.id) === 'true';
+    });
+    return initialFilters;
+  });
+
+  React.useEffect(() => {
+    const searchFromURL = searchParams.get('search') || '';
+    if (searchFromURL !== inputValue) {
+      setInputValue(searchFromURL);
+    }
+    // Update activeFilters from URL as well, in case of back/forward navigation
+    let filtersChanged = false;
+    const newFiltersFromURL = { ...activeFilters };
+    FILTER_OPTIONS.forEach(filter => {
+      const paramValue = searchParams.get(filter.id) === 'true';
+      if (newFiltersFromURL[filter.id] !== paramValue) {
+        newFiltersFromURL[filter.id] = paramValue;
+        filtersChanged = true;
+      }
+    });
+    if (filtersChanged) {
+      setActiveFilters(newFiltersFromURL);
+    }
+  }, [searchParams]); // Only listen to searchParams changes here for syncing input values
+
+  React.useEffect(() => {
+    const handler = setTimeout(() => {
+      if (inputValue !== searchTerm) {
+        setSearchTerm(inputValue);
+      }
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [inputValue, searchTerm]);
+
+  React.useEffect(() => {
+    const newParams = new URLSearchParams(); 
+    Object.entries(activeFilters).forEach(([key, value]) => {
+      if (value === true) {
+        newParams.set(key, 'true');
+      }
+    });
+
+    if (searchTerm) {
+      newParams.set('search', searchTerm);
+    } else {
+      newParams.delete('search');
+    }
+    
+    // Only update if the string form of params actually changes
+    // This prevents loops if searchParams was in the dependency array of this effect.
+    if (newParams.toString() !== searchParams.toString()) {
+        setSearchParams(newParams, { replace: true });
+    }
+  }, [activeFilters, searchTerm, setSearchParams]); // Removed searchParams from this dependency array
+  
   // Update timezone when settings are loaded
   React.useEffect(() => {
     if (settings?.timezone) {
@@ -139,6 +203,39 @@ export default function Jobs() {
     }));
   };
 
+  // Filter jobs based on active filters and search term
+  const filteredJobs = React.useMemo(() => {
+    if (!jobs) return [];
+    
+    return jobs.filter(job => {
+      console.log(job, activeFilters);
+
+      // Group 1: Status (Active/Suspended)
+      if (activeFilters.active && job.suspended) return false;
+      if (activeFilters.suspended && !job.suspended) return false;
+
+      // Group 2: Running
+      if (activeFilters.running && !(job.instances && job.instances.length > 0)) return false;
+
+      // Group 3: Monitoring (Monitored/Unmonitored)
+      if (activeFilters.monitored && !job.monitored) return false;
+      if (activeFilters.unmonitored && job.monitored) return false;
+      
+      // Check if job matches (debounced) search term
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        const nameMatch = job.name?.toLowerCase().includes(term);
+        const commandMatch = job.command?.toLowerCase().includes(term);
+        const expressionMatch = job.expression?.toLowerCase().includes(term);
+        if (!(nameMatch || commandMatch || expressionMatch)) {
+          return false;
+        }
+      }
+      
+      return true;
+    });
+  }, [jobs, activeFilters, searchTerm]);
+
   if (error) return (
     <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
       <div className="flex">
@@ -214,7 +311,7 @@ export default function Jobs() {
         command: '',
         crontab_filename: '',
         run_as_user: '',
-        is_monitored: false,
+        monitored: false,
         is_draft: true
       });
       mutate();
@@ -228,13 +325,23 @@ export default function Jobs() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white -mt-1.5">Jobs</h1>
-        <button
-          onClick={() => setShowNewJob(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium"
-        >
-          Add Job
-        </button>
+        <div className="flex items-center gap-8 w-full overflow-hidden">
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-white flex-shrink-0">Jobs</h1>
+          <div className="flex-1 overflow-x-auto">
+            <FilterBar 
+              activeFilters={activeFilters} 
+              setActiveFilters={setActiveFilters}
+              inputValue={inputValue}
+              onInputChange={e => setInputValue(e.target.value)}
+            />
+          </div>
+          <button
+            onClick={() => setShowNewJob(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium flex-shrink-0"
+          >
+            Add Job
+          </button>
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -273,16 +380,26 @@ export default function Jobs() {
             )}
           </div>
         )}
-        {jobs.map((job, index) => (
-          <JobCard 
-            key={index} 
-            job={job} 
-            mutate={mutate} 
-            allJobs={jobs} 
-            showToast={showToast}
-            isMacOS={settings?.os === 'darwin'}
-          />
-        ))}
+        {filteredJobs.length > 0 ? (
+          filteredJobs.map((job, index) => (
+            <JobCard 
+              key={index} 
+              job={job} 
+              mutate={mutate} 
+              allJobs={jobs} 
+              showToast={showToast}
+              isMacOS={settings?.os === 'darwin'}
+            />
+          ))
+        ) : (
+          <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-8 text-center">
+            <p className="text-gray-600 dark:text-gray-300">
+              {jobs.length > 0 
+                ? 'No jobs match your current filters' 
+                : 'No jobs found. Click "Add Job" to create one.'}
+            </p>
+          </div>
+        )}
       </div>
       {isToastVisible && <Toast message={toastMessage} onClose={() => setIsToastVisible(false)} type={toastType} />}
     </div>

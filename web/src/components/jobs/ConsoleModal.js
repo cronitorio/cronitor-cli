@@ -179,12 +179,12 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange }) {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style={{ margin: '0px' }}>
       <div className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg shadow-xl w-[calc(100%-2rem)] max-w-6xl mx-4 relative">
         <CloseButton onClick={onClose} />
-        <div className="p-4">
+        <div className="p-4 px-4">
           <div className="mb-4">
             <div className="flex items-center space-x-2">
               <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Command</span>
             </div>
-            <div className="flex items-center space-x-2 mt-1">
+            <div className="flex items-center space-x-2 mt-1 bg-black p-4 rounded">
               <span className="text-green-500">$</span>
               <input
                 ref={commandInputRef}
@@ -193,7 +193,7 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange }) {
                 onChange={(e) => setCommand(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onBlur={handleCommandBlur}
-                className="w-full text-sm text-gray-900 dark:text-gray-100 font-mono bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none"
+                className="w-full text-sm text-white font-mono bg-transparent focus:outline-none"
                 disabled={isRunning}
               />
             </div>

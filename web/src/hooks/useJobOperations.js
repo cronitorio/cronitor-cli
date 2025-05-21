@@ -110,7 +110,7 @@ export function useJobOperations() {
         body: JSON.stringify({
           key: jobKey,
           crontab_filename: job.crontab_filename,
-          is_monitored: job.is_monitored,
+          monitored: job.monitored,
           code: job.code
         }),
       });
@@ -136,7 +136,7 @@ export function useJobOperations() {
 
     // Optimistic update
     const optimisticData = jobs.map(j => 
-      j.key === jobKey ? { ...j, is_monitored: isMonitored } : j
+      j.key === jobKey ? { ...j, monitored: isMonitored } : j
     );
     mutate(optimisticData, false);
 
@@ -148,7 +148,7 @@ export function useJobOperations() {
         },
         body: JSON.stringify({
           ...job,
-          is_monitored: isMonitored,
+          monitored: isMonitored,
         }),
       });
 
@@ -186,7 +186,7 @@ export function useJobOperations() {
         body: JSON.stringify({
           ...job,
           suspended,
-          pause_hours: suspended && job.is_monitored ? job.pause_hours : !suspended && job.is_monitored ? "0" : null,
+          pause_hours: suspended && job.monitored ? job.pause_hours : !suspended && job.monitored ? "0" : null,
         }),
       });
 

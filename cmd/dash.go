@@ -459,7 +459,7 @@ type Job struct {
 	CrontabDisplayName string        `json:"crontab_display_name"`
 	CrontabFilename    string        `json:"crontab_filename"`
 	LineNumber         int           `json:"line_number"`
-	IsMonitored        bool          `json:"is_monitored"`
+	Monitored          bool          `json:"monitored"`
 	Timezone           string        `json:"timezone"`
 	Passing            bool          `json:"passing"`
 	Disabled           bool          `json:"disabled"`
@@ -541,7 +541,7 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 				CrontabDisplayName: strings.Replace(crontab.DisplayName(), "user ", "User ", 1),
 				CrontabFilename:    crontab.Filename,
 				LineNumber:         line.LineNumber + 1,
-				IsMonitored:        len(line.Code) > 0,
+				Monitored:          len(line.Code) > 0,
 				Timezone:           timezone,
 				Passing:            line.Mon.Passing,
 				Disabled:           line.Mon.Disabled,
@@ -613,7 +613,7 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 		hasChanges = true
 
 		// If the job is monitored, handle pause/unpause
-		if job.IsMonitored {
+		if job.Monitored {
 			if *job.Suspended {
 				// Pause the monitor when suspending
 				if err := getCronitorApi().PauseMonitor(job.Code, job.PauseHours); err != nil {
@@ -632,7 +632,7 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 
 	// Collect all monitor updates
 	var monitor *lib.Monitor
-	if job.IsMonitored {
+	if job.Monitored {
 		monitor = &lib.Monitor{
 			Name:        job.Name,
 			DefaultName: createDefaultName(foundLine, crontab, "", []string{}, map[string]bool{}),
@@ -728,7 +728,7 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 	// Update the job with the latest values
 	job.Name = foundLine.Name
 	job.Code = foundLine.Code
-	job.IsMonitored = len(foundLine.Code) > 0
+	job.Monitored = len(foundLine.Code) > 0
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(job)
@@ -991,7 +991,7 @@ func handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If the job is monitored, pause it indefinitely
-	if job.IsMonitored {
+	if job.Monitored {
 		if err := getCronitorApi().PauseMonitor(job.Code, ""); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to pause monitor: %v", err), http.StatusInternalServerError)
 			return
@@ -1090,7 +1090,7 @@ func handlePostJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If monitoring is enabled, create a new monitor
-	if job.IsMonitored {
+	if job.Monitored {
 		monitor := &lib.Monitor{
 			Name:     job.Name,
 			Schedule: job.Expression,

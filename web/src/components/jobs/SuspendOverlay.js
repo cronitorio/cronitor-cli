@@ -25,7 +25,7 @@ export function SuspendOverlay({
             ? 'This job is suspended and will not be run at its scheduled time.'
             : 'This job will run at its scheduled time. If you suspend this job, it will be commented-out in the crontab.'}
         </p>
-        {!job.suspended && job.is_monitored && (
+        {!job.suspended && job.monitored && (
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Pause monitoring

@@ -8,7 +8,7 @@ export function useJobMonitoring(job, onUpdate) {
       // For new jobs, just update the form state
       onUpdate({
         ...job,
-        is_monitored: !job.is_monitored
+        monitored: !job.monitored
       });
       return;
     }
@@ -18,7 +18,7 @@ export function useJobMonitoring(job, onUpdate) {
     try {
       await onUpdate({
         ...job,
-        is_monitored: !job.is_monitored
+        monitored: !job.monitored
       });
     } catch (error) {
       console.error('Error updating job status:', error);

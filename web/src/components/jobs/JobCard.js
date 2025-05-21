@@ -47,6 +47,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
   const [scheduledReason, setScheduledReason] = React.useState('');
   const [formData, setFormData] = React.useState(initialJob);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [wasMonitoredBeforeSuspend, setWasMonitoredBeforeSuspend] = React.useState(false);
 
   const { jobs, createJob, updateJob, deleteJob, toggleJobMonitoring, toggleJobSuspension, killJobProcess } = useJobOperations();
 
@@ -84,18 +85,21 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
 
   // Update parent form state when local state changes
   React.useEffect(() => {
-    if (isNew && onFormChange) {
-      onFormChange({
+    if (isNew) {
+      onFormChange(prev => ({
+        ...prev,
         name: editedName,
         expression: editedSchedule,
         command: editedCommand,
-        crontab_filename: editedCronFile,
+        crontab_filename: editedCronFile?.filename || prev.crontab_filename,
+        crontab_display_name: editedCronFile?.display_name || prev.crontab_display_name,
         run_as_user: editedRunAsUser,
-        is_monitored: job.is_monitored,
-        is_draft: true
-      });
+        is_draft: false,
+        suspended: job.suspended,
+        monitored: job.monitored
+      }));
     }
-  }, [isNew, onFormChange, editedName, editedSchedule, editedCommand, editedCronFile, editedRunAsUser, job.is_monitored]);
+  }, [isNew, onFormChange, editedName, editedSchedule, editedCommand, editedCronFile, editedRunAsUser, job.monitored]);
 
   const handleFormChange = (field, value) => {
     const newData = { ...formData, [field]: value };
@@ -108,12 +112,17 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
   const handleSave = async () => {
     setSavingStatus('saving');
     try {
-      await updateJob({
+      const updatedJob = {
         ...job,
         name: isEditing ? editedName : job.name,
         command: isEditingCommand ? editedCommand : job.command,
         expression: isEditingSchedule ? editedSchedule : job.expression,
-      });
+        is_draft: false,
+        suspended: job.suspended,
+        monitored: job.monitored
+      };
+
+      await updateJob(updatedJob);
       setSavingStatus('saved');
       setTimeout(() => {
         setSavingStatus(null);
@@ -121,6 +130,9 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         if (isEditingCommand) setIsEditingCommand(false);
         if (isEditingSchedule) setIsEditingSchedule(false);
       }, 1000);
+
+      await toggleJobMonitoring(job.key, updatedJob.monitored);
+      mutate();
     } catch (error) {
       setSavingStatus(null);
       showToast('Failed to update job: ' + error.message);
@@ -300,6 +312,36 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     setShowSuspendedOverlay(!showSuspendedOverlay);
   };
 
+  const handleToggleSuspend = async () => {
+    setShowSuspendedOverlay(false); // Close overlay first
+    const updatedJob = { ...job };
+    updatedJob.suspended = !job.suspended;
+
+    // Store current monitored state if suspending
+    if (!job.suspended) { // If currently active and about to be suspended
+      setWasMonitoredBeforeSuspend(job.monitored);
+      updatedJob.monitored = false; // Suspending always disables monitoring
+    } else { // If currently suspended and about to be resumed
+      updatedJob.monitored = wasMonitoredBeforeSuspend; // Restore previous monitored state
+    }
+
+    try {
+      await onSave(updatedJob, true); // Pass true to indicate it's a suspend/resume toggle
+      // The toggleJobMonitoring call is handled within onSave or by MonitoringSection for existing jobs.
+      // For new jobs, onSave will set the initial state.
+      // If we strictly need to call it here for existing jobs after onSave:
+      if (!isNew) {
+         await toggleJobMonitoring(job.key, updatedJob.monitored);
+      }
+      mutate(); 
+      showToast('Job saved successfully', 'success');
+      if (isEditing) setIsEditing(false);
+    } catch (error) {
+      console.error('Error toggling job suspension:', error);
+      showToast('Failed to toggle job suspension: ' + error.message);
+    }
+  };
+
   return (
     <div className={`bg-white dark:bg-gray-800 shadow rounded-lg p-4 relative ${job.suspended ? 'bg-gray-100 dark:bg-gray-700' : ''}`}>
       <StatusBadges
@@ -467,7 +509,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                     job={job}
                     onUpdate={async (updatedJob) => {
                       try {
-                        await toggleJobMonitoring(job.key, updatedJob.is_monitored);
+                        await toggleJobMonitoring(job.key, updatedJob.monitored);
                       } catch (error) {
                         showToast('Failed to update monitoring status: ' + error.message);
                       }
@@ -523,14 +565,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
             job={job}
             allJobs={allJobs}
             onClose={() => setShowSuspendedOverlay(false)}
-            onToggleSuspension={async () => {
-              try {
-                await toggleJobSuspension(job.key, !job.suspended);
-                setShowSuspendedOverlay(false);
-              } catch (error) {
-                showToast('Failed to update job status: ' + error.message);
-              }
-            }}
+            onToggleSuspension={handleToggleSuspend}
             onShowDeleteConfirmation={() => {
               setShowSuspendedOverlay(false);
               setShowDeleteConfirmation(true);
