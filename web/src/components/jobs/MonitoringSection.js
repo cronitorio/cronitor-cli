@@ -42,7 +42,7 @@ export function MonitoringSection({ job, onUpdate, onShowLearnMore }) {
             onClick={handleToggle}
             disabled={isLoading}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 mr-4 ${
-              job.monitored ? 'bg-green-500' : 'bg-red-500'
+              job.monitored ? 'bg-green-500' : 'bg-gray-500 dark:bg-gray-600'
             }`}
             title={job.monitored ? 'Monitoring enabled' : 'Monitoring disabled'}
           >

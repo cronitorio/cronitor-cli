@@ -29,7 +29,7 @@ export function FilterBar({ activeFilters, setActiveFilters, inputValue, onInput
     const filter = FILTER_OPTIONS.find(f => f.id === filterId);
     if (!filter) return null;
 
-    let buttonClasses = "px-3 py-3 text-base rounded-md bg-gray-100 dark:bg-gray-800 flex-shrink-0 flex items-center ";
+    let buttonClasses = "px-3 py-3 text-base rounded-md bg-gray-200 dark:bg-gray-800 flex-shrink-0 flex items-center ";
     if (activeFilters[filter.id]) {
       buttonClasses += 'text-purple-600 dark:text-purple-400';
     } else {
@@ -75,7 +75,7 @@ export function FilterBar({ activeFilters, setActiveFilters, inputValue, onInput
         value={inputValue}
         onChange={onInputChange}
         placeholder="Search..."
-        className="px-3 py-3 w-64 ml-2 flex-shrink-0 bg-gray-100 dark:bg-gray-800 dark:text-gray-100 rounded-md text-base placeholder-gray-500 dark:placeholder-gray-500 focus:outline-none"
+        className="px-3 py-3 w-64 ml-2 flex-shrink-0 bg-gray-200 dark:bg-gray-800 dark:text-gray-100 rounded-md text-base placeholder-gray-500 dark:placeholder-gray-500 focus:outline-none"
       />
     </div>
   );

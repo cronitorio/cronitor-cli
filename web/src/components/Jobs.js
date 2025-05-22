@@ -310,6 +310,7 @@ export default function Jobs() {
         expression: '',
         command: '',
         crontab_filename: '',
+        crontab_display_name: '',
         run_as_user: '',
         monitored: false,
         is_draft: true
@@ -353,7 +354,19 @@ export default function Jobs() {
               allJobs={jobs} 
               isNew={true}
               onSave={handleSaveNewJob}
-              onDiscard={() => setShowNewJob(false)}
+              onDiscard={() => {
+                setShowNewJob(false);
+                setNewJobForm({
+                  name: '',
+                  expression: '',
+                  command: '',
+                  crontab_filename: '',
+                  crontab_display_name: '',
+                  run_as_user: '',
+                  monitored: false,
+                  is_draft: true
+                });
+              }}
               onFormChange={setNewJobForm}
               onLocationChange={handleLocationChange}
               showToast={showToast}

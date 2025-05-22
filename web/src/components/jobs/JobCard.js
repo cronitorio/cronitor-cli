@@ -536,7 +536,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                     <select
                       value={selectedUser}
                       onChange={handleUserChange}
-                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236B7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22M6%208l4%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.5rem_center] bg-no-repeat"
+                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-400 dark:border-gray-600 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236B7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22M6%208l4%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.5rem_center] bg-no-repeat"
                     >
                       <option value="">Select a user</option>
                       {users.map((user) => (
@@ -583,6 +583,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                 await deleteJob(job.key);
                 setShowDeleteConfirmation(false);
                 setDeleteConfirmation('');
+                showToast('Job deleted successfully', 'success');
               } catch (error) {
                 showToast('Failed to delete job: ' + error.message);
               }
@@ -694,7 +695,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                   type="text"
                   value={suspendedReason}
                   onChange={(e) => setSuspendedReason(e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-gray-400 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white sm:text-sm text-gray-800 bg-gray-200"
                 />
               </div>
               <div className="flex justify-end space-x-3">
@@ -730,7 +731,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                   type="datetime-local"
                   value={scheduledTime}
                   onChange={(e) => setScheduledTime(e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-gray-400 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white sm:text-sm text-gray-800 bg-gray-200"
                 />
               </div>
               <div>
@@ -741,7 +742,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                   type="text"
                   value={scheduledReason}
                   onChange={(e) => setScheduledReason(e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-gray-400 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white sm:text-sm text-gray-800 bg-gray-200"
                 />
               </div>
               <div className="flex justify-end space-x-3">

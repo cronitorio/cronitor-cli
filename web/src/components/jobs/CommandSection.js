@@ -25,8 +25,8 @@ export function CommandSection({
                 onKeyDown={onKeyDown}
                 onBlur={onEditEnd}
                 className={isNew 
-                  ? "w-full text-sm text-gray-900 dark:text-gray-100 font-mono rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white px-3 py-2" 
-                  : "w-full text-sm text-gray-900 dark:text-gray-100 font-mono bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none"
+                  ? "w-full text-sm text-gray-800 dark:text-gray-100 font-mono rounded-md border-gray-400 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white px-3 py-2 bg-gray-200" 
+                  : "w-full text-sm text-gray-800 dark:text-gray-100 font-mono bg-transparent border-b border-gray-400 dark:border-gray-600 focus:outline-none"
                 }
                 placeholder={isNew ? "/path/to/command" : ""}
               />

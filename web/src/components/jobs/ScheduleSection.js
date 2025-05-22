@@ -34,8 +34,8 @@ export function ScheduleSection({
             onKeyDown={onKeyDown}
             onBlur={onEditEnd}
             className={isNew 
-              ? "w-full text-sm font-mono rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white px-3 py-2" 
-              : "w-full text-sm font-mono bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none"
+              ? "w-full text-sm font-mono rounded-md border-gray-400 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white px-3 py-2 text-gray-800 bg-gray-200" 
+              : "w-full text-sm font-mono bg-transparent border-b border-gray-400 dark:border-gray-600 focus:outline-none text-gray-800"
             }
             placeholder={isNew ? "* * * * *" : ""}
           />

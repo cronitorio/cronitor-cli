@@ -22,8 +22,8 @@ export function JobHeader({
             onKeyDown={onKeyDown}
             onBlur={onEditEnd}
             className={`w-[94%] ${isNew 
-              ? "text-lg font-medium text-gray-900 dark:text-white rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white px-3 py-2"
-              : "text-lg font-medium text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none"
+              ? "text-lg font-medium text-gray-800 dark:text-white rounded-md border-gray-400 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white px-3 py-2 bg-gray-200"
+              : "text-lg font-medium text-gray-800 dark:text-white bg-transparent border-b border-gray-400 dark:border-gray-600 focus:outline-none"
             }`}
             placeholder={isNew ? "Job Name" : ""}
           />
