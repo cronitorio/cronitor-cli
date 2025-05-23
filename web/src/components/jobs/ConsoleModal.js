@@ -69,33 +69,49 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange }) {
     }
 
     try {
-      const eventSource = new EventSource(`/api/jobs/run?command=${encodeURIComponent(command)}`);
-      eventSourceRef.current = eventSource;
+      const response = await fetch('/api/jobs/run', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ command })
+      });
 
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          
-          if (data.pid) {
-            setCurrentPid(data.pid);
-          } else if (data.output) {
-            addOutput(data.output);
-          } else if (data.error) {
-            addOutput(data.error);
-          } else if (data.completion) {
-            addOutput(data.completion);
-            setIsRunning(false);
+      if (!response.ok) {
+        throw new Error('Failed to start job');
+      }
+
+      // Set up the reader for the response stream
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.pid) {
+                setCurrentPid(data.pid);
+              } else if (data.output) {
+                addOutput(data.output);
+              } else if (data.error) {
+                addOutput(data.error);
+              } else if (data.completion) {
+                addOutput(data.completion);
+                setIsRunning(false);
+              }
+            } catch (e) {
+              console.error('Failed to parse SSE data:', e);
+            }
           }
-        } catch (e) {
-          console.error('Failed to parse SSE data:', e);
         }
-      };
-
-      eventSource.onerror = (error) => {
-        console.error('EventSource failed:', error);
-        eventSource.close();
-        setIsRunning(false);
-      };
+      }
     } catch (error) {
       addOutput(`Error: ${error.message}\n`);
       setIsRunning(false);

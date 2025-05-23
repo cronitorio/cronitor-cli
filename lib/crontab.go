@@ -375,7 +375,7 @@ func (l Line) Write() string {
 		}
 	}
 
-	outputLines = append(outputLines, strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1))
+	outputLines = append(outputLines, strings.TrimSpace(strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)))
 	return strings.Join(outputLines, "\n")
 }
 

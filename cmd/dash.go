@@ -189,6 +189,9 @@ The dashboard provides a web interface for managing your Cronitor monitors and c
 		// Add run job endpoint
 		http.Handle("/api/jobs/run", authMiddleware(http.HandlerFunc(handleRunJob)))
 
+		// Add monitors endpoint
+		http.Handle("/api/monitors", authMiddleware(http.HandlerFunc(handleGetMonitors)))
+
 		// Start the server in a goroutine
 		go func() {
 			fmt.Printf("Starting Cronitor dashboard on port %d...\n", port)
@@ -491,13 +494,6 @@ func handleJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetJobs(w http.ResponseWriter, r *http.Request) {
-	var err error
-	existingMonitors.Monitors, err = getCronitorApi().GetMonitors()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
 	crontabs, err := lib.GetAllCrontabs()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -513,13 +509,6 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 			line := crontab.Lines[i]
 			if !line.IsJob {
 				continue
-			}
-
-			// If we know this monitor exists already, return the name
-			line.Mon = existingMonitors.Get(line.Key(crontab.CanonicalName()), line.Code)
-			if line.Mon.Name != "" && line.Mon.Name != line.Name {
-				line.Name = line.Mon.Name
-				hasChanges = true
 			}
 
 			timezone := effectiveTimezoneLocationName().Name
@@ -543,10 +532,10 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 				LineNumber:         line.LineNumber + 1,
 				Monitored:          len(line.Code) > 0,
 				Timezone:           timezone,
-				Passing:            line.Mon.Passing,
-				Disabled:           line.Mon.Disabled,
-				Paused:             line.Mon.Paused != nil && *line.Mon.Paused,
-				Initialized:        line.Mon.Initialized,
+				Passing:            false, // Will be updated by frontend
+				Disabled:           false, // Will be updated by frontend
+				Paused:             false, // Will be updated by frontend
+				Initialized:        false, // Will be updated by frontend
 				Code:               line.Code,
 				Key:                line.Key(crontab.CanonicalName()),
 				Instances:          findInstances(commandHistory.GetCommands(line.Key(crontab.CanonicalName()), line.CommandToRun)),
@@ -561,6 +550,28 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	responseData, err := json.Marshal(jobs)
+	if err != nil {
+		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+		return
+	}
+
+	w.Write(responseData)
+}
+
+// handleGetMonitors handles GET requests for monitor data
+func handleGetMonitors(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	monitors, err := getCronitorApi().GetMonitors()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	responseData, err := json.Marshal(monitors)
 	if err != nil {
 		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
 		return
@@ -780,13 +791,21 @@ func findInstances(commandStrings []string) []JobInstance {
 
 // handleRunJob handles POST requests to run a job
 func handleRunJob(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
+	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	command := r.URL.Query().Get("command")
-	if command == "" {
+	var request struct {
+		Command string `json:"command"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if request.Command == "" {
 		http.Error(w, "Command parameter is required", http.StatusBadRequest)
 		return
 	}
@@ -814,7 +833,7 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 	// Start the command in a goroutine
 	go func() {
 		startTime := time.Now()
-		cmd := exec.Command("sh", "-c", command)
+		cmd := exec.Command("sh", "-c", request.Command)
 		cmd.Env = makeCronLikeEnv()
 		cmd.Stdout = tempFile
 		cmd.Stderr = tempFile
@@ -1029,6 +1048,11 @@ func handlePostJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !strings.HasPrefix(job.CrontabFilename, "user:") && job.RunAsUser == "" {
+		http.Error(w, "Missing required field: run_as_user", http.StatusBadRequest)
+		return
+	}
+
 	// If cron.d is selected, create a new file
 	if job.CrontabFilename == "/etc/cron.d" {
 		// Slugify the job name for the filename
@@ -1054,20 +1078,6 @@ func handlePostJob(w http.ResponseWriter, r *http.Request) {
 		} else {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
-		}
-	}
-
-	// Create the cron line
-	if strings.HasPrefix(job.CrontabFilename, "user:") {
-		// For user crontabs, don't include the username in the command
-		// No need to use a separate cronLine variable
-	} else {
-		// For system crontabs, ensure run_as_user is included when appropriate
-		if job.RunAsUser == "" {
-			// Get current user if not specified
-			if currentUser, err := user.Current(); err == nil {
-				job.RunAsUser = currentUser.Username
-			}
 		}
 	}
 

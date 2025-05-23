@@ -30,6 +30,10 @@ export default function Jobs() {
     refreshInterval: 5000,
     revalidateOnFocus: true
   });
+  const { data: monitors } = useSWR('/api/monitors', fetcher, {
+    refreshInterval: 5000,
+    revalidateOnFocus: true
+  });
   const { data: settings } = useSWR('/api/settings', fetcher);
   const [searchParams, setSearchParams] = useSearchParams();
   const [showNewJob, setShowNewJob] = React.useState(false);
@@ -128,7 +132,7 @@ export default function Jobs() {
     setToastMessage(message);
     setToastType(type);
     setIsToastVisible(true);
-    setTimeout(() => setIsToastVisible(false), 3000);
+    setTimeout(() => setIsToastVisible(false), type === 'error' ? 6000 : 3000);
   };
 
   const handleReload = async () => {
@@ -188,26 +192,50 @@ export default function Jobs() {
   };
 
   const handleLocationChange = (location) => {
-    if (location === '/etc/cron.d (New Crontab)') {
+    // Handle both direct string values and event objects
+    const selectedLocation = typeof location === 'string' ? location : location.target.value;
+
+    if (selectedLocation === '/etc/cron.d (New Crontab)') {
       setShowNewCrontab(true);
       return;
     }
 
     // Handle existing crontab selection
-    const isUserCrontab = location.startsWith('user:');
+    const isUserCrontab = selectedLocation.startsWith('user:');
     setNewJobForm(prev => ({
       ...prev,
-      crontab_filename: location,
-      crontab_display_name: isUserCrontab ? `User ${location.split(':')[1]} Crontab` : location,
-      run_as_user: isUserCrontab ? location.split(':')[1] : ''
+      crontab_filename: selectedLocation,
+      crontab_display_name: isUserCrontab ? `User ${selectedLocation.split(':')[1]} Crontab` : selectedLocation,
+      run_as_user: isUserCrontab ? selectedLocation.split(':')[1] : ''
     }));
   };
 
+  // Merge monitor data with jobs
+  const jobsWithMonitors = React.useMemo(() => {
+    if (!jobs || !monitors) return jobs;
+    
+    return jobs.map(job => {
+      if (!job.monitored) return job;
+      
+      const monitor = monitors.find(m => m.key === job.key || m.attributes?.code === job.code);
+      if (!monitor) return job;
+
+      return {
+        ...job,
+        name: monitor.name || job.name,
+        passing: monitor.passing,
+        disabled: monitor.disabled,
+        paused: monitor.paused,
+        initialized: monitor.initialized
+      };
+    });
+  }, [jobs, monitors]);
+
   // Filter jobs based on active filters and search term
   const filteredJobs = React.useMemo(() => {
-    if (!jobs) return [];
+    if (!jobsWithMonitors) return [];
     
-    return jobs.filter(job => {
+    return jobsWithMonitors.filter(job => {
       console.log(job, activeFilters);
 
       // Group 1: Status (Active/Suspended)
@@ -234,7 +262,7 @@ export default function Jobs() {
       
       return true;
     });
-  }, [jobs, activeFilters, searchTerm]);
+  }, [jobsWithMonitors, activeFilters, searchTerm]);
 
   if (error) return (
     <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
@@ -288,7 +316,7 @@ export default function Jobs() {
       </div>
     </div>
   );
-  if (!jobs) return <div className="text-gray-600 dark:text-gray-300">Loading...</div>;
+  if (!jobsWithMonitors) return <div className="text-gray-600 dark:text-gray-300">Loading...</div>;
 
   const handleSaveNewJob = async () => {
     try {
@@ -338,7 +366,7 @@ export default function Jobs() {
           </div>
           <button
             onClick={() => setShowNewJob(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium flex-shrink-0"
+            className="px-4 py-2.5 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium flex-shrink-0"
           >
             Add Job
           </button>
@@ -351,7 +379,7 @@ export default function Jobs() {
             <JobCard 
               job={newJobForm} 
               mutate={mutate} 
-              allJobs={jobs} 
+              allJobs={jobsWithMonitors} 
               isNew={true}
               onSave={handleSaveNewJob}
               onDiscard={() => {
@@ -399,7 +427,7 @@ export default function Jobs() {
               key={index} 
               job={job} 
               mutate={mutate} 
-              allJobs={jobs} 
+              allJobs={jobsWithMonitors} 
               showToast={showToast}
               isMacOS={settings?.os === 'darwin'}
             />
@@ -407,7 +435,7 @@ export default function Jobs() {
         ) : (
           <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-8 text-center">
             <p className="text-gray-600 dark:text-gray-300">
-              {jobs.length > 0 
+              {jobsWithMonitors.length > 0 
                 ? 'No jobs match your current filters' 
                 : 'No jobs found. Click "Add Job" to create one.'}
             </p>

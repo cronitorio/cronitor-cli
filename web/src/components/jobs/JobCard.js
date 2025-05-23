@@ -49,7 +49,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [wasMonitoredBeforeSuspend, setWasMonitoredBeforeSuspend] = React.useState(false);
 
-  const { jobs, createJob, updateJob, deleteJob, toggleJobMonitoring, toggleJobSuspension, killJobProcess } = useJobOperations();
+  const { jobs, createJob, updateJob, deleteJob, toggleJobMonitoring, toggleJobSuspension, killJobProcess, mutate: jobsMutate } = useJobOperations();
 
   // Get the current job data from allJobs and update local state
   React.useEffect(() => {
@@ -86,20 +86,20 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
   // Update parent form state when local state changes
   React.useEffect(() => {
     if (isNew) {
-      onFormChange(prev => ({
-        ...prev,
+      onFormChange({
+        ...job,
         name: editedName,
         expression: editedSchedule,
         command: editedCommand,
-        crontab_filename: editedCronFile?.filename || prev.crontab_filename,
-        crontab_display_name: editedCronFile?.display_name || prev.crontab_display_name,
+        crontab_filename: editedCronFile?.filename || job.crontab_filename,
+        crontab_display_name: editedCronFile?.display_name || job.crontab_display_name,
         run_as_user: editedRunAsUser,
         is_draft: false,
         suspended: job.suspended,
         monitored: job.monitored
-      }));
+      });
     }
-  }, [isNew, onFormChange, editedName, editedSchedule, editedCommand, editedCronFile, editedRunAsUser, job.monitored]);
+  }, [isNew, onFormChange, editedName, editedSchedule, editedCommand, editedCronFile, editedRunAsUser, job.monitored, job]);
 
   const handleFormChange = (field, value) => {
     const newData = { ...formData, [field]: value };
@@ -308,37 +308,138 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     }
   };
 
+  const handleRunNow = async () => {
+    try {
+      const response = await fetch('/api/jobs/run', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ command: job.command })
+      });
+      if (!response.ok) {
+        throw new Error('Failed to run job');
+      }
+      showToast('Job started successfully', 'success');
+      mutate();
+    } catch (error) {
+      console.error('Error running job:', error);
+      showToast('Failed to run job: ' + error.message, 'error');
+    }
+  };
+
   const handleToggleSuspendedOverlay = () => {
     setShowSuspendedOverlay(!showSuspendedOverlay);
   };
 
-  const handleToggleSuspend = async () => {
+  const handleToggleSuspend = async (explicitSuspendedState, explicitPauseHours) => {
     setShowSuspendedOverlay(false); // Close overlay first
-    const updatedJob = { ...job };
-    updatedJob.suspended = !job.suspended;
+    
+    // Get the current job state from allJobs to ensure we have latest data
+    const currentJob = allJobs.find(j => j.key === job.key) || job;
+    
+    // Use the explicit state if provided, otherwise toggle the current state
+    // Convert to explicit boolean with Boolean()
+    const newSuspendedState = explicitSuspendedState !== undefined 
+      ? Boolean(explicitSuspendedState) 
+      : !currentJob.suspended;
+    
+    console.log('Current suspended state:', currentJob.suspended);
+    console.log('New suspended state:', newSuspendedState);
+    
+    const updatedJob = { 
+      ...currentJob,
+      suspended: newSuspendedState
+    };
 
-    // Store current monitored state if suspending
-    if (!job.suspended) { // If currently active and about to be suspended
-      setWasMonitoredBeforeSuspend(job.monitored);
-      updatedJob.monitored = false; // Suspending always disables monitoring
-    } else { // If currently suspended and about to be resumed
-      updatedJob.monitored = wasMonitoredBeforeSuspend; // Restore previous monitored state
+    // Set pause_hours if provided
+    if (explicitPauseHours !== undefined) {
+      updatedJob.pause_hours = explicitPauseHours;
     }
 
+    // Preserve the monitoring state instead of forcing it off when suspending
+    updatedJob.monitored = currentJob.monitored;
+
+    // Update local state immediately for optimistic UI update
+    setJob({...job, suspended: newSuspendedState, monitored: updatedJob.monitored, pause_hours: updatedJob.pause_hours});
+    
+    // Create optimistic update for all jobs in the list
+    const optimisticData = allJobs.map(j => 
+      j.key === currentJob.key ? {...j, suspended: newSuspendedState, monitored: updatedJob.monitored, pause_hours: updatedJob.pause_hours} : j
+    );
+    // Apply optimistic update to prevent flickering
+    mutate(optimisticData, false);
+    
     try {
-      await onSave(updatedJob, true); // Pass true to indicate it's a suspend/resume toggle
-      // The toggleJobMonitoring call is handled within onSave or by MonitoringSection for existing jobs.
-      // For new jobs, onSave will set the initial state.
-      // If we strictly need to call it here for existing jobs after onSave:
-      if (!isNew) {
-         await toggleJobMonitoring(job.key, updatedJob.monitored);
+      // For new jobs, use onSave from props
+      if (isNew && typeof onSave === 'function') {
+        await onSave(updatedJob, true); // Pass true to indicate it's a suspend/resume toggle
+      } else {
+        // For existing jobs, use direct API call instead of toggleJobSuspension
+        // This bypasses any potential issues with the toggleJobSuspension function
+        const job = allJobs.find(j => j.key === currentJob.key);
+        if (!job) throw new Error('Job not found');
+        
+        console.log('Sending API request with suspended =', newSuspendedState);
+        console.log('and monitored =', updatedJob.monitored);
+        if (updatedJob.pause_hours !== undefined) {
+          console.log('and pause_hours =', updatedJob.pause_hours);
+        }
+        
+        // CREATE A COMPLETELY NEW REQUEST BODY WITH EXPLICIT SUSPENDED STATE
+        const requestBody = {
+          key: job.key,
+          code: job.code, // Include the code field for monitoring API
+          command: job.command,
+          expression: job.expression,
+          name: job.name,
+          crontab_filename: job.crontab_filename,
+          run_as_user: job.run_as_user,
+          // Preserve the monitoring state
+          monitored: updatedJob.monitored,
+          suspended: newSuspendedState === true,
+          // Include pause_hours if it was set
+          pause_hours: updatedJob.pause_hours
+        };
+        
+        // For ultra-explicit safety, use a string representation in the body
+        const requestBodyStr = JSON.stringify(requestBody);
+        console.log('REQUEST BODY STRING:', requestBodyStr);
+        
+        const response = await fetch('/api/jobs', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: requestBodyStr,
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to update job suspension status: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
+        }
+        
+        // Try to read the response body for debugging
+        try {
+          const responseData = await response.clone().json();
+          console.log('Response data:', responseData);
+        } catch(e) {
+          console.log('Could not parse response as JSON');
+        }
       }
-      mutate(); 
-      showToast('Job saved successfully', 'success');
+      
+      // Refresh data from server with the changes we just made
+      jobsMutate();
+      
+      showToast(`Job ${newSuspendedState ? 'suspended' : 'activated'} successfully`, 'success');
       if (isEditing) setIsEditing(false);
     } catch (error) {
       console.error('Error toggling job suspension:', error);
       showToast('Failed to toggle job suspension: ' + error.message);
+      
+      // Revert optimistic update on error
+      setJob(currentJob);
+      mutate();
     }
   };
 
@@ -443,15 +544,6 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                         setIsEditingCommand(false);
                       }
                     }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleSave();
-                      } else if (e.key === 'Escape') {
-                        setIsEditingCommand(false);
-                        setEditedCommand(job.command);
-                      }
-                    }}
                     onShowConsole={() => setShowConsole(true)}
                     isNew={isNew}
                   />
@@ -508,10 +600,16 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                   <MonitoringSection
                     job={job}
                     onUpdate={async (updatedJob) => {
-                      try {
-                        await toggleJobMonitoring(job.key, updatedJob.monitored);
-                      } catch (error) {
-                        showToast('Failed to update monitoring status: ' + error.message);
+                      setJob(updatedJob);
+                      if (isNew) {
+                        onFormChange(updatedJob);
+                      } else {
+                        try {
+                          await toggleJobMonitoring(job.key, updatedJob.monitored);
+                          mutate();
+                        } catch (error) {
+                          showToast('Failed to update monitoring status: ' + error.message);
+                        }
                       }
                     }}
                     onShowLearnMore={() => setShowLearnMore(true)}
@@ -557,12 +655,13 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
             isKillingAll={isKillingAll}
             onKillInstance={(pid) => handleKill([pid])}
             onKillAll={() => handleKill((job.instances || []).map(i => i.pid), true)}
+            onRunNow={handleRunNow}
           />
         )}
 
         {showSuspendedOverlay && (
           <SuspendOverlay
-            job={job}
+            job={allJobs.find(j => j.key === job.key) || job}
             allJobs={allJobs}
             onClose={() => setShowSuspendedOverlay(false)}
             onToggleSuspension={handleToggleSuspend}
@@ -570,7 +669,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
               setShowSuspendedOverlay(false);
               setShowDeleteConfirmation(true);
             }}
-            mutate={mutate}
+            mutate={jobsMutate}
           />
         )}
 

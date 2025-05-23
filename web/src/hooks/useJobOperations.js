@@ -130,15 +130,17 @@ export function useJobOperations() {
     }
   }, [jobs, mutate]);
 
-  const toggleJobMonitoring = useCallback(async (jobKey, isMonitored) => {
+  const toggleJobMonitoring = useCallback(async (jobKey, isMonitored, skipOptimisticUpdate = false) => {
     const job = jobs.find(j => j.key === jobKey);
     if (!job) return;
 
     // Optimistic update
-    const optimisticData = jobs.map(j => 
-      j.key === jobKey ? { ...j, monitored: isMonitored } : j
-    );
-    mutate(optimisticData, false);
+    if (!skipOptimisticUpdate) {
+      const optimisticData = jobs.map(j => 
+        j.key === jobKey ? { ...j, monitored: isMonitored } : j
+      );
+      mutate(optimisticData, false);
+    }
 
     try {
       const response = await fetch('/api/jobs', {
@@ -161,21 +163,25 @@ export function useJobOperations() {
       mutate();
       return true;
     } catch (error) {
-      // Revert optimistic update
-      mutate(jobs, false);
+      // Revert optimistic update if we made one
+      if (!skipOptimisticUpdate) {
+        mutate(jobs, false);
+      }
       handleNetworkError(error, 'update monitoring status');
     }
   }, [jobs, mutate]);
 
-  const toggleJobSuspension = useCallback(async (jobKey, suspended) => {
+  const toggleJobSuspension = useCallback(async (jobKey, suspended, skipOptimisticUpdate = false) => {
     const job = jobs.find(j => j.key === jobKey);
     if (!job) return;
 
     // Optimistic update
-    const optimisticData = jobs.map(j => 
-      j.key === jobKey ? { ...j, suspended } : j
-    );
-    mutate(optimisticData, false);
+    if (!skipOptimisticUpdate) {
+      const optimisticData = jobs.map(j => 
+        j.key === jobKey ? { ...j, suspended } : j
+      );
+      mutate(optimisticData, false);
+    }
 
     try {
       const response = await fetch('/api/jobs', {
@@ -199,8 +205,10 @@ export function useJobOperations() {
       mutate();
       return true;
     } catch (error) {
-      // Revert optimistic update
-      mutate(jobs, false);
+      // Revert optimistic update if we made one
+      if (!skipOptimisticUpdate) {
+        mutate(jobs, false);
+      }
       handleNetworkError(error, 'update suspension status');
     }
   }, [jobs, mutate]);

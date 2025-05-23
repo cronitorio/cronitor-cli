@@ -34,15 +34,28 @@ export function MonitoringSection({ job, onUpdate, onShowLearnMore }) {
     }
   };
 
+  const handleToggleClick = () => {
+    // For new jobs (no key), just update the form state
+    if (!job.key) {
+      onUpdate({
+        ...job,
+        monitored: !job.monitored
+      });
+      return;
+    }
+    // For existing jobs, use the handleToggle from useJobMonitoring
+    handleToggle();
+  };
+
   return (
     <div className="flex items-center space-x-2">
       <div className="flex items-center justify-between space-x-4">
         <div className="flex items-center">
           <button
-            onClick={handleToggle}
+            onClick={handleToggleClick}
             disabled={isLoading}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 mr-4 ${
-              job.monitored ? 'bg-green-500' : 'bg-gray-500 dark:bg-gray-600'
+              job.monitored ? 'bg-green-500' : 'bg-gray-200 dark:bg-gray-600'
             }`}
             title={job.monitored ? 'Monitoring enabled' : 'Monitoring disabled'}
           >
@@ -54,20 +67,24 @@ export function MonitoringSection({ job, onUpdate, onShowLearnMore }) {
           </button>
           {job.monitored ? (
             <>
-              {job.paused || job.disabled ? (
-                <StatusTag
-                  className="inline-flex items-center px-2.5 py-0.5 text-sm font-medium bg-gray-100 text-red-600 dark:bg-gray-700 dark:text-red-400 rounded-l-full border-r border-white dark:border-gray-600"
-                  title="Alerts: Off"
-                >
-                  <BellSlashIcon className="h-5 w-5" />
-                </StatusTag>
-              ) : null}
-              <StatusTag
-                className={`inline-flex items-center px-2.5 py-0.5 text-sm font-medium ${statusInfo.color} ${(job.paused || job.disabled) ? 'rounded-l-none' : 'rounded-l-full'} rounded-r-full`}
-                title={statusInfo.title}
-              >
-                <span>{statusInfo.text}</span>
-              </StatusTag>
+              {!job.key ? null : (
+                <>
+                  {job.paused || job.disabled ? (
+                    <StatusTag
+                      className="inline-flex items-center px-2.5 py-0.5 text-sm font-medium bg-gray-100 text-red-600 dark:bg-gray-700 dark:text-red-400 rounded-l-full border-r border-white dark:border-gray-600"
+                      title="Alerts: Off"
+                    >
+                      <BellSlashIcon className="h-5 w-5" />
+                    </StatusTag>
+                  ) : null}
+                  <StatusTag
+                    className={`inline-flex items-center px-2.5 py-0.5 text-sm font-medium ${statusInfo.color} ${(job.paused || job.disabled) ? 'rounded-l-none' : 'rounded-l-full'} rounded-r-full`}
+                    title={statusInfo.title}
+                  >
+                    <span>{statusInfo.text}</span>
+                  </StatusTag>
+                </>
+              )}
             </>
           ) : (
             <button
