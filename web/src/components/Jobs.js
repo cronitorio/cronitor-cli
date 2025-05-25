@@ -441,6 +441,22 @@ export default function Jobs() {
             </p>
           </div>
         )}
+        {jobsWithMonitors.length > 0 && filteredJobs.length < jobsWithMonitors.length && (
+          <div className="bg-gray-50 dark:bg-gray-800/50 shadow-sm rounded-lg p-4 text-center">
+            <p className="text-gray-500 dark:text-gray-400">
+              {jobsWithMonitors.length - filteredJobs.length} Jobs Hidden{' '}
+              <button
+                onClick={() => {
+                  setActiveFilters({});
+                  setInputValue('');
+                }}
+                className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium"
+              >
+                Clear Filters
+              </button>
+            </p>
+          </div>
+        )}
       </div>
       {isToastVisible && <Toast message={toastMessage} onClose={() => setIsToastVisible(false)} type={toastType} />}
     </div>

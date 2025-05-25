@@ -1102,19 +1102,30 @@ func handlePostJob(w http.ResponseWriter, r *http.Request) {
 	// If monitoring is enabled, create a new monitor
 	if job.Monitored {
 		monitor := &lib.Monitor{
-			Name:     job.Name,
-			Schedule: job.Expression,
-			Type:     "job",
-			Platform: lib.CRON,
+			Name:        job.Name,
+			DefaultName: createDefaultName(line, crontab, effectiveHostname(), []string{}, map[string]bool{}),
+			Schedule:    job.Expression,
+			Type:        "job",
+			Platform:    lib.CRON,
+			Timezone:    job.Timezone,
+			Key:         line.Key(crontab.CanonicalName()),
 		}
 
 		monitors := map[string]*lib.Monitor{
 			monitor.Key: monitor,
 		}
 
-		if _, err := getCronitorApi().PutMonitors(monitors); err != nil {
+		updatedMonitors, err := getCronitorApi().PutMonitors(monitors)
+		if err != nil {
 			// Log the error but don't fail the request
 			log(fmt.Sprintf("Failed to create monitor: %v", err))
+		} else if updatedMonitor, exists := updatedMonitors[monitor.Key]; exists {
+			line.Code = updatedMonitor.Attributes.Code
+			line.Mon = *updatedMonitor
+			// Save the crontab again to update the code
+			if err := crontab.Save(crontab.Write()); err != nil {
+				log(fmt.Sprintf("Failed to save crontab with monitor code: %v", err))
+			}
 		}
 	}
 

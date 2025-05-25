@@ -253,7 +253,6 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
   const handleLocationChange = (e) => {
     const location = e.target.value;
     setSelectedLocation(location);
-    setEditedCronFile(location);
     
     if (location === "/etc/cron.d (New Crontab)") {
       onLocationChange(location);
@@ -266,10 +265,13 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
       setSelectedUser('');
       const timezone = selectedCronFile.timezone || 'UTC';
       setJob(prev => ({ ...prev, timezone }));
+      setEditedCronFile(selectedCronFile.filename);
       onFormChange(prev => ({
         ...prev,
         timezone,
-        crontab_filename: location
+        crontab_filename: selectedCronFile.filename,
+        crontab_display_name: selectedCronFile.display_name,
+        run_as_user: selectedCronFile.isUserCrontab ? selectedCronFile.user : ''
       }));
     }
   };
