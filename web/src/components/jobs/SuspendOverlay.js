@@ -23,6 +23,9 @@ export function SuspendOverlay({
   const buttonText = job.suspended ? 'Activate Job' : 'Suspend Job';
   
   const handleButtonClick = () => {
+    console.log('SuspendOverlay handleButtonClick - job:', job);
+    console.log('SuspendOverlay handleButtonClick - desiredSuspendedState:', desiredSuspendedState);
+    console.log('SuspendOverlay handleButtonClick - pauseHours:', pauseHours);
     // Pass both the desired suspended state and the selected pause hours
     onToggleSuspension(desiredSuspendedState, pauseHours);
   };

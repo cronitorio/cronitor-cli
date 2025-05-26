@@ -29,19 +29,20 @@ export function ScheduleSection({
         {isEditing ? (
           <input
             type="text"
-            value={editedSchedule}
+            value={editedSchedule || ''}
             onChange={(e) => onScheduleChange(e.target.value)}
             onKeyDown={onKeyDown}
             onBlur={onEditEnd}
             className={isNew 
-              ? "w-full text-sm font-mono rounded-md border-gray-400 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white px-3 py-2 text-gray-800 bg-gray-200" 
-              : "w-full text-sm font-mono bg-transparent border-b border-gray-400 dark:border-gray-600 focus:outline-none text-gray-800"
+              ? "w-full text-sm font-mono rounded-md border-gray-400 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white px-3 py-2 text-gray-900 bg-gray-200" 
+              : "w-full text-sm font-mono bg-transparent border-b border-gray-400 dark:border-gray-600 focus:outline-none text-gray-900 dark:text-white"
             }
             placeholder={isNew ? "* * * * *" : ""}
+            autoFocus
           />
         ) : (
           <span className="text-sm font-mono text-gray-500 dark:text-gray-400">
-            {editedSchedule || job.expression}
+            {job.expression || ''}
           </span>
         )}
         {!isNew && (

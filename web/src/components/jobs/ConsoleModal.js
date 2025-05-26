@@ -1,7 +1,7 @@
 import React from 'react';
 import { CloseButton } from '../CloseButton';
 
-export function ConsoleModal({ job, onClose, isNew = false, onFormChange }) {
+export function ConsoleModal({ job, onClose, isNew = false, onFormChange, onCommandUpdate }) {
   const [output, setOutput] = React.useState('');
   const [isRunning, setIsRunning] = React.useState(false);
   const [currentPid, setCurrentPid] = React.useState(null);
@@ -157,12 +157,20 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange }) {
     setIsSaving(true);
     try {
       if (isNew) {
-        // For new jobs, just update the form state
+        // For new jobs, update the form state and the command in parent
         onFormChange({
           ...job,
           command: command,
         });
+        // Also update the editedCommand state if callback is provided
+        if (onCommandUpdate) {
+          onCommandUpdate(command);
+        }
         setHasChanges(false);
+        // Close the modal after saving in Add Mode to provide feedback
+        setTimeout(() => {
+          onClose();
+        }, 500);
       } else {
         const response = await fetch('/api/jobs', {
           method: 'PUT',

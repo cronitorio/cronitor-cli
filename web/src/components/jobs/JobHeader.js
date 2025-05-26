@@ -11,11 +11,24 @@ export function JobHeader({
   onKeyDown,
   isNew = false
 }) {
+  const inputRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (isEditing && inputRef.current) {
+      // Focus the input
+      inputRef.current.focus();
+      // Move cursor to the end
+      const length = inputRef.current.value.length;
+      inputRef.current.setSelectionRange(length, length);
+    }
+  }, [isEditing]);
+
   return (
     <div className="group relative">
       <div className="flex items-center">
         {isEditing ? (
           <input
+            ref={inputRef}
             type="text"
             value={editedName}
             onChange={(e) => onNameChange(e.target.value)}

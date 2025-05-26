@@ -37,25 +37,39 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
   const [showDeleteConfirmation, setShowDeleteConfirmation] = React.useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = React.useState('');
   const [showLearnMore, setShowLearnMore] = React.useState(false);
-  const [job, setJob] = React.useState(initialJob);
-  const [isSuspended, setIsSuspended] = React.useState(initialJob.is_suspended);
-  const [isScheduled, setIsScheduled] = React.useState(initialJob.is_scheduled);
   const [showSuspendedDialog, setShowSuspendedDialog] = React.useState(false);
   const [showScheduledDialog, setShowScheduledDialog] = React.useState(false);
   const [suspendedReason, setSuspendedReason] = React.useState('');
   const [scheduledTime, setScheduledTime] = React.useState('');
   const [scheduledReason, setScheduledReason] = React.useState('');
-  const [formData, setFormData] = React.useState(initialJob);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [wasMonitoredBeforeSuspend, setWasMonitoredBeforeSuspend] = React.useState(false);
+  const [pendingChanges, setPendingChanges] = React.useState(null);
 
   const { jobs, createJob, updateJob, deleteJob, toggleJobMonitoring, toggleJobSuspension, killJobProcess, mutate: jobsMutate } = useJobOperations();
 
   // Get the current job data from allJobs and update local state
   React.useEffect(() => {
     const currentJob = allJobs.find(j => j.key === initialJob.key) || initialJob;
-    setJob(currentJob);
-  }, [allJobs, initialJob]);
+    
+    // If we have pending changes and they match what's now in the server data, clear them
+    if (pendingChanges) {
+      if (
+        currentJob.name === pendingChanges.name &&
+        currentJob.command === pendingChanges.command &&
+        currentJob.expression === pendingChanges.expression
+      ) {
+        setPendingChanges(null);
+      }
+    }
+    
+    // Only update edited values if we're not editing and don't have pending changes
+    if (!isEditing && !isEditingCommand && !isEditingSchedule && !pendingChanges) {
+      setEditedName(currentJob.name || currentJob.default_name);
+      setEditedCommand(currentJob.command);
+      setEditedSchedule(currentJob.expression || '');
+    }
+  }, [allJobs, initialJob, isEditing, isEditingCommand, isEditingSchedule, pendingChanges]);
 
   React.useEffect(() => {
     // Fetch cron files and users when component mounts
@@ -87,42 +101,80 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
   React.useEffect(() => {
     if (isNew) {
       onFormChange({
-        ...job,
+        ...initialJob,
         name: editedName,
         expression: editedSchedule,
         command: editedCommand,
-        crontab_filename: editedCronFile?.filename || job.crontab_filename,
-        crontab_display_name: editedCronFile?.display_name || job.crontab_display_name,
+        crontab_filename: editedCronFile?.filename || initialJob.crontab_filename,
+        crontab_display_name: editedCronFile?.display_name || initialJob.crontab_display_name,
         run_as_user: editedRunAsUser,
         is_draft: false,
-        suspended: job.suspended,
-        monitored: job.monitored
+        suspended: initialJob.suspended,
+        monitored: initialJob.monitored
       });
     }
-  }, [isNew, onFormChange, editedName, editedSchedule, editedCommand, editedCronFile, editedRunAsUser, job.monitored, job]);
+  }, [isNew, onFormChange, editedName, editedSchedule, editedCommand, editedCronFile, editedRunAsUser, initialJob.monitored, initialJob]);
 
   const handleFormChange = (field, value) => {
-    const newData = { ...formData, [field]: value };
-    setFormData(newData);
-    if (onFormChange) {
+    const newData = { ...initialJob, [field]: value };
+    // Only call onFormChange if it's provided (for new jobs)
+    if (typeof onFormChange === 'function') {
       onFormChange(newData);
     }
   };
 
   const handleSave = async () => {
     setSavingStatus('saving');
+    
+    // Store the values we're saving as pending changes
+    setPendingChanges({
+      name: editedName,
+      command: editedCommand,
+      expression: editedSchedule
+    });
+    
     try {
+      // Get the latest state values
       const updatedJob = {
-        ...job,
-        name: isEditing ? editedName : job.name,
-        command: isEditingCommand ? editedCommand : job.command,
-        expression: isEditingSchedule ? editedSchedule : job.expression,
+        ...initialJob,
+        name: editedName,
+        command: editedCommand,
+        expression: editedSchedule,
         is_draft: false,
-        suspended: job.suspended,
-        monitored: job.monitored
+        suspended: initialJob.suspended,
+        monitored: initialJob.monitored
       };
 
-      await updateJob(updatedJob);
+      if (isNew && typeof onSave === 'function') {
+        await onSave(updatedJob);
+      } else {
+        // Ensure we're sending the complete job data
+        const jobToUpdate = {
+          ...updatedJob,
+          key: initialJob.key,
+          code: initialJob.code,
+          crontab_filename: initialJob.crontab_filename,
+          run_as_user: initialJob.run_as_user
+        };
+
+        // Make the API call
+        const response = await fetch('/api/jobs', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(jobToUpdate),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to update job: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
+        }
+
+        // Trigger a revalidation
+        mutate();
+      }
+
       setSavingStatus('saved');
       setTimeout(() => {
         setSavingStatus(null);
@@ -130,11 +182,9 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         if (isEditingCommand) setIsEditingCommand(false);
         if (isEditingSchedule) setIsEditingSchedule(false);
       }, 1000);
-
-      await toggleJobMonitoring(job.key, updatedJob.monitored);
-      mutate();
     } catch (error) {
       setSavingStatus(null);
+      setPendingChanges(null); // Clear pending changes on error
       showToast('Failed to update job: ' + error.message);
     }
   };
@@ -143,19 +193,23 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     if (isNew) {
       onDiscard();
     } else {
-      setFormData(initialJob);
+      setEditedName(initialJob.name || initialJob.default_name);
+      setEditedCommand(initialJob.command);
+      setEditedSchedule(initialJob.expression || '');
       setIsEditing(false);
+      setIsEditingCommand(false);
+      setIsEditingSchedule(false);
     }
   };
 
   const handleSuspendedToggle = async () => {
-    if (!isSuspended) {
+    if (!initialJob.is_suspended) {
       setShowSuspendedDialog(true);
       return;
     }
 
     try {
-      const response = await fetch(`/api/jobs/${job.id}/unsuspend`, {
+      const response = await fetch(`/api/jobs/${initialJob.id}/unsuspend`, {
         method: 'POST',
       });
 
@@ -163,7 +217,6 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         throw new Error('Failed to unsuspend job');
       }
 
-      setIsSuspended(false);
       mutate();
       showToast('Job unsuspended successfully', 'success');
     } catch (error) {
@@ -173,13 +226,13 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
   };
 
   const handleScheduledToggle = async () => {
-    if (!isScheduled) {
+    if (!initialJob.is_scheduled) {
       setShowScheduledDialog(true);
       return;
     }
 
     try {
-      const response = await fetch(`/api/jobs/${job.id}/unschedule`, {
+      const response = await fetch(`/api/jobs/${initialJob.id}/unschedule`, {
         method: 'POST',
       });
 
@@ -187,7 +240,6 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         throw new Error('Failed to unschedule job');
       }
 
-      setIsScheduled(false);
       mutate();
       showToast('Job unscheduled successfully', 'success');
     } catch (error) {
@@ -198,7 +250,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
 
   const handleSuspendedSubmit = async () => {
     try {
-      const response = await fetch(`/api/jobs/${job.id}/suspend`, {
+      const response = await fetch(`/api/jobs/${initialJob.id}/suspend`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -210,9 +262,6 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         throw new Error('Failed to suspend job');
       }
 
-      setIsSuspended(true);
-      setShowSuspendedDialog(false);
-      setSuspendedReason('');
       mutate();
       showToast('Job suspended successfully', 'success');
     } catch (error) {
@@ -223,7 +272,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
 
   const handleScheduledSubmit = async () => {
     try {
-      const response = await fetch(`/api/jobs/${job.id}/schedule`, {
+      const response = await fetch(`/api/jobs/${initialJob.id}/schedule`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -238,10 +287,6 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         throw new Error('Failed to schedule job');
       }
 
-      setIsScheduled(true);
-      setShowScheduledDialog(false);
-      setScheduledTime('');
-      setScheduledReason('');
       mutate();
       showToast('Job scheduled successfully', 'success');
     } catch (error) {
@@ -264,15 +309,11 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
       setIsUserCrontab(selectedCronFile.isUserCrontab);
       setSelectedUser('');
       const timezone = selectedCronFile.timezone || 'UTC';
-      setJob(prev => ({ ...prev, timezone }));
+      handleFormChange('timezone', timezone);
       setEditedCronFile(selectedCronFile.filename);
-      onFormChange(prev => ({
-        ...prev,
-        timezone,
-        crontab_filename: selectedCronFile.filename,
-        crontab_display_name: selectedCronFile.display_name,
-        run_as_user: selectedCronFile.isUserCrontab ? selectedCronFile.user : ''
-      }));
+      handleFormChange('crontab_filename', selectedCronFile.filename);
+      handleFormChange('crontab_display_name', selectedCronFile.display_name);
+      handleFormChange('run_as_user', selectedCronFile.isUserCrontab ? selectedCronFile.user : '');
     }
   };
 
@@ -280,11 +321,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     const user = e.target.value;
     setSelectedUser(user);
     setEditedRunAsUser(user);
-    setJob(prev => ({ ...prev, run_as_user: user }));
-    onFormChange(prev => ({
-      ...prev,
-      run_as_user: user
-    }));
+    handleFormChange('run_as_user', user);
   };
 
   const handleKill = async (pids, isAll = false) => {
@@ -317,7 +354,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ command: job.command })
+        body: JSON.stringify({ command: initialJob.command })
       });
       if (!response.ok) {
         throw new Error('Failed to run job');
@@ -338,7 +375,14 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     setShowSuspendedOverlay(false); // Close overlay first
     
     // Get the current job state from allJobs to ensure we have latest data
-    const currentJob = allJobs.find(j => j.key === job.key) || job;
+    const currentJob = allJobs.find(j => j.key === initialJob.key) || initialJob;
+    
+    // Add debugging
+    console.log('handleToggleSuspend called');
+    console.log('initialJob.key:', initialJob.key);
+    console.log('allJobs:', allJobs);
+    console.log('Found currentJob:', currentJob);
+    console.log('isNew:', isNew);
     
     // Use the explicit state if provided, otherwise toggle the current state
     // Convert to explicit boolean with Boolean()
@@ -363,7 +407,9 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     updatedJob.monitored = currentJob.monitored;
 
     // Update local state immediately for optimistic UI update
-    setJob({...job, suspended: newSuspendedState, monitored: updatedJob.monitored, pause_hours: updatedJob.pause_hours});
+    handleFormChange('suspended', newSuspendedState);
+    handleFormChange('monitored', updatedJob.monitored);
+    handleFormChange('pause_hours', updatedJob.pause_hours);
     
     // Create optimistic update for all jobs in the list
     const optimisticData = allJobs.map(j => 
@@ -375,12 +421,17 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     try {
       // For new jobs, use onSave from props
       if (isNew && typeof onSave === 'function') {
+        console.log('Calling onSave for new job');
         await onSave(updatedJob, true); // Pass true to indicate it's a suspend/resume toggle
       } else {
+        console.log('Making PUT request for existing job');
         // For existing jobs, use direct API call instead of toggleJobSuspension
         // This bypasses any potential issues with the toggleJobSuspension function
         const job = allJobs.find(j => j.key === currentJob.key);
-        if (!job) throw new Error('Job not found');
+        if (!job) {
+          console.error('Job not found in allJobs!');
+          throw new Error('Job not found');
+        }
         
         console.log('Sending API request with suspended =', newSuspendedState);
         console.log('and monitored =', updatedJob.monitored);
@@ -431,7 +482,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
       }
       
       // Refresh data from server with the changes we just made
-      jobsMutate();
+      mutate();
       
       showToast(`Job ${newSuspendedState ? 'suspended' : 'activated'} successfully`, 'success');
       if (isEditing) setIsEditing(false);
@@ -440,16 +491,26 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
       showToast('Failed to toggle job suspension: ' + error.message);
       
       // Revert optimistic update on error
-      setJob(currentJob);
+      handleFormChange('suspended', currentJob.suspended);
+      handleFormChange('monitored', currentJob.monitored);
+      handleFormChange('pause_hours', currentJob.pause_hours);
       mutate();
     }
   };
 
+  // Get the display values - either pending changes or current values
+  const getDisplayValue = (field) => {
+    if (pendingChanges && pendingChanges[field] !== undefined) {
+      return pendingChanges[field];
+    }
+    return initialJob[field];
+  };
+
   return (
-    <div className={`bg-white dark:bg-gray-800 shadow rounded-lg p-4 relative ${job.suspended ? 'bg-gray-100 dark:bg-gray-700' : ''}`}>
+    <div className={`bg-white dark:bg-gray-800 shadow rounded-lg p-4 relative ${initialJob.suspended ? 'bg-gray-100 dark:bg-gray-700' : ''}`}>
       <StatusBadges
-        job={job}
-        instances={job.instances || []}
+        job={initialJob}
+        instances={initialJob.instances || []}
         showInstances={showInstances}
         onToggleInstances={() => setShowInstances(!showInstances)}
         onToggleSuspended={handleToggleSuspendedOverlay}
@@ -474,11 +535,17 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
 
       <div className="space-y-2">
         <JobHeader
-          job={job}
+          job={{
+            ...initialJob,
+            name: getDisplayValue('name') || initialJob.default_name
+          }}
           isEditing={isEditing}
           editedName={editedName}
           onNameChange={setEditedName}
-          onEditStart={() => setIsEditing(true)}
+          onEditStart={() => {
+            setIsEditing(true);
+            setEditedName(getDisplayValue('name') || initialJob.default_name);
+          }}
           onEditEnd={() => {
             if (!isNew) {
               setIsEditing(false);
@@ -489,8 +556,10 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
               e.preventDefault();
               handleSave();
             } else if (e.key === 'Escape') {
-              setIsEditing(false);
-              setEditedName(job.name || job.default_name);
+              if (!isNew) {
+                setIsEditing(false);
+                setEditedName(getDisplayValue('name') || initialJob.default_name);
+              }
             }
           }}
           isNew={isNew}
@@ -508,13 +577,20 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
               <tr>
                 <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
                   <ScheduleSection
-                    job={job}
+                    job={{
+                      ...initialJob,
+                      expression: getDisplayValue('expression') || ''
+                    }}
                     isEditing={isEditingSchedule}
                     editedSchedule={editedSchedule}
-                    onScheduleChange={setEditedSchedule}
+                    onScheduleChange={(value) => {
+                      console.log('Schedule changed to:', value); // Debug log
+                      setEditedSchedule(value);
+                    }}
                     onEditStart={() => {
+                      console.log('Starting edit with schedule:', getDisplayValue('expression')); // Debug log
                       setIsEditingSchedule(true);
-                      setEditedSchedule(job.expression || '');
+                      setEditedSchedule(getDisplayValue('expression') || '');
                     }}
                     onEditEnd={() => {
                       if (!isNew) {
@@ -526,8 +602,10 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                         e.preventDefault();
                         handleSave();
                       } else if (e.key === 'Escape') {
-                        setIsEditingSchedule(false);
-                        setEditedSchedule(job.expression || '');
+                        if (!isNew) {
+                          setIsEditingSchedule(false);
+                          setEditedSchedule(getDisplayValue('expression') || '');
+                        }
                       }
                     }}
                     showDescription={false}
@@ -536,7 +614,10 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                 </td>
                 <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
                   <CommandSection
-                    job={job}
+                    job={{
+                      ...initialJob,
+                      command: getDisplayValue('command')
+                    }}
                     isEditing={isEditingCommand}
                     editedCommand={editedCommand}
                     onCommandChange={setEditedCommand}
@@ -544,6 +625,17 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                     onEditEnd={() => {
                       if (!isNew) {
                         setIsEditingCommand(false);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSave();
+                      } else if (e.key === 'Escape') {
+                        if (!isNew) {
+                          setIsEditingCommand(false);
+                          setEditedCommand(getDisplayValue('command'));
+                        }
                       }
                     }}
                     onShowConsole={() => setShowConsole(true)}
@@ -554,13 +646,20 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
               <tr>
                 <td colSpan="2" className="py-2 text-sm text-gray-900 dark:text-gray-100">
                   <ScheduleSection
-                    job={job}
+                    job={{
+                      ...initialJob,
+                      expression: getDisplayValue('expression') || ''
+                    }}
                     isEditing={isEditingSchedule}
                     editedSchedule={editedSchedule}
-                    onScheduleChange={setEditedSchedule}
+                    onScheduleChange={(value) => {
+                      console.log('Schedule changed to:', value); // Debug log
+                      setEditedSchedule(value);
+                    }}
                     onEditStart={() => {
+                      console.log('Starting edit with schedule:', getDisplayValue('expression')); // Debug log
                       setIsEditingSchedule(true);
-                      setEditedSchedule(job.expression || '');
+                      setEditedSchedule(getDisplayValue('expression') || '');
                     }}
                     onEditEnd={() => {
                       if (!isNew) {
@@ -572,8 +671,10 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                         e.preventDefault();
                         handleSave();
                       } else if (e.key === 'Escape') {
-                        setIsEditingSchedule(false);
-                        setEditedSchedule(job.expression || '');
+                        if (!isNew) {
+                          setIsEditingSchedule(false);
+                          setEditedSchedule(getDisplayValue('expression') || '');
+                        }
                       }
                     }}
                     showDescription={true}
@@ -600,14 +701,16 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
               <tr>
                 <td className="py-2 text-sm text-gray-900 dark:text-gray-100" style={{ width: '25%' }}>
                   <MonitoringSection
-                    job={job}
+                    job={initialJob}
                     onUpdate={async (updatedJob) => {
-                      setJob(updatedJob);
+                      handleFormChange('suspended', updatedJob.suspended);
+                      handleFormChange('monitored', updatedJob.monitored);
+                      handleFormChange('pause_hours', updatedJob.pause_hours);
                       if (isNew) {
                         onFormChange(updatedJob);
                       } else {
                         try {
-                          await toggleJobMonitoring(job.key, updatedJob.monitored);
+                          await toggleJobMonitoring(initialJob.key, updatedJob.monitored);
                           mutate();
                         } catch (error) {
                           showToast('Failed to update monitoring status: ' + error.message);
@@ -619,7 +722,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                 </td>
                 <td className="py-2 text-sm text-gray-900 dark:text-gray-100" style={{ width: '37.5%' }}>
                   <LocationSection
-                    job={job}
+                    job={initialJob}
                     isNew={isNew}
                     cronFiles={cronFiles}
                     users={users}
@@ -652,18 +755,18 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
 
         {showInstances && (
           <InstancesTable
-            instances={job.instances || []}
+            instances={initialJob.instances || []}
             killingPids={killingPids}
             isKillingAll={isKillingAll}
             onKillInstance={(pid) => handleKill([pid])}
-            onKillAll={() => handleKill((job.instances || []).map(i => i.pid), true)}
+            onKillAll={() => handleKill((initialJob.instances || []).map(i => i.pid), true)}
             onRunNow={handleRunNow}
           />
         )}
 
         {showSuspendedOverlay && (
           <SuspendOverlay
-            job={allJobs.find(j => j.key === job.key) || job}
+            job={allJobs.find(j => j.key === initialJob.key) || initialJob}
             allJobs={allJobs}
             onClose={() => setShowSuspendedOverlay(false)}
             onToggleSuspension={handleToggleSuspend}
@@ -681,7 +784,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
             onDelete={async () => {
               if (deleteConfirmation.toLowerCase() !== 'delete') return;
               try {
-                await deleteJob(job.key);
+                await deleteJob(initialJob.key);
                 setShowDeleteConfirmation(false);
                 setDeleteConfirmation('');
                 showToast('Job deleted successfully', 'success');
@@ -696,10 +799,11 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
 
         {showConsole && (
           <ConsoleModal
-            job={job}
+            job={initialJob}
             onClose={() => setShowConsole(false)}
             isNew={isNew}
             onFormChange={onFormChange}
+            onCommandUpdate={setEditedCommand}
           />
         )}
 
