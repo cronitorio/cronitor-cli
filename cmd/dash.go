@@ -1143,7 +1143,8 @@ func handleGetCrontabs(w http.ResponseWriter, r *http.Request) {
 	var crontabs []*lib.Crontab
 	crontabs, err := lib.GetAllCrontabs()
 	if err != nil {
-		fatal(err.Error(), 1)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	// Check if /etc/crontab is already in the list
@@ -1163,6 +1164,13 @@ func handleGetCrontabs(w http.ResponseWriter, r *http.Request) {
 		}
 		systemCrontab := lib.CrontabFactory(username, "/etc/crontab")
 		crontabs = append(crontabs, systemCrontab)
+	}
+
+	// Parse each crontab to ensure lines are loaded
+	for _, crontab := range crontabs {
+		if len(crontab.Lines) == 0 && crontab.Exists() {
+			crontab.Parse(true)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1187,9 +1195,18 @@ func handlePostCrontabs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If creating in /etc/cron.d, build the full path
+	if !strings.Contains(crontab.Filename, "/") && crontab.Filename != "/etc/crontab" && !strings.HasPrefix(crontab.Filename, "user:") {
+		crontab.Filename = filepath.Join("/etc/cron.d", crontab.Filename)
+	}
+
 	// Try to load the crontab first to check if it exists
 	existingCrontab, err := lib.GetCrontab(crontab.Filename)
 	if err == nil {
+		// Parse it to ensure lines are loaded
+		if len(existingCrontab.Lines) == 0 && existingCrontab.Exists() {
+			existingCrontab.Parse(true)
+		}
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(existingCrontab)
 		return
@@ -1213,6 +1230,9 @@ func handlePostCrontabs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to create crontab file: %v", err), http.StatusInternalServerError)
 		return
 	}
+
+	// Parse the new crontab to populate lines
+	newCrontab.Parse(true)
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(newCrontab)

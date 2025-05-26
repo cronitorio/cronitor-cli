@@ -287,12 +287,14 @@ func (c Crontab) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(&struct {
 		Alias
-		DisplayName string `json:"display_name"`
-		Timezone    string `json:"timezone,omitempty"`
+		DisplayName string  `json:"display_name"`
+		Timezone    string  `json:"timezone,omitempty"`
+		Lines       []*Line `json:"lines"`
 	}{
 		Alias:       Alias(c),
 		DisplayName: c.DisplayName(),
 		Timezone:    timezone,
+		Lines:       c.Lines,
 	})
 }
 
@@ -409,6 +411,69 @@ func (l Line) GetCode() string {
 		return l.Mon.Code
 	}
 
+	return ""
+}
+
+// MarshalJSON implements custom JSON marshaling to expose all necessary fields
+func (l Line) MarshalJSON() ([]byte, error) {
+	type Alias Line
+	return json.Marshal(&struct {
+		Alias
+		IsJob          bool   `json:"is_job"`
+		IsComment      bool   `json:"is_comment"`
+		IsEnvVar       bool   `json:"is_env_var"`
+		Name           string `json:"name"`
+		LineText       string `json:"line_text"`
+		LineNumber     int    `json:"line_number"`
+		CronExpression string `json:"cron_expression"`
+		CommandToRun   string `json:"command_to_run"`
+		Code           string `json:"code"`
+		RunAs          string `json:"run_as"`
+		EnvVarKey      string `json:"env_var_key,omitempty"`
+		EnvVarValue    string `json:"env_var_value,omitempty"`
+	}{
+		Alias:          Alias(l),
+		IsJob:          l.IsJob,
+		IsComment:      l.IsComment,
+		IsEnvVar:       l.IsEnvVar(),
+		Name:           l.Name,
+		LineText:       l.FullLine,
+		LineNumber:     l.LineNumber,
+		CronExpression: l.CronExpression,
+		CommandToRun:   l.CommandToRun,
+		Code:           l.Code,
+		RunAs:          l.RunAs,
+		EnvVarKey:      l.GetEnvVarKey(),
+		EnvVarValue:    l.GetEnvVarValue(),
+	})
+}
+
+// IsEnvVar checks if the line is an environment variable declaration
+func (l Line) IsEnvVar() bool {
+	return !l.IsJob && strings.Contains(l.FullLine, "=")
+}
+
+// GetEnvVarKey extracts the key from an environment variable line
+func (l Line) GetEnvVarKey() string {
+	if !l.IsEnvVar() {
+		return ""
+	}
+	parts := strings.SplitN(l.FullLine, "=", 2)
+	if len(parts) > 0 {
+		return strings.TrimSpace(parts[0])
+	}
+	return ""
+}
+
+// GetEnvVarValue extracts the value from an environment variable line
+func (l Line) GetEnvVarValue() string {
+	if !l.IsEnvVar() {
+		return ""
+	}
+	parts := strings.SplitN(l.FullLine, "=", 2)
+	if len(parts) > 1 {
+		return strings.TrimSpace(parts[1])
+	}
 	return ""
 }
 

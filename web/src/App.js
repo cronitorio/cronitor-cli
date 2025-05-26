@@ -6,6 +6,7 @@ import cronitorLogo from './assets/cronitor.png';
 import Settings from './components/Settings';
 import useSWR from 'swr';
 import Jobs from './components/Jobs';
+import Crontabs from './components/Crontabs';
 
 const fetcher = url => fetch(url).then(res => res.json());
 
@@ -168,14 +169,6 @@ function App() {
         </div>
       </div>
     </Router>
-  );
-}
-
-function Crontabs() {
-  return (
-    <div>
-      <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Crontabs</h1>
-    </div>
   );
 }
 
