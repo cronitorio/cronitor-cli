@@ -540,6 +540,22 @@ export default function Crontabs() {
                       className="py-4 px-3 font-mono text-sm text-gray-100 cursor-text min-h-full"
                       style={{ lineHeight: '1.5' }}
                       tabIndex={0}
+                      onClick={() => {
+                        // If crontab is empty, start editing immediately
+                        if (!selectedCrontab || !selectedCrontab.lines || selectedCrontab.lines.length === 0) {
+                          setEditedContent('');
+                          setIsEditing(true);
+                          setSelectedLine(null);
+                          
+                          // Focus the textarea after a brief delay
+                          setTimeout(() => {
+                            if (textareaRef.current) {
+                              textareaRef.current.focus();
+                              textareaRef.current.setSelectionRange(0, 0);
+                            }
+                          }, 0);
+                        }
+                      }}
                       onKeyDown={(e) => {
                         // Handle keyboard navigation
                         const formattedLines = formatCrontabContent();
@@ -567,22 +583,26 @@ export default function Crontabs() {
                         }
                       }}
                     >
-                      {formatCrontabContent().map((line, index) => (
-                        <div
-                          key={index}
-                          onClick={() => line.originalLine && handleLineClick(selectedCrontab.lines.indexOf(line.originalLine))}
-                          onDoubleClick={() => handleEditStart(index)}
-                          className={`pr-4 ${
-                            !line.isNameComment ? 'hover:bg-gray-900 cursor-pointer' : 'hover:bg-gray-900 cursor-pointer'
-                          } ${
-                            line.originalLine === selectedLine ? 'bg-blue-900/30' : ''
-                          } ${
-                            line.isNameComment || (line.originalLine && line.originalLine.is_comment) ? 'text-gray-400' : ''
-                          }`}
-                        >
-                          {line.text || '\u00A0'}
-                        </div>
-                      ))}
+                      {formatCrontabContent().length === 0 ? (
+                        <div className="text-gray-500 italic">Empty crontab - click to edit</div>
+                      ) : (
+                        formatCrontabContent().map((line, index) => (
+                          <div
+                            key={index}
+                            onClick={() => line.originalLine && handleLineClick(selectedCrontab.lines.indexOf(line.originalLine))}
+                            onDoubleClick={() => handleEditStart(index)}
+                            className={`pr-4 ${
+                              !line.isNameComment ? 'hover:bg-gray-900 cursor-pointer' : 'hover:bg-gray-900 cursor-pointer'
+                            } ${
+                              line.originalLine === selectedLine ? 'bg-blue-900/30' : ''
+                            } ${
+                              line.isNameComment || (line.originalLine && line.originalLine.is_comment) ? 'text-gray-400' : ''
+                            }`}
+                          >
+                            {line.text || '\u00A0'}
+                          </div>
+                        ))
+                      )}
                     </div>
                   )}
                 </div>

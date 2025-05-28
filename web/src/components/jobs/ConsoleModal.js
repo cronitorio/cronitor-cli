@@ -184,7 +184,8 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange, onComm
         });
 
         if (!response.ok) {
-          throw new Error('Failed to update job command');
+          const errorText = await response.text();
+          throw new Error(`Failed to update job command: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
         }
 
         // Update the job in the parent component

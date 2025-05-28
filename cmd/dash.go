@@ -732,7 +732,7 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 	// Save changes if any
 	if hasChanges {
 		if err := crontab.Save(crontab.Write()); err != nil {
-			http.Error(w, "Failed to save crontab", http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf("Failed to save crontab: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -1148,25 +1148,6 @@ func handleGetCrontabs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if /etc/crontab is already in the list
-	hasSystemCrontab := false
-	for _, crontab := range crontabs {
-		if crontab.Filename == "/etc/crontab" {
-			hasSystemCrontab = true
-			break
-		}
-	}
-
-	// Always add /etc/crontab if it's not already in the list
-	if !hasSystemCrontab {
-		username := ""
-		if u, err := user.Current(); err == nil {
-			username = u.Username
-		}
-		systemCrontab := lib.CrontabFactory(username, "/etc/crontab")
-		crontabs = append(crontabs, systemCrontab)
-	}
-
 	// Parse each crontab to ensure lines are loaded
 	for _, crontab := range crontabs {
 		if len(crontab.Lines) == 0 && crontab.Exists() {
@@ -1351,7 +1332,12 @@ func handlePutCrontabs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid crontab path", http.StatusBadRequest)
 		return
 	}
-	filename := parts[3]
+	// Join all parts after "/api/crontabs/" to handle nested directory paths
+	filename := strings.Join(parts[3:], "/")
+	// Add leading slash for file paths, but not for user crontabs (user:username)
+	if !strings.HasPrefix(filename, "user:") {
+		filename = "/" + filename
+	}
 
 	// Parse the request body
 	var request struct {
