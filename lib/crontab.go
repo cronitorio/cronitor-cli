@@ -417,20 +417,25 @@ func (l Line) GetCode() string {
 // MarshalJSON implements custom JSON marshaling to expose all necessary fields
 func (l Line) MarshalJSON() ([]byte, error) {
 	type Alias Line
-	return json.Marshal(&struct {
+
+	// Base structure that all lines will have
+	base := struct {
 		Alias
-		IsJob          bool   `json:"is_job"`
-		IsComment      bool   `json:"is_comment"`
-		IsEnvVar       bool   `json:"is_env_var"`
-		Name           string `json:"name"`
-		LineText       string `json:"line_text"`
-		LineNumber     int    `json:"line_number"`
-		CronExpression string `json:"cron_expression"`
-		CommandToRun   string `json:"command_to_run"`
-		Code           string `json:"code"`
-		RunAs          string `json:"run_as"`
-		EnvVarKey      string `json:"env_var_key,omitempty"`
-		EnvVarValue    string `json:"env_var_value,omitempty"`
+		IsJob           bool   `json:"is_job"`
+		IsComment       bool   `json:"is_comment"`
+		IsEnvVar        bool   `json:"is_env_var"`
+		Name            string `json:"name"`
+		LineText        string `json:"line_text"`
+		LineNumber      int    `json:"line_number"`
+		CronExpression  string `json:"cron_expression"`
+		CommandToRun    string `json:"command_to_run"`
+		Code            string `json:"code"`
+		RunAs           string `json:"run_as"`
+		EnvVarKey       string `json:"env_var_key,omitempty"`
+		EnvVarValue     string `json:"env_var_value,omitempty"`
+		Key             string `json:"key,omitempty"`
+		CrontabFilename string `json:"crontab_filename,omitempty"`
+		DefaultName     string `json:"default_name,omitempty"`
 	}{
 		Alias:          Alias(l),
 		IsJob:          l.IsJob,
@@ -445,7 +450,167 @@ func (l Line) MarshalJSON() ([]byte, error) {
 		RunAs:          l.RunAs,
 		EnvVarKey:      l.GetEnvVarKey(),
 		EnvVarValue:    l.GetEnvVarValue(),
-	})
+	}
+
+	// If this is a job, add additional fields
+	if l.IsJob {
+		base.Key = l.Key(l.Crontab.CanonicalName())
+		base.CrontabFilename = l.Crontab.Filename
+
+		// Generate default name
+		defaultName := ""
+		excludeFromName := []string{
+			"2>&1",
+			"/bin/bash -l -c",
+			"/bin/bash -lc",
+			"/bin/bash -c -l",
+			"/bin/bash -cl",
+			"/dev/null",
+			"'",
+			"\"",
+			"\\",
+		}
+
+		// Limit the visible hostname portion to 21 chars
+		hostname, _ := os.Hostname()
+		formattedHostname := ""
+		if hostname != "" {
+			if len(hostname) > 21 {
+				hostname = fmt.Sprintf("%s...%s", hostname[:9], hostname[len(hostname)-9:])
+			}
+			formattedHostname = fmt.Sprintf("[%s] ", hostname)
+		}
+
+		if l.IsAutoDiscoverCommand() {
+			defaultName = fmt.Sprintf("%sAuto discover %s", formattedHostname, strings.TrimSpace(l.Crontab.DisplayName()))
+			if len(defaultName) > 100 {
+				defaultName = defaultName[:97] + "..."
+			}
+		} else {
+			// Remove output redirection
+			commandToRun := l.CommandToRun
+			for _, redirectionOperator := range []string{">>", ">"} {
+				if operatorPosition := strings.LastIndex(l.CommandToRun, redirectionOperator); operatorPosition > 0 {
+					commandToRun = commandToRun[:operatorPosition]
+					break
+				}
+			}
+
+			// Remove exclusion text
+			for _, substr := range excludeFromName {
+				commandToRun = strings.Replace(commandToRun, substr, "", -1)
+			}
+
+			commandToRun = strings.Join(strings.Fields(commandToRun), " ")
+
+			// Assemble the candidate name
+			formattedRunAs := ""
+			if l.RunAs != "" {
+				formattedRunAs = fmt.Sprintf("%s ", l.RunAs)
+			}
+
+			defaultName = formattedHostname + formattedRunAs + commandToRun
+
+			// If too long, truncate
+			if len(defaultName) > 100 {
+				// Keep the first and last portion of the command
+				separator := "..."
+				commandPrefixLen := 20 + len(formattedHostname) + len(formattedRunAs)
+				lineNumSuffix := fmt.Sprintf(" L%d", l.LineNumber)
+				commandSuffixLen := 100 - len(lineNumSuffix) - commandPrefixLen - len(separator)
+				defaultName = fmt.Sprintf(
+					"%s%s%s%s",
+					strings.TrimSpace(defaultName[:commandPrefixLen]),
+					separator,
+					strings.TrimSpace(defaultName[len(defaultName)-commandSuffixLen:]),
+					lineNumSuffix)
+			}
+		}
+
+		base.DefaultName = defaultName
+
+		// Now create a Job structure
+		type Job struct {
+			Key                string        `json:"key"`
+			Code               string        `json:"code"`
+			Name               string        `json:"name"`
+			DefaultName        string        `json:"default_name"`
+			Command            string        `json:"command"`
+			Expression         string        `json:"expression"`
+			CrontabFilename    string        `json:"crontab_filename"`
+			CrontabDisplayName string        `json:"crontab_display_name"`
+			LineNumber         int           `json:"line_number"`
+			RunAsUser          string        `json:"run_as_user"`
+			Timezone           string        `json:"timezone"`
+			Monitored          bool          `json:"monitored"`
+			Suspended          bool          `json:"suspended"`
+			Instances          []interface{} `json:"instances"`
+			IsDraft            bool          `json:"is_draft"`
+		}
+
+		timezone := "UTC"
+		if l.Crontab.TimezoneLocationName != nil {
+			timezone = l.Crontab.TimezoneLocationName.Name
+		}
+
+		job := Job{
+			Key:                base.Key,
+			Code:               l.Code,
+			Name:               l.Name,
+			DefaultName:        defaultName,
+			Command:            l.CommandToRun,
+			Expression:         l.CronExpression,
+			CrontabFilename:    l.Crontab.Filename,
+			CrontabDisplayName: l.Crontab.DisplayName(),
+			LineNumber:         l.LineNumber + 1, // 1-indexed for UI
+			RunAsUser:          l.RunAs,
+			Timezone:           timezone,
+			Monitored:          len(l.Code) > 0,
+			Suspended:          l.IsComment,
+			Instances:          []interface{}{}, // Empty array for now
+			IsDraft:            false,
+		}
+
+		// Include the job in the JSON output
+		return json.Marshal(&struct {
+			IsJob           bool   `json:"is_job"`
+			IsComment       bool   `json:"is_comment"`
+			IsEnvVar        bool   `json:"is_env_var"`
+			Name            string `json:"name"`
+			LineText        string `json:"line_text"`
+			LineNumber      int    `json:"line_number"`
+			CronExpression  string `json:"cron_expression"`
+			CommandToRun    string `json:"command_to_run"`
+			Code            string `json:"code"`
+			RunAs           string `json:"run_as"`
+			EnvVarKey       string `json:"env_var_key,omitempty"`
+			EnvVarValue     string `json:"env_var_value,omitempty"`
+			Key             string `json:"key,omitempty"`
+			CrontabFilename string `json:"crontab_filename,omitempty"`
+			DefaultName     string `json:"default_name,omitempty"`
+			Job             *Job   `json:"job,omitempty"`
+		}{
+			IsJob:           base.IsJob,
+			IsComment:       base.IsComment,
+			IsEnvVar:        base.IsEnvVar,
+			Name:            base.Name,
+			LineText:        base.LineText,
+			LineNumber:      base.LineNumber,
+			CronExpression:  base.CronExpression,
+			CommandToRun:    base.CommandToRun,
+			Code:            base.Code,
+			RunAs:           base.RunAs,
+			EnvVarKey:       base.EnvVarKey,
+			EnvVarValue:     base.EnvVarValue,
+			Key:             base.Key,
+			CrontabFilename: base.CrontabFilename,
+			DefaultName:     base.DefaultName,
+			Job:             &job,
+		})
+	}
+
+	// For non-job lines, return the base structure
+	return json.Marshal(base)
 }
 
 // IsEnvVar checks if the line is an environment variable declaration

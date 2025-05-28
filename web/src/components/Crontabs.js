@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import useSWR from 'swr';
 import { NewCrontabOverlay } from './jobs/NewCrontabOverlay';
 import { Toast } from './Toast';
+import { JobCard } from './jobs/JobCard';
+import { CommentCard } from './crontabs/CommentCard';
+import { EnvVarCard } from './crontabs/EnvVarCard';
 
 const fetcher = async url => {
   try {
@@ -20,11 +23,48 @@ const fetcher = async url => {
 };
 
 export default function Crontabs() {
-  const { data: crontabs, error, mutate } = useSWR('/api/crontabs', fetcher, {
-    refreshInterval: 5000,
-    revalidateOnFocus: true
+  const [enableAutoRefresh, setEnableAutoRefresh] = useState(false);
+  const [revalidationKey, setRevalidationKey] = useState(0);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedContent, setEditedContent] = useState('');
+  const textareaRef = useRef(null);
+  
+  // Enable auto-refresh after initial load completes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setEnableAutoRefresh(true);
+    }, 2000); // Wait 2 seconds before enabling auto-refresh
+    
+    return () => clearTimeout(timer);
+  }, []);
+  
+  // Load settings first (non-critical, no refresh)
+  const { data: settings } = useSWR('/api/settings', fetcher, {
+    revalidateOnFocus: false,
+    refreshInterval: 0
   });
-  const { data: settings } = useSWR('/api/settings', fetcher);
+  
+  // Load crontabs with controlled refresh
+  const { data: crontabs, error, mutate } = useSWR(
+    `/api/crontabs?key=${revalidationKey}`,
+    fetcher,
+    {
+      refreshInterval: enableAutoRefresh ? 10000 : 0, // Only auto-refresh after initial load
+      revalidateOnFocus: true, // Enable revalidation on focus
+      dedupingInterval: 2000 // Prevent duplicate requests within 2s
+    }
+  );
+  
+  // Only load jobs after crontabs are loaded
+  const { data: jobs, mutate: jobsMutate } = useSWR(
+    crontabs ? `/api/jobs?key=${revalidationKey}` : null, 
+    fetcher, 
+    {
+      refreshInterval: enableAutoRefresh ? 10000 : 0, // Only auto-refresh after initial load
+      revalidateOnFocus: true,
+      dedupingInterval: 2000
+    }
+  );
   
   const [selectedCrontab, setSelectedCrontab] = useState(null);
   const [selectedLine, setSelectedLine] = useState(null);
@@ -32,6 +72,7 @@ export default function Crontabs() {
   const [isToastVisible, setIsToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState('error');
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   
   const [newCrontabForm, setNewCrontabForm] = useState({
     filename: '',
@@ -53,8 +94,45 @@ export default function Crontabs() {
   useEffect(() => {
     if (crontabs && crontabs.length > 0 && !selectedCrontab) {
       setSelectedCrontab(crontabs[0]);
+      setIsInitialLoad(false);
     }
   }, [crontabs, selectedCrontab]);
+
+  // Update selectedLine when selectedCrontab changes to keep data in sync
+  useEffect(() => {
+    if (selectedCrontab && selectedLine) {
+      // Find the line index in the current crontab
+      const currentIndex = selectedCrontab.lines.findIndex(line => line === selectedLine);
+      if (currentIndex === -1) {
+        // The selectedLine is from an old crontab, find the corresponding line by index
+        const originalIndex = selectedLine.line_number;
+        if (originalIndex >= 0 && originalIndex < selectedCrontab.lines.length) {
+          const updatedLine = selectedCrontab.lines[originalIndex];
+          if (updatedLine && updatedLine !== selectedLine) {
+            setSelectedLine(updatedLine);
+          }
+        }
+      }
+    }
+  }, [selectedCrontab, selectedLine]);
+
+  // Debug selected line
+  useEffect(() => {
+    if (selectedLine) {
+      console.log('Selected line full object:', selectedLine);
+      console.log('Line type checks:', {
+        is_job: selectedLine.is_job,
+        is_job_type: typeof selectedLine.is_job,
+        is_job_truthy: !!selectedLine.is_job,
+        is_comment: selectedLine.is_comment,
+        is_comment_type: typeof selectedLine.is_comment,
+        is_env_var: selectedLine.is_env_var,
+        is_env_var_type: typeof selectedLine.is_env_var,
+        has_line_text: !!selectedLine.line_text,
+        line_text_preview: selectedLine.line_text?.substring(0, 50)
+      });
+    }
+  }, [selectedLine]);
 
   const showToast = (message, type = 'error') => {
     setToastMessage(message);
@@ -81,7 +159,8 @@ export default function Crontabs() {
           filename: newCrontabForm.filename,
           TimezoneLocationName: {
             Name: newCrontabForm.timezone
-          }
+          },
+          comments: newCrontabForm.comments
         }),
       });
 
@@ -133,15 +212,22 @@ export default function Crontabs() {
         formattedLines.push({
           lineNumber: lineNumber++,
           text: `# Name: ${line.name}`,
-          originalLine: null,
+          originalLine: line,
           isNameComment: true
         });
       }
       
       // Add the actual line
+      let displayText = line.line_text || '';
+      
+      // If this is a comment line and doesn't already start with #, add it
+      if (line.is_comment && displayText && !displayText.startsWith('#')) {
+        displayText = `# ${displayText}`;
+      }
+      
       formattedLines.push({
         lineNumber: lineNumber++,
-        text: line.line_text || '',
+        text: displayText,
         originalLine: line,
         isNameComment: false
       });
@@ -150,34 +236,248 @@ export default function Crontabs() {
     return formattedLines;
   };
 
+  // Get or create a job object for the selected line
+  const getJobForLine = () => {
+    if (!selectedLine || !selectedLine.is_job) return null;
+    
+    // If the line has a job object from the server, use it
+    if (selectedLine.job) {
+      // Add any missing fields that might be needed
+      const job = { ...selectedLine.job };
+      
+      // Add instances from the jobs list if available
+      if (jobs && jobs.length > 0 && selectedLine.key) {
+        const matchedJob = jobs.find(j => j.key === selectedLine.key);
+        if (matchedJob && matchedJob.instances) {
+          job.instances = matchedJob.instances;
+        }
+      }
+      
+      return job;
+    }
+    
+    // Fallback for older server versions that don't include job in the response
+    // This code can be removed once all servers are updated
+    if (jobs && jobs.length > 0) {
+      // Try to match by key
+      if (selectedLine.key) {
+        const job = jobs.find(j => j.key === selectedLine.key);
+        if (job) return { ...job, line_number: selectedLine.line_number };
+      }
+      
+      // Try to match by content
+      const matchedJob = jobs.find(j => 
+        j.crontab_filename === selectedLine.crontab_filename &&
+        j.expression === selectedLine.cron_expression &&
+        j.command === selectedLine.command_to_run
+      );
+      if (matchedJob) return { ...matchedJob, line_number: selectedLine.line_number };
+    }
+    
+    // If no match found, create a job object from the crontab line
+    return {
+      key: selectedLine.key || `crontab-line-${selectedLine.line_number}`,
+      code: selectedLine.code,
+      name: selectedLine.name || selectedLine.default_name || '',
+      command: selectedLine.command_to_run || '',
+      expression: selectedLine.cron_expression || '',
+      crontab_filename: selectedLine.crontab_filename || selectedCrontab?.filename || '',
+      crontab_display_name: selectedCrontab?.display_name || selectedCrontab?.filename || '',
+      line_number: selectedLine.line_number,
+      run_as_user: selectedLine.run_as || '',
+      timezone: selectedLine.timezone || selectedCrontab?.timezone || 'UTC',
+      monitored: !!selectedLine.code,
+      suspended: false,
+      instances: [],
+      is_draft: false
+    };
+  };
+
+  const handleEditStart = (displayedLineIndex) => {
+    if (!selectedCrontab) return;
+    
+    // Get all lines including Name comments (same as what's displayed)
+    const lines = selectedCrontab.lines.map(line => {
+      if (line.is_job && line.name) {
+        // For job lines with names, add the Name comment first, then the job line
+        const jobLineText = line.is_comment ? `# ${line.line_text}` : line.line_text;
+        return [`# Name: ${line.name}`, jobLineText];
+      } else {
+        // For other lines, add # prefix if it's a comment line and doesn't already have it
+        let lineText = line.line_text;
+        if (line.is_comment && lineText && !lineText.startsWith('#')) {
+          lineText = `# ${lineText}`;
+        }
+        return [lineText];
+      }
+    }).flat();
+    
+    const content = lines.join('\n');
+    
+    // Calculate the position to place the cursor at the end of the clicked line
+    // Use the displayedLineIndex which matches the lines array
+    const linesBeforeCursor = lines.slice(0, displayedLineIndex + 1);
+    const cursorPosition = linesBeforeCursor.join('\n').length;
+    
+    setEditedContent(content);
+    setIsEditing(true);
+    setSelectedLine(null); // Clear selected line when editing starts
+    
+    // Focus the textarea and set cursor position after a brief delay
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(cursorPosition, cursorPosition);
+      }
+    }, 0);
+  };
+
+  const handleDiscard = () => {
+    setIsEditing(false);
+    setEditedContent('');
+  };
+
+  const handleSubmit = async () => {
+    try {
+      // Split content into lines and process them
+      const lines = editedContent.split('\n').map(line => line.trim());
+      const processedLines = [];
+      let currentName = null;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        
+        // Check if this is a Name comment (handles both # Name: and #Name: formats)
+        const nameMatch = line.match(/^#\s*Name:\s*(.+)$/i);
+        if (nameMatch) {
+          currentName = nameMatch[1].trim();
+          // Don't add the Name comment to processed lines
+          continue;
+        }
+
+        // Check if this is a job line (either active or suspended)
+        const isJobLine = line && (
+          !line.startsWith('#') || // Active job line
+          (line.startsWith('#') && line.trim().length > 1 && !line.match(/^#\s*Name:/i)) // Suspended job line (but not a Name comment)
+        );
+
+        if (isJobLine) {
+          processedLines.push({
+            line_text: line,
+            name: currentName || undefined
+          });
+          currentName = null; // Reset the name after associating it
+        } else {
+          // Regular comment, empty line, or environment variable
+          processedLines.push({ line_text: line });
+        }
+      }
+      
+      const response = await fetch(`/api/crontabs/${selectedCrontab.filename}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ lines: processedLines }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update crontab');
+      }
+
+      const updatedCrontab = await response.json();
+      
+      // Update local state immediately
+      setSelectedCrontab(updatedCrontab);
+      setIsEditing(false);
+      setEditedContent('');
+      
+      // Update the SWR cache with the new crontab data
+      mutate(
+        (currentData) => {
+          return currentData.map(crontab => 
+            crontab.filename === updatedCrontab.filename ? updatedCrontab : crontab
+          );
+        },
+        { revalidate: false }
+      );
+      
+      // Force revalidation of both crontabs and jobs data
+      forceRevalidation();
+      mutate();
+      jobsMutate();
+      
+      showToast('Crontab updated successfully', 'success');
+    } catch (error) {
+      console.error('Error updating crontab:', error);
+      showToast('Failed to update crontab: ' + error.message);
+    }
+  };
+
+  const forceRevalidation = () => {
+    setRevalidationKey(prev => prev + 1);
+  };
+
   if (error) {
     return (
-      <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-        <h3 className="text-sm font-medium text-red-800 dark:text-red-200">Failed to load crontabs</h3>
-        <div className="mt-2 text-sm text-red-700 dark:text-red-300">
-          <pre className="whitespace-pre-wrap break-words">{error.message}</pre>
+      <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+        <div className="flex">
+          <div className="flex-shrink-0">
+            <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+          </div>
+          <div className="ml-3 flex-1">
+            <h3 className="text-sm font-medium text-red-800 dark:text-red-200">Failed to load crontabs</h3>
+            <div className="mt-2 text-sm text-red-700 dark:text-red-300">
+              <pre className="whitespace-pre-wrap break-words">{error.message}</pre>
+            </div>
+            {error.message.includes('Unable to connect') && (
+              <div className="mt-2 text-sm text-red-700 dark:text-red-300">
+                <p>Possible causes:</p>
+                <ul className="list-disc list-inside mt-1">
+                  <li>The dash server is not running</li>
+                  <li>Your IP is not whitelisted</li>
+                  <li>A VPN connection is required</li>
+                  <li>Server is restarting</li>
+                </ul>
+              </div>
+            )}
+            <div className="mt-4">
+              <button
+                onClick={() => mutate()}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md shadow-sm text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                Reload
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
-  if (!crontabs) {
+  if (!crontabs || isInitialLoad) {
     return <div className="text-gray-600 dark:text-gray-300">Loading...</div>;
   }
+
+  const jobForLine = getJobForLine();
 
   return (
     <div className="h-full flex flex-col">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Crontabs</h1>
-        <button
-          onClick={() => setShowNewCrontab(true)}
-          className="px-4 py-2.5 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium"
-        >
-          Add Crontab
-        </button>
+        {settings?.os !== 'darwin' && (
+          <button
+            onClick={() => setShowNewCrontab(true)}
+            className="px-4 py-2.5 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium"
+          >
+            Add Crontab
+          </button>
+        )}
       </div>
 
-      <div className="mb-4">
+      <div className="mb-4 w-1/2">
         <select
           value={selectedCrontab?.filename || ''}
           onChange={(e) => {
@@ -195,155 +495,151 @@ export default function Crontabs() {
         </select>
       </div>
 
-      <div className="flex-1 flex gap-4 min-h-0">
-        {/* Main content area - 3/4 width */}
-        <div className="flex-[3] bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
-          <div className="h-full p-4">
-            <div className="h-full bg-gray-50 dark:bg-gray-900 rounded-lg overflow-hidden">
+      <div className="flex-1 flex flex-col gap-4 min-h-0">
+        {/* Main content area - full width */}
+        <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+          <div className="h-full rounded-lg">
+            <div className="h-full rounded-lg overflow-hidden" style={{ backgroundColor: 'rgba(0, 0, 0, 0.9)' }}>
               <div className="h-full flex">
                 {/* Line numbers column */}
                 <div className="flex-shrink-0 py-4 pl-4 pr-2 text-gray-400 dark:text-gray-500 font-mono text-sm select-none" style={{ lineHeight: '1.5' }}>
-                  {formatCrontabContent().map((line, index) => (
-                    <div key={index}>{String(line.lineNumber).padStart(3, ' ')}</div>
-                  ))}
+                  {isEditing ? (
+                    editedContent.split('\n').map((_, index) => (
+                      <div key={index}>{String(index + 1).padStart(3, ' ')}</div>
+                    ))
+                  ) : (
+                    formatCrontabContent().map((line, index) => (
+                      <div key={index}>{String(line.lineNumber).padStart(3, ' ')}</div>
+                    ))
+                  )}
                 </div>
                 {/* Separator */}
                 <div className="flex-shrink-0 py-4 text-gray-300 dark:text-gray-600 font-mono text-sm select-none" style={{ lineHeight: '1.5' }}>
-                  {formatCrontabContent().map((_, index) => (
-                    <div key={index}>│</div>
-                  ))}
+                  {isEditing ? (
+                    editedContent.split('\n').map((_, index) => (
+                      <div key={index}>│</div>
+                    ))
+                  ) : (
+                    formatCrontabContent().map((_, index) => (
+                      <div key={index}>│</div>
+                    ))
+                  )}
                 </div>
                 {/* Content area */}
                 <div className="flex-1 overflow-auto">
-                  <div 
-                    className="py-4 px-3 font-mono text-sm text-gray-900 dark:text-gray-100 cursor-text min-h-full"
-                    style={{ lineHeight: '1.5' }}
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      // Handle keyboard navigation
-                      const formattedLines = formatCrontabContent();
-                      const currentIndex = selectedLine ? formattedLines.findIndex(fl => fl.originalLine === selectedLine) : -1;
-                      let newIndex = currentIndex;
-                      
-                      if (e.key === 'ArrowUp' && currentIndex > 0) {
-                        newIndex = currentIndex - 1;
-                        // Skip name comment lines
-                        while (newIndex >= 0 && formattedLines[newIndex].isNameComment) {
-                          newIndex--;
+                  {isEditing ? (
+                    <textarea
+                      ref={textareaRef}
+                      value={editedContent}
+                      onChange={(e) => setEditedContent(e.target.value)}
+                      className="w-full h-full py-4 px-3 font-mono text-sm text-gray-100 bg-transparent border-none focus:ring-0 resize-none"
+                      style={{ lineHeight: '1.5' }}
+                    />
+                  ) : (
+                    <div 
+                      className="py-4 px-3 font-mono text-sm text-gray-100 cursor-text min-h-full"
+                      style={{ lineHeight: '1.5' }}
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        // Handle keyboard navigation
+                        const formattedLines = formatCrontabContent();
+                        const currentIndex = selectedLine ? formattedLines.findIndex(fl => fl.originalLine === selectedLine) : -1;
+                        let newIndex = currentIndex;
+                        
+                        if (e.key === 'ArrowUp' && currentIndex > 0) {
+                          newIndex = currentIndex - 1;
+                          // Skip name comment lines
+                          while (newIndex >= 0 && formattedLines[newIndex].isNameComment) {
+                            newIndex--;
+                          }
+                          e.preventDefault();
+                        } else if (e.key === 'ArrowDown' && currentIndex < formattedLines.length - 1) {
+                          newIndex = currentIndex + 1;
+                          // Skip name comment lines
+                          while (newIndex < formattedLines.length && formattedLines[newIndex].isNameComment) {
+                            newIndex++;
+                          }
+                          e.preventDefault();
                         }
-                        e.preventDefault();
-                      } else if (e.key === 'ArrowDown' && currentIndex < formattedLines.length - 1) {
-                        newIndex = currentIndex + 1;
-                        // Skip name comment lines
-                        while (newIndex < formattedLines.length && formattedLines[newIndex].isNameComment) {
-                          newIndex++;
+                        
+                        if (newIndex !== currentIndex && newIndex >= 0 && newIndex < formattedLines.length && !formattedLines[newIndex].isNameComment) {
+                          setSelectedLine(formattedLines[newIndex].originalLine);
                         }
-                        e.preventDefault();
-                      }
-                      
-                      if (newIndex !== currentIndex && newIndex >= 0 && newIndex < formattedLines.length && !formattedLines[newIndex].isNameComment) {
-                        setSelectedLine(formattedLines[newIndex].originalLine);
-                      }
-                    }}
-                  >
-                    {formatCrontabContent().map((line, index) => (
-                      <div
-                        key={index}
-                        onClick={() => !line.isNameComment && line.originalLine && handleLineClick(selectedCrontab.lines.indexOf(line.originalLine))}
-                        className={`pr-4 ${
-                          !line.isNameComment ? 'hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer' : ''
-                        } ${
-                          line.originalLine === selectedLine ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                        } ${
-                          line.isNameComment ? 'text-gray-500 dark:text-gray-400' : ''
-                        }`}
-                      >
-                        {line.text || '\u00A0'}
-                      </div>
-                    ))}
-                  </div>
+                      }}
+                    >
+                      {formatCrontabContent().map((line, index) => (
+                        <div
+                          key={index}
+                          onClick={() => line.originalLine && handleLineClick(selectedCrontab.lines.indexOf(line.originalLine))}
+                          onDoubleClick={() => handleEditStart(index)}
+                          className={`pr-4 ${
+                            !line.isNameComment ? 'hover:bg-gray-900 cursor-pointer' : 'hover:bg-gray-900 cursor-pointer'
+                          } ${
+                            line.originalLine === selectedLine ? 'bg-blue-900/30' : ''
+                          } ${
+                            line.isNameComment || (line.originalLine && line.originalLine.is_comment) ? 'text-gray-400' : ''
+                          }`}
+                        >
+                          {line.text || '\u00A0'}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Sidebar - 1/4 width with fixed sizing */}
-        <div className="w-80 flex-shrink-0 bg-white dark:bg-gray-800 rounded-lg shadow">
-          <div className="p-4 h-full overflow-y-auto">
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Line Details</h3>
-            
-            {selectedLine ? (
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Type</label>
-                  <p className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                    {selectedLine.is_job ? 'Job' : 
-                     selectedLine.is_comment ? 'Comment' : 
-                     selectedLine.is_env_var ? 'Environment Variable' : 
-                     'Other'}
-                  </p>
-                </div>
-
-                {selectedLine.is_job && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Expression</label>
-                      <p className="mt-1 text-sm text-gray-900 dark:text-gray-100 font-mono">
-                        {selectedLine.cron_expression || 'N/A'}
-                      </p>
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Command</label>
-                      <p className="mt-1 text-sm text-gray-900 dark:text-gray-100 font-mono break-all">
-                        {selectedLine.command_to_run || 'N/A'}
-                      </p>
-                    </div>
-
-                    {selectedLine.name && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Name</label>
-                        <p className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                          {selectedLine.name}
-                        </p>
-                      </div>
-                    )}
-
-                    {selectedLine.run_as && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Run As</label>
-                        <p className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                          {selectedLine.run_as}
-                        </p>
-                      </div>
-                    )}
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Monitored</label>
-                      <p className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                        {selectedLine.code ? 'Yes' : 'No'}
-                      </p>
-                    </div>
-                  </>
-                )}
-
-                {selectedLine.is_env_var && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Variable</label>
-                    <p className="mt-1 text-sm text-gray-900 dark:text-gray-100 font-mono">
-                      {selectedLine.env_var_key} = {selectedLine.env_var_value}
-                    </p>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Click on a line in the crontab to view its details
-              </p>
-            )}
+        {/* Edit controls or detail card */}
+        {isEditing ? (
+          <div className="flex-shrink-0 flex justify-end gap-4 p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
+            <button
+              onClick={handleDiscard}
+              className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
+            >
+              Discard
+            </button>
+            <button
+              onClick={handleSubmit}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium"
+            >
+              Save Changes
+            </button>
           </div>
-        </div>
+        ) : selectedLine && (
+          <div className="flex-shrink-0">
+            {(() => {
+              // Check for blank/empty lines
+              if (!selectedLine.line_text || selectedLine.line_text.trim() === '') {
+                return null;
+              }
+              
+              if (selectedLine.is_job === true && jobForLine) {
+                return (
+                  <JobCard 
+                    job={jobForLine} 
+                    mutate={jobsMutate} 
+                    allJobs={jobs || []} 
+                    showToast={showToast}
+                    isMacOS={settings?.os === 'darwin'}
+                    onJobChange={forceRevalidation}
+                    crontabMutate={mutate}
+                    selectedCrontab={selectedCrontab}
+                    setSelectedCrontab={setSelectedCrontab}
+                  />
+                );
+              } else if (selectedLine.is_comment === true) {
+                return <CommentCard line={selectedLine} />;
+              } else if (selectedLine.is_env_var === true) {
+                return <EnvVarCard line={selectedLine} />;
+              } else {
+                // For unknown line types, show as a comment
+                return <CommentCard line={selectedLine} />;
+              }
+            })()}
+          </div>
+        )}
       </div>
 
       {showNewCrontab && (

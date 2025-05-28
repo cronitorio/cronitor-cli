@@ -7,6 +7,7 @@ import Settings from './components/Settings';
 import useSWR from 'swr';
 import Jobs from './components/Jobs';
 import Crontabs from './components/Crontabs';
+import { usePrefetch } from './hooks/usePrefetch';
 
 const fetcher = url => fetch(url).then(res => res.json());
 
@@ -40,8 +41,19 @@ function ToggleSwitch({ isOn, onChange }) {
 function Sidebar({ isDark, toggleTheme }) {
   const location = useLocation();
   const { data } = useSWR('/api/settings', fetcher, {
-    refreshInterval: 5000, // Refresh every 5 seconds
+    refreshInterval: 30000, // Reduced from 5s to 30s - settings don't change often
+    revalidateOnFocus: false
   });
+  const { prefetchCrontabs, prefetchJobs } = usePrefetch();
+
+  const handleNavHover = (href) => {
+    // Prefetch data when hovering over navigation links
+    if (href === '/crontabs') {
+      prefetchCrontabs();
+    } else if (href === '/') {
+      prefetchJobs();
+    }
+  };
 
   return (
     <div className="hidden md:flex md:w-64 md:flex-col">
@@ -62,6 +74,7 @@ function Sidebar({ isDark, toggleTheme }) {
                 <Link
                   key={item.name}
                   to={item.href}
+                  onMouseEnter={() => handleNavHover(item.href)}
                   className={`group flex items-center px-2 py-2 text-sm font-medium rounded-md ${
                     isActive
                       ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'

@@ -179,6 +179,7 @@ The dashboard provides a web interface for managing your Cronitor monitors and c
 
 		// Add crontabs endpoint
 		http.Handle("/api/crontabs", authMiddleware(http.HandlerFunc(handleCrontabs)))
+		http.Handle("/api/crontabs/", authMiddleware(http.HandlerFunc(handleCrontab)))
 
 		// Add users endpoint
 		http.Handle("/api/users", authMiddleware(http.HandlerFunc(handleUsers)))
@@ -1184,24 +1185,31 @@ func handlePostCrontabs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var crontab lib.Crontab
-	if err := json.NewDecoder(r.Body).Decode(&crontab); err != nil {
+	// Define a custom struct to capture all fields including comments
+	type CrontabRequest struct {
+		Filename             string                    `json:"filename"`
+		TimezoneLocationName *lib.TimezoneLocationName `json:"TimezoneLocationName"`
+		Comments             string                    `json:"comments"`
+	}
+
+	var request CrontabRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	if crontab.Filename == "" {
+	if request.Filename == "" {
 		http.Error(w, "Filename is required", http.StatusBadRequest)
 		return
 	}
 
 	// If creating in /etc/cron.d, build the full path
-	if !strings.Contains(crontab.Filename, "/") && crontab.Filename != "/etc/crontab" && !strings.HasPrefix(crontab.Filename, "user:") {
-		crontab.Filename = filepath.Join("/etc/cron.d", crontab.Filename)
+	if !strings.Contains(request.Filename, "/") && request.Filename != "/etc/crontab" && !strings.HasPrefix(request.Filename, "user:") {
+		request.Filename = filepath.Join("/etc/cron.d", request.Filename)
 	}
 
 	// Try to load the crontab first to check if it exists
-	existingCrontab, err := lib.GetCrontab(crontab.Filename)
+	existingCrontab, err := lib.GetCrontab(request.Filename)
 	if err == nil {
 		// Parse it to ensure lines are loaded
 		if len(existingCrontab.Lines) == 0 && existingCrontab.Exists() {
@@ -1218,12 +1226,31 @@ func handlePostCrontabs(w http.ResponseWriter, r *http.Request) {
 		username = u.Username
 	}
 
-	newCrontab := lib.CrontabFactory(username, crontab.Filename)
+	newCrontab := lib.CrontabFactory(username, request.Filename)
 
-	// Set timezone if provided
+	// Build content with timezone and comments
 	content := ""
-	if crontab.TimezoneLocationName != nil && crontab.TimezoneLocationName.Name != "" {
-		content = fmt.Sprintf("CRON_TZ=%s\nTZ=%s\n", crontab.TimezoneLocationName.Name, crontab.TimezoneLocationName.Name)
+
+	// Add timezone if provided
+	if request.TimezoneLocationName != nil && request.TimezoneLocationName.Name != "" {
+		content = fmt.Sprintf("CRON_TZ=%s\nTZ=%s\n", request.TimezoneLocationName.Name, request.TimezoneLocationName.Name)
+	}
+
+	// Add comments if provided
+	if request.Comments != "" {
+		// Add each comment line with proper formatting
+		commentLines := strings.Split(request.Comments, "\n")
+		for _, line := range commentLines {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				// Always add # prefix for comments
+				if !strings.HasPrefix(line, "#") {
+					content += "# " + line + "\n"
+				} else {
+					content += line + "\n"
+				}
+			}
+		}
 	}
 
 	if err := newCrontab.Save(content); err != nil {
@@ -1304,6 +1331,147 @@ func handleCrontabs(w http.ResponseWriter, r *http.Request) {
 		handleGetCrontabs(w, r)
 	case "POST":
 		handlePostCrontabs(w, r)
+	case "PUT":
+		handlePutCrontabs(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handlePutCrontabs handles PUT requests to update a crontab
+func handlePutCrontabs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "PUT" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get the crontab filename from the URL path
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "Invalid crontab path", http.StatusBadRequest)
+		return
+	}
+	filename := parts[3]
+
+	// Parse the request body
+	var request struct {
+		Lines []struct {
+			LineText string `json:"line_text"`
+			Name     string `json:"name,omitempty"`
+		} `json:"lines"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Get the crontab
+	crontab, err := lib.GetCrontab(filename)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Convert the lines to the format expected by the crontab
+	var newLines []*lib.Line
+	for _, line := range request.Lines {
+		newLine := &lib.Line{
+			FullLine: line.LineText,
+			Name:     line.Name,
+			Crontab:  *crontab,
+		}
+
+		// Set line types and parse content based on line type
+		if strings.HasPrefix(line.LineText, "#") {
+			newLine.IsComment = true
+		} else if strings.Contains(line.LineText, "=") {
+			// Environment variable - just use FullLine
+		} else if line.LineText != "" {
+			// This is a job line - we need to parse it properly
+			newLine.IsJob = true
+
+			// Parse the job line to extract cron expression and command
+			splitLine := strings.Fields(line.LineText)
+			if len(splitLine) >= 6 {
+				// Check if it's a 6-field expression
+				var cronExpression string
+				var command []string
+
+				// Handle special @keywords
+				if len(splitLine) > 0 && strings.HasPrefix(splitLine[0], "@") {
+					cronExpression = splitLine[0]
+					command = splitLine[1:]
+				} else {
+					// Standard 5 or 6 field cron expression
+					cronExpression = strings.Join(splitLine[0:5], " ")
+					command = splitLine[5:]
+
+					// Handle run-as user for system crontabs
+					if !crontab.IsUserCrontab && len(command) > 0 {
+						// First word after cron expression might be the user
+						if runtime.GOOS != "windows" {
+							if _, err := exec.Command("id", "-u", command[0]).CombinedOutput(); err == nil {
+								newLine.RunAs = command[0]
+								command = command[1:]
+							}
+						}
+					}
+				}
+
+				newLine.CronExpression = cronExpression
+				newLine.CommandToRun = strings.Join(command, " ")
+			}
+		}
+
+		newLines = append(newLines, newLine)
+	}
+
+	// Update the crontab's lines
+	crontab.Lines = newLines
+
+	// Save the crontab
+	if err := crontab.Save(crontab.Write()); err != nil {
+		http.Error(w, "Failed to save crontab", http.StatusInternalServerError)
+		return
+	}
+
+	// Create a new crontab instance for parsing
+	username := ""
+	if u, err := user.Current(); err == nil {
+		username = u.Username
+	}
+	updatedCrontab := lib.CrontabFactory(username, filename)
+
+	// Parse the crontab to ensure all line types are properly set
+	if err, _ := updatedCrontab.Parse(true); err != nil {
+		http.Error(w, "Failed to parse crontab after save", http.StatusInternalServerError)
+		return
+	}
+
+	// Set response headers
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	// Marshal the response
+	responseData, err := json.Marshal(updatedCrontab)
+	if err != nil {
+		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+		return
+	}
+
+	// Write the response
+	if _, err := w.Write(responseData); err != nil {
+		http.Error(w, "Failed to write response", http.StatusInternalServerError)
+		return
+	}
+}
+
+// handleCrontab handles requests for individual crontabs
+func handleCrontab(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "PUT":
+		handlePutCrontabs(w, r)
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}

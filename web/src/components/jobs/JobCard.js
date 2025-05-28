@@ -13,7 +13,7 @@ import { useJobOperations } from '../../hooks/useJobOperations';
 import { Switch } from '@headlessui/react';
 import { ClockIcon, UserIcon, DocumentTextIcon } from '@heroicons/react/24/outline';
 
-export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSave, onDiscard, onFormChange, onLocationChange, showToast, isMacOS }) {
+export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSave, onDiscard, onFormChange, onLocationChange, showToast, isMacOS, onJobChange, crontabMutate, selectedCrontab, setSelectedCrontab }) {
   const [isEditing, setIsEditing] = React.useState(isNew);
   const [isEditingCommand, setIsEditingCommand] = React.useState(isNew);
   const [isEditingSchedule, setIsEditingSchedule] = React.useState(isNew);
@@ -173,6 +173,27 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
 
         // Trigger a revalidation
         mutate();
+        if (onJobChange) {
+          // Add a small delay to ensure the server has processed the change
+          setTimeout(onJobChange, 100);
+        }
+        
+        // Also refresh crontab data since job changes modify the crontab
+        if (crontabMutate) {
+          setTimeout(async () => {
+            await crontabMutate();
+            // Update the selected crontab if we have it
+            if (selectedCrontab && setSelectedCrontab) {
+              const updatedCrontabs = await crontabMutate();
+              if (updatedCrontabs) {
+                const updatedCrontab = updatedCrontabs.find(c => c.filename === selectedCrontab.filename);
+                if (updatedCrontab) {
+                  setSelectedCrontab(updatedCrontab);
+                }
+              }
+            }
+          }, 150);
+        }
       }
 
       setSavingStatus('saved');
@@ -263,6 +284,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
       }
 
       mutate();
+      if (onJobChange) onJobChange();
       showToast('Job suspended successfully', 'success');
     } catch (error) {
       console.error('Error suspending job:', error);
@@ -288,6 +310,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
       }
 
       mutate();
+      if (onJobChange) onJobChange();
       showToast('Job scheduled successfully', 'success');
     } catch (error) {
       console.error('Error scheduling job:', error);
@@ -331,6 +354,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     }
     try {
       await killJobProcess(pids);
+      if (onJobChange) onJobChange();
     } catch (error) {
       showToast('Failed to kill processes: ' + error.message);
     } finally {
@@ -361,6 +385,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
       }
       showToast('Job started successfully', 'success');
       mutate();
+      if (onJobChange) onJobChange();
     } catch (error) {
       console.error('Error running job:', error);
       showToast('Failed to run job: ' + error.message, 'error');
@@ -483,6 +508,27 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
       
       // Refresh data from server with the changes we just made
       mutate();
+      if (onJobChange) {
+        // Add a small delay to ensure the server has processed the change
+        setTimeout(onJobChange, 100);
+      }
+      
+      // Also refresh crontab data since suspension modifies the crontab
+      if (crontabMutate) {
+        setTimeout(async () => {
+          await crontabMutate();
+          // Update the selected crontab if we have it
+          if (selectedCrontab && setSelectedCrontab) {
+            const updatedCrontabs = await crontabMutate();
+            if (updatedCrontabs) {
+              const updatedCrontab = updatedCrontabs.find(c => c.filename === selectedCrontab.filename);
+              if (updatedCrontab) {
+                setSelectedCrontab(updatedCrontab);
+              }
+            }
+          }
+        }, 150);
+      }
       
       showToast(`Job ${newSuspendedState ? 'suspended' : 'activated'} successfully`, 'success');
       if (isEditing) setIsEditing(false);
@@ -712,6 +758,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                         try {
                           await toggleJobMonitoring(initialJob.key, updatedJob.monitored);
                           mutate();
+                          if (onJobChange) onJobChange();
                         } catch (error) {
                           showToast('Failed to update monitoring status: ' + error.message);
                         }
