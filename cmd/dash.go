@@ -78,6 +78,8 @@ func (ch *CommandHistory) GetCommands(key, currentCommand string) []string {
 
 var commandHistory = NewCommandHistory()
 
+var isSafeModeEnabled bool
+
 func openBrowser(url string) {
 	var err error
 	switch runtime.GOOS {
@@ -105,6 +107,9 @@ The dashboard provides a web interface for managing your Cronitor monitors and c
 		if port == 0 {
 			port = 9000
 		}
+
+		safeMode, _ := cmd.Flags().GetBool("safe-mode")
+		isSafeModeEnabled = safeMode
 
 		// Basic auth middleware
 		authMiddleware := func(next http.Handler) http.Handler {
@@ -255,6 +260,7 @@ func addLineToCrontab(file string, line string) error {
 func init() {
 	RootCmd.AddCommand(dashCmd)
 	dashCmd.Flags().Int("port", 9000, "Port to run the dashboard on")
+	dashCmd.Flags().Bool("safe-mode", false, "Limit the ability to edit jobs, crontabs, and settings")
 }
 
 type SettingsResponse struct {
@@ -266,6 +272,7 @@ type SettingsResponse struct {
 	Timezone       string          `json:"timezone"`
 	Timezones      []string        `json:"timezones"`
 	OS             string          `json:"os"`
+	SafeMode       bool            `json:"safe_mode"`
 }
 
 // handleSettings handles GET and POST requests for settings
@@ -369,7 +376,8 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 				"CRONITOR_DASH_USER":    os.Getenv(varDashUsername) != "",
 				"CRONITOR_DASH_PASS":    os.Getenv(varDashPassword) != "",
 			},
-			OS: runtime.GOOS,
+			OS:       runtime.GOOS,
+			SafeMode: isSafeModeEnabled,
 		}
 
 		// Override config values with environment variables if they exist
@@ -683,6 +691,11 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 
 	// Handle command update
 	if job.Command != "" && job.Command != foundLine.CommandToRun {
+		if isSafeModeEnabled {
+			http.Error(w, "Command editing is disabled in safe mode", http.StatusForbidden)
+			return
+		}
+
 		// Get the old key before updating the command
 		oldKey := foundLine.Key(crontab.CanonicalName())
 		oldCommand := foundLine.CommandToRun // Store the old command
@@ -809,6 +822,36 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 	if request.Command == "" {
 		http.Error(w, "Command parameter is required", http.StatusBadRequest)
 		return
+	}
+
+	// In safe mode, only allow commands that exist in crontabs
+	if isSafeModeEnabled {
+		crontabs, err := lib.GetAllCrontabs()
+		if err != nil {
+			http.Error(w, "Failed to validate command", http.StatusInternalServerError)
+			return
+		}
+
+		commandAllowed := false
+		for _, crontab := range crontabs {
+			if len(crontab.Lines) == 0 && crontab.Exists() {
+				crontab.Parse(true)
+			}
+			for _, line := range crontab.Lines {
+				if line.IsJob && line.CommandToRun == request.Command {
+					commandAllowed = true
+					break
+				}
+			}
+			if commandAllowed {
+				break
+			}
+		}
+
+		if !commandAllowed {
+			http.Error(w, "Command execution is restricted to existing crontab commands in safe mode", http.StatusForbidden)
+			return
+		}
 	}
 
 	// Create a temporary file for the output
@@ -1037,6 +1080,11 @@ func handlePostJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isSafeModeEnabled {
+		http.Error(w, "Job creation is disabled in safe mode", http.StatusForbidden)
+		return
+	}
+
 	var job Job
 	if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1163,6 +1211,11 @@ func handleGetCrontabs(w http.ResponseWriter, r *http.Request) {
 func handlePostCrontabs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if isSafeModeEnabled {
+		http.Error(w, "Crontab creation is disabled in safe mode", http.StatusForbidden)
 		return
 	}
 
@@ -1323,6 +1376,11 @@ func handleCrontabs(w http.ResponseWriter, r *http.Request) {
 func handlePutCrontabs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "PUT" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if isSafeModeEnabled {
+		http.Error(w, "Crontab editing is disabled in safe mode", http.StatusForbidden)
 		return
 	}
 

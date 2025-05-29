@@ -10,7 +10,8 @@ export function CommandSection({
   onEditEnd,
   onKeyDown,
   onShowConsole,
-  isNew = false
+  isNew = false,
+  readOnly = false
 }) {
   return (
     <>
@@ -35,7 +36,7 @@ export function CommandSection({
                 {job.command}
               </div>
             )}
-            {!isNew && (
+            {!isNew && !readOnly && (
               <button
                 onClick={onEditStart}
                 className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -45,12 +46,14 @@ export function CommandSection({
             )}
           </div>
         </div>
-        <button
-          onClick={onShowConsole}
-          className="ml-4 text-sm text-gray-900 hover:text-black dark:text-gray-300 dark:hover:text-white"
-        >
-          Console
-        </button>
+        {!readOnly && (
+          <button
+            onClick={onShowConsole}
+            className="ml-4 text-sm text-gray-900 hover:text-black dark:text-gray-300 dark:hover:text-white"
+          >
+            Console
+          </button>
+        )}
       </div>
     </>
   );

@@ -364,12 +364,14 @@ export default function Jobs() {
               onInputChange={e => setInputValue(e.target.value)}
             />
           </div>
-          <button
-            onClick={() => setShowNewJob(true)}
-            className="px-4 py-2.5 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium flex-shrink-0"
-          >
-            Add Job
-          </button>
+          {!settings?.safe_mode && (
+            <button
+              onClick={() => setShowNewJob(true)}
+              className="px-4 py-2.5 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium flex-shrink-0"
+            >
+              Add Job
+            </button>
+          )}
         </div>
       </div>
 
@@ -399,6 +401,7 @@ export default function Jobs() {
               onLocationChange={handleLocationChange}
               showToast={showToast}
               isMacOS={settings?.os === 'darwin'}
+              readOnly={settings?.safe_mode}
               key={showNewCrontab ? 'new-crontab' : 'no-crontab'}
             />
             {showNewCrontab && (
@@ -430,6 +433,7 @@ export default function Jobs() {
               allJobs={jobsWithMonitors} 
               showToast={showToast}
               isMacOS={settings?.os === 'darwin'}
+              readOnly={settings?.safe_mode}
             />
           ))
         ) : (
@@ -444,13 +448,16 @@ export default function Jobs() {
         {jobsWithMonitors.length > 0 && filteredJobs.length < jobsWithMonitors.length && (
           <div className="bg-gray-50 dark:bg-gray-800/50 shadow-sm rounded-lg p-4 text-center">
             <p className="text-gray-500 dark:text-gray-400">
-              {jobsWithMonitors.length - filteredJobs.length} Jobs Hidden{' '}
+              {(() => {
+                const hiddenCount = jobsWithMonitors.length - filteredJobs.length;
+                return `${hiddenCount} Job${hiddenCount === 1 ? '' : 's'} Hidden`;
+              })()} {' '}
               <button
                 onClick={() => {
                   setActiveFilters({});
                   setInputValue('');
                 }}
-                className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium"
+                className="ml-2 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium"
               >
                 Clear Filters
               </button>

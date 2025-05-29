@@ -13,7 +13,7 @@ import { useJobOperations } from '../../hooks/useJobOperations';
 import { Switch } from '@headlessui/react';
 import { ClockIcon, UserIcon, DocumentTextIcon } from '@heroicons/react/24/outline';
 
-export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSave, onDiscard, onFormChange, onLocationChange, showToast, isMacOS, onJobChange, crontabMutate, selectedCrontab, setSelectedCrontab }) {
+export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSave, onDiscard, onFormChange, onLocationChange, showToast, isMacOS, onJobChange, crontabMutate, selectedCrontab, setSelectedCrontab, readOnly = false }) {
   const [isEditing, setIsEditing] = React.useState(isNew);
   const [isEditingCommand, setIsEditingCommand] = React.useState(isNew);
   const [isEditingSchedule, setIsEditingSchedule] = React.useState(isNew);
@@ -667,7 +667,11 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                     isEditing={isEditingCommand}
                     editedCommand={editedCommand}
                     onCommandChange={setEditedCommand}
-                    onEditStart={() => setIsEditingCommand(true)}
+                    onEditStart={() => {
+                      if (!readOnly) {
+                        setIsEditingCommand(true);
+                      }
+                    }}
                     onEditEnd={() => {
                       if (!isNew) {
                         setIsEditingCommand(false);
@@ -686,6 +690,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                     }}
                     onShowConsole={() => setShowConsole(true)}
                     isNew={isNew}
+                    readOnly={readOnly}
                   />
                 </td>
               </tr>

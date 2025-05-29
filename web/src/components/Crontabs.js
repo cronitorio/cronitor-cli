@@ -467,7 +467,7 @@ export default function Crontabs() {
     <div className="h-full flex flex-col">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Crontabs</h1>
-        {settings?.os !== 'darwin' && (
+        {settings?.os !== 'darwin' && !settings?.safe_mode && (
           <button
             onClick={() => setShowNewCrontab(true)}
             className="px-4 py-2.5 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium"
@@ -542,7 +542,7 @@ export default function Crontabs() {
                       tabIndex={0}
                       onClick={() => {
                         // If crontab is empty, start editing immediately
-                        if (!selectedCrontab || !selectedCrontab.lines || selectedCrontab.lines.length === 0) {
+                        if (!settings?.safe_mode && (!selectedCrontab || !selectedCrontab.lines || selectedCrontab.lines.length === 0)) {
                           setEditedContent('');
                           setIsEditing(true);
                           setSelectedLine(null);
@@ -584,13 +584,15 @@ export default function Crontabs() {
                       }}
                     >
                       {formatCrontabContent().length === 0 ? (
-                        <div className="text-gray-500 italic">Empty crontab - click to edit</div>
+                        <div className="text-gray-500 italic">
+                          {settings?.safe_mode ? 'Empty crontab' : 'Empty crontab - click to edit'}
+                        </div>
                       ) : (
                         formatCrontabContent().map((line, index) => (
                           <div
                             key={index}
                             onClick={() => line.originalLine && handleLineClick(selectedCrontab.lines.indexOf(line.originalLine))}
-                            onDoubleClick={() => handleEditStart(index)}
+                            onDoubleClick={() => !settings?.safe_mode && handleEditStart(index)}
                             className={`pr-4 ${
                               !line.isNameComment ? 'hover:bg-gray-900 cursor-pointer' : 'hover:bg-gray-900 cursor-pointer'
                             } ${
@@ -647,6 +649,7 @@ export default function Crontabs() {
                     crontabMutate={mutate}
                     selectedCrontab={selectedCrontab}
                     setSelectedCrontab={setSelectedCrontab}
+                    readOnly={settings?.safe_mode}
                   />
                 );
               } else if (selectedLine.is_comment === true) {
