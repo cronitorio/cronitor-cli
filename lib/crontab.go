@@ -344,7 +344,12 @@ func (l Line) Write() string {
 	}
 
 	if !l.IsMonitorable() {
-		lineParts = append(lineParts, l.FullLine)
+		// If this is a comment line, ensure it starts with #
+		if l.IsComment && !strings.HasPrefix(l.FullLine, "#") {
+			lineParts = append(lineParts, "# "+l.FullLine)
+		} else {
+			lineParts = append(lineParts, l.FullLine)
+		}
 	} else {
 		// If this line is marked as a comment, ensure it is commented out in the crontab
 		if l.IsComment {

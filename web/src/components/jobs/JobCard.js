@@ -9,6 +9,7 @@ import { InstancesTable } from './InstancesTable';
 import { SuspendOverlay } from './SuspendOverlay';
 import { DeleteConfirmation } from './DeleteConfirmation';
 import { ConsoleModal } from './ConsoleModal';
+import { LearnMoreModal } from './LearnMoreModal';
 import { useJobOperations } from '../../hooks/useJobOperations';
 import { Switch } from '@headlessui/react';
 import { ClockIcon, UserIcon, DocumentTextIcon } from '@heroicons/react/24/outline';
@@ -860,59 +861,17 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         )}
 
         {showLearnMore && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style={{ margin: '0px' }}>
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full mx-4 relative">
-              <button
-                onClick={() => setShowLearnMore(false)}
-                className="absolute top-0 right-8 bg-white dark:bg-gray-800 px-3 py-0 rounded-b-sm border border-t-0 border-gray-300 dark:border-gray-600 text-gray-400 hover:text-gray-500 dark:text-gray-400 dark:hover:text-gray-300 z-10 text-xl leading-none"
-              >
-                ×
-              </button>
-              <div className="p-8">
-                <div className="flex">
-                  <div className="w-2/3 pr-8">
-                    <h2 className="text-2xl font-black text-gray-900 dark:text-white mb-8">Monitor your jobs with Cronitor</h2>
-                    <ul className="space-y-6">
-                      <li className="flex items-start">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true" data-slot="icon" className="h-7 w-7 text-green-500 mr-3 flex-shrink-0 mt-0.5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"></path>
-                        </svg>
-                        <span className="text-lg text-gray-700 dark:text-gray-300 leading-relaxed">Instant alerts if a job fails or never starts.</span>
-                      </li>
-                      <li className="flex items-start">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true" data-slot="icon" className="h-7 w-7 text-green-500 mr-3 flex-shrink-0 mt-0.5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"></path>
-                        </svg>
-                        <span className="text-lg text-gray-700 dark:text-gray-300 leading-relaxed">See the status, metrics and logs from every job.</span>
-                      </li>
-                      <li className="flex items-start">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true" data-slot="icon" className="h-7 w-7 text-green-500 mr-3 flex-shrink-0 mt-0.5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"></path>
-                        </svg>
-                        <span className="text-lg text-gray-700 dark:text-gray-300 leading-relaxed">Track performance with a full year of data retention.</span>
-                      </li>
-                      <li className="flex items-start">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true" data-slot="icon" className="h-7 w-7 text-green-500 mr-3 flex-shrink-0 mt-0.5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"></path>
-                        </svg>
-                        <span className="text-lg text-gray-700 dark:text-gray-300 leading-relaxed">Start for free, no credit card required.</span>
-                      </li>
-                    </ul>
-                    <div className="mt-10">
-                      <a href="https://cronitor.io/cron-job-monitoring?utm_source=cli&utm_campaign=modal&utm_content=1" target="_blank" rel="noopener noreferrer" className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                        Learn More
-                      </a>
-                    </div>
-                  </div>
-                  <div className="w-1/3 overflow-hidden relative">
-                    <a href="https://cronitor.io/cron-job-monitoring?utm_source=cli&utm_campaign=modal&utm_content=1" target="_blank" rel="noopener noreferrer" className="block">
-                      <img src="/static/media/cronitor-screenshot.6101d4163e37020459b5.png" alt="Cronitor Dashboard" className="w-full h-auto" style={{ objectPosition: 'left center', width: '167%', maxWidth: 'none' }} />
-                    </a>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <LearnMoreModal
+            isOpen={showLearnMore}
+            onClose={() => setShowLearnMore(false)}
+            onSignupSuccess={(apiKeys) => {
+              setShowLearnMore(false);
+              showToast('Account created! Refreshing settings...', 'success');
+              // Reload settings after signup
+              window.location.reload();
+            }}
+            showToast={showToast}
+          />
         )}
 
         {isNew && (

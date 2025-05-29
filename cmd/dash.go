@@ -198,6 +198,9 @@ The dashboard provides a web interface for managing your Cronitor monitors and c
 		// Add monitors endpoint
 		http.Handle("/api/monitors", authMiddleware(http.HandlerFunc(handleGetMonitors)))
 
+		// Add signup endpoint
+		http.Handle("/api/signup", authMiddleware(http.HandlerFunc(handleSignup)))
+
 		// Start the server in a goroutine
 		go func() {
 			fmt.Printf("Starting Cronitor dashboard on port %d...\n", port)
@@ -589,174 +592,69 @@ func handleGetMonitors(w http.ResponseWriter, r *http.Request) {
 	w.Write(responseData)
 }
 
-func handlePutJob(w http.ResponseWriter, r *http.Request) {
-	var job Job
-	if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
+// handleSignup handles POST requests to sign up for a new Cronitor account
+func handleSignup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var request struct {
+		Name     string `json:"name"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	if job.CrontabFilename == "" {
-		http.Error(w, "Crontab filename is required", http.StatusBadRequest)
+	// Validate inputs
+	if request.Name == "" || request.Email == "" || request.Password == "" {
+		http.Error(w, "All fields are required", http.StatusBadRequest)
 		return
 	}
 
-	crontab, err := lib.GetCrontab(job.CrontabFilename)
+	if !strings.Contains(request.Email, "@") || len(request.Email) < 5 {
+		http.Error(w, "Please enter a valid email address", http.StatusBadRequest)
+		return
+	}
+
+	if len(request.Password) < 8 {
+		http.Error(w, "Password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	// Call the Cronitor API to sign up
+	api := lib.CronitorApi{
+		UserAgent: "cronitor-cli",
+	}
+
+	resp, err := api.Signup(request.Name, request.Email, request.Password)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	var foundLine *lib.Line
-	var foundLineIndex int
+	// Save the API keys to config
+	viper.Set(varApiKey, resp.ApiKey)
+	viper.Set(varPingApiKey, resp.PingApiKey)
 
-	// Find the matching line
-	for i, line := range crontab.Lines {
-		if (job.Code != "" && line.Code == job.Code) || (job.Key != "" && line.Key(crontab.CanonicalName()) == job.Key) {
-			foundLine = line
-			foundLineIndex = i
-			break
+	// Write config to file
+	if err := viper.WriteConfig(); err != nil {
+		// Try to create config directory if it doesn't exist
+		if err := os.MkdirAll(defaultConfigFileDirectory(), os.ModePerm); err == nil {
+			viper.WriteConfig()
 		}
 	}
 
-	if foundLine == nil {
-		http.Error(w, "Job not found", http.StatusNotFound)
-		return
-	}
-
-	// Update the line
-	hasChanges := false
-
-	// Handle suspended status
-	if job.Suspended != nil && *job.Suspended != foundLine.IsComment {
-		foundLine.IsComment = *job.Suspended
-		hasChanges = true
-
-		// If the job is monitored, handle pause/unpause
-		if job.Monitored {
-			if *job.Suspended {
-				// Pause the monitor when suspending
-				if err := getCronitorApi().PauseMonitor(job.Code, job.PauseHours); err != nil {
-					http.Error(w, fmt.Sprintf("Failed to pause monitor: %v", err), http.StatusInternalServerError)
-					return
-				}
-			} else {
-				// Unpause the monitor when unsuspending
-				if err := getCronitorApi().PauseMonitor(job.Code, "0"); err != nil {
-					http.Error(w, fmt.Sprintf("Failed to unpause monitor: %v", err), http.StatusInternalServerError)
-					return
-				}
-			}
-		}
-	}
-
-	// Collect all monitor updates
-	var monitor *lib.Monitor
-	if job.Monitored {
-		monitor = &lib.Monitor{
-			Name:        job.Name,
-			DefaultName: createDefaultName(foundLine, crontab, "", []string{}, map[string]bool{}),
-			Schedule:    job.Expression,
-			Type:        "job",
-			Platform:    lib.CRON,
-			Timezone:    job.Timezone,
-			Key:         foundLine.Code,
-		}
-
-		// If we're enabling monitoring for the first time, we won't have a code yet, use the key instead
-		// Ensure monitor is unpaused -- important if they have previously disabled monitoring and then re-enabled it
-		if foundLine.Code == "" {
-			monitor.Key = foundLine.Key(crontab.CanonicalName())
-			paused := false
-			monitor.Paused = &paused
-			fmt.Println("Setting monitor key to", monitor.Key)
-			fmt.Println("Setting monitor paused to", *monitor.Paused)
-		}
-
-	} else if foundLine.Code != "" {
-		if err := getCronitorApi().PauseMonitor(foundLine.Code, ""); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to pause monitor: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		crontab.Lines[foundLineIndex].Code = ""
-		hasChanges = true
-	}
-
-	// Handle name update
-	if job.Name != foundLine.Name {
-		crontab.Lines[foundLineIndex].Name = job.Name
-		hasChanges = true
-	}
-
-	// Handle command update
-	if job.Command != "" && job.Command != foundLine.CommandToRun {
-		if isSafeModeEnabled {
-			http.Error(w, "Command editing is disabled in safe mode", http.StatusForbidden)
-			return
-		}
-
-		// Get the old key before updating the command
-		oldKey := foundLine.Key(crontab.CanonicalName())
-		oldCommand := foundLine.CommandToRun // Store the old command
-
-		// Update the command
-		crontab.Lines[foundLineIndex].CommandToRun = job.Command
-		hasChanges = true
-
-		// Get the new key after updating the command
-		newKey := foundLine.Key(crontab.CanonicalName())
-
-		// Move history to new key
-		commandHistory.MoveHistory(oldKey, newKey, oldCommand)
-	}
-
-	// Handle schedule update
-	if job.Expression != "" && foundLine.CronExpression != job.Expression {
-		crontab.Lines[foundLineIndex].CronExpression = job.Expression
-		hasChanges = true
-	}
-
-	// Handle timezone update
-	if job.Timezone != "" && crontab.TimezoneLocationName != nil && crontab.TimezoneLocationName.Name != job.Timezone {
-		crontab.TimezoneLocationName = &lib.TimezoneLocationName{Name: job.Timezone}
-		hasChanges = true
-	}
-
-	// If monitor exists or needs to be created, update it with all changes
-	if monitor != nil {
-		monitors := map[string]*lib.Monitor{
-			monitor.Key: monitor,
-		}
-
-		updatedMonitors, err := getCronitorApi().PutMonitors(monitors)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if updatedMonitor, exists := updatedMonitors[monitor.Key]; exists {
-			crontab.Lines[foundLineIndex].Mon = *updatedMonitor
-			crontab.Lines[foundLineIndex].Code = updatedMonitor.Attributes.Code
-			hasChanges = true
-		}
-	}
-
-	// Save changes if any
-	if hasChanges {
-		if err := crontab.Save(crontab.Write()); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to save crontab: %v", err), http.StatusInternalServerError)
-			return
-		}
-	}
-
-	// Update the job with the latest values
-	job.Name = foundLine.Name
-	job.Code = foundLine.Code
-	job.Monitored = len(foundLine.Code) > 0
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(job)
+	// Return the API keys
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"api_key":      resp.ApiKey,
+		"ping_api_key": resp.PingApiKey,
+	})
 }
 
 func findInstances(commandStrings []string) []JobInstance {
@@ -1529,4 +1427,172 @@ func contains(slice []string, str string) bool {
 		}
 	}
 	return false
+}
+
+func handlePutJob(w http.ResponseWriter, r *http.Request) {
+	var job Job
+	if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if job.CrontabFilename == "" {
+		http.Error(w, "Crontab filename is required", http.StatusBadRequest)
+		return
+	}
+
+	crontab, err := lib.GetCrontab(job.CrontabFilename)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var foundLine *lib.Line
+	var foundLineIndex int
+
+	// Find the matching line
+	for i, line := range crontab.Lines {
+		if (job.Code != "" && line.Code == job.Code) || (job.Key != "" && line.Key(crontab.CanonicalName()) == job.Key) {
+			foundLine = line
+			foundLineIndex = i
+			break
+		}
+	}
+
+	if foundLine == nil {
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	// Update the line
+	hasChanges := false
+
+	// Handle suspended status
+	if job.Suspended != nil && *job.Suspended != foundLine.IsComment {
+		foundLine.IsComment = *job.Suspended
+		hasChanges = true
+
+		// If the job is monitored, handle pause/unpause
+		if job.Monitored {
+			if *job.Suspended {
+				// Pause the monitor when suspending
+				if err := getCronitorApi().PauseMonitor(job.Code, job.PauseHours); err != nil {
+					http.Error(w, fmt.Sprintf("Failed to pause monitor: %v", err), http.StatusInternalServerError)
+					return
+				}
+			} else {
+				// Unpause the monitor when unsuspending
+				if err := getCronitorApi().PauseMonitor(job.Code, "0"); err != nil {
+					http.Error(w, fmt.Sprintf("Failed to unpause monitor: %v", err), http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+	}
+
+	// Collect all monitor updates
+	var monitor *lib.Monitor
+	if job.Monitored {
+		monitor = &lib.Monitor{
+			Name:        job.Name,
+			DefaultName: createDefaultName(foundLine, crontab, "", []string{}, map[string]bool{}),
+			Schedule:    job.Expression,
+			Type:        "job",
+			Platform:    lib.CRON,
+			Timezone:    job.Timezone,
+			Key:         foundLine.Code,
+		}
+
+		// If we're enabling monitoring for the first time, we won't have a code yet, use the key instead
+		// Ensure monitor is unpaused -- important if they have previously disabled monitoring and then re-enabled it
+		if foundLine.Code == "" {
+			monitor.Key = foundLine.Key(crontab.CanonicalName())
+			paused := false
+			monitor.Paused = &paused
+		}
+
+	} else if foundLine.Code != "" {
+		if err := getCronitorApi().PauseMonitor(foundLine.Code, ""); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to pause monitor: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		crontab.Lines[foundLineIndex].Code = ""
+		hasChanges = true
+	}
+
+	// Handle name update
+	if job.Name != foundLine.Name {
+		crontab.Lines[foundLineIndex].Name = job.Name
+		hasChanges = true
+	}
+
+	// Handle command update
+	if job.Command != "" && job.Command != foundLine.CommandToRun {
+		if isSafeModeEnabled {
+			http.Error(w, "Command editing is disabled in safe mode", http.StatusForbidden)
+			return
+		}
+
+		// Get the old key before updating the command
+		oldKey := foundLine.Key(crontab.CanonicalName())
+		oldCommand := foundLine.CommandToRun // Store the old command
+
+		// Update the command
+		crontab.Lines[foundLineIndex].CommandToRun = job.Command
+		hasChanges = true
+
+		// Get the new key after updating the command
+		newKey := foundLine.Key(crontab.CanonicalName())
+
+		// Move history to new key
+		commandHistory.MoveHistory(oldKey, newKey, oldCommand)
+	}
+
+	// Handle schedule update
+	if job.Expression != "" && foundLine.CronExpression != job.Expression {
+		crontab.Lines[foundLineIndex].CronExpression = job.Expression
+		hasChanges = true
+	}
+
+	// Handle timezone update
+	if job.Timezone != "" && crontab.TimezoneLocationName != nil && crontab.TimezoneLocationName.Name != job.Timezone {
+		crontab.TimezoneLocationName = &lib.TimezoneLocationName{Name: job.Timezone}
+		hasChanges = true
+	}
+
+	// If monitor exists or needs to be created, update it with all changes
+	if monitor != nil {
+		monitors := map[string]*lib.Monitor{
+			monitor.Key: monitor,
+		}
+
+		updatedMonitors, err := getCronitorApi().PutMonitors(monitors)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if updatedMonitor, exists := updatedMonitors[monitor.Key]; exists {
+			crontab.Lines[foundLineIndex].Mon = *updatedMonitor
+			crontab.Lines[foundLineIndex].Code = updatedMonitor.Attributes.Code
+			hasChanges = true
+		}
+	}
+
+	// Save changes if any
+	if hasChanges {
+		if err := crontab.Save(crontab.Write()); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to save crontab: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Update the job with the latest values
+	job.Name = foundLine.Name
+	job.Code = foundLine.Code
+	job.Monitored = len(foundLine.Code) > 0
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(job)
 }

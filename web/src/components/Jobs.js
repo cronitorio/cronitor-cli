@@ -402,6 +402,7 @@ export default function Jobs() {
               showToast={showToast}
               isMacOS={settings?.os === 'darwin'}
               readOnly={settings?.safe_mode}
+              settings={settings}
               key={showNewCrontab ? 'new-crontab' : 'no-crontab'}
             />
             {showNewCrontab && (

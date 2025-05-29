@@ -2,7 +2,7 @@ import React from 'react';
 import { useJobMonitoring } from '../../hooks/useJobMonitoring';
 import { BellSlashIcon } from '@heroicons/react/24/outline';
 
-export function MonitoringSection({ job, onUpdate, onShowLearnMore }) {
+export function MonitoringSection({ job, onUpdate, onShowLearnMore, settings }) {
   const { isLoading, handleToggle, getStatusInfo } = useJobMonitoring(job, onUpdate);
   const statusInfo = getStatusInfo();
 
@@ -35,6 +35,15 @@ export function MonitoringSection({ job, onUpdate, onShowLearnMore }) {
   };
 
   const handleToggleClick = () => {
+    // Check if trying to enable monitoring without API key
+    if (!job.monitored && (!settings?.api_key || settings.api_key === '')) {
+      // Show the learn more modal instead
+      if (typeof onShowLearnMore === 'function') {
+        onShowLearnMore();
+      }
+      return;
+    }
+
     // For new jobs (no key), just update the form state
     if (!job.key) {
       onUpdate({
