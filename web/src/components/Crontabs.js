@@ -275,6 +275,8 @@ export default function Crontabs() {
     }
     
     // If no match found, create a job object from the crontab line
+    // Important: If we have a code but the job wasn't found in the jobs list,
+    // it means the monitor might not exist, so we shouldn't assume it's monitored
     return {
       key: selectedLine.key || `crontab-line-${selectedLine.line_number}`,
       code: selectedLine.code,
@@ -286,7 +288,7 @@ export default function Crontabs() {
       line_number: selectedLine.line_number,
       run_as_user: selectedLine.run_as || '',
       timezone: selectedLine.timezone || selectedCrontab?.timezone || 'UTC',
-      monitored: !!selectedLine.code,
+      monitored: false, // Default to false since we couldn't find it in the jobs list
       suspended: false,
       instances: [],
       is_draft: false
@@ -650,6 +652,7 @@ export default function Crontabs() {
                     selectedCrontab={selectedCrontab}
                     setSelectedCrontab={setSelectedCrontab}
                     readOnly={settings?.safe_mode}
+                    settings={settings}
                   />
                 );
               } else if (selectedLine.is_comment === true) {

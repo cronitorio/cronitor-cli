@@ -431,7 +431,7 @@ func getCronitorApi() *lib.CronitorApi {
 	return &lib.CronitorApi{
 		IsDev:          dev,
 		IsAutoDiscover: isAutoDiscover,
-		ApiKey:         varApiKey,
+		ApiKey:         viper.GetString(varApiKey),
 		UserAgent:      userAgent,
 		Logger:         log,
 	}

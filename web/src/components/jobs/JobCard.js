@@ -14,7 +14,7 @@ import { useJobOperations } from '../../hooks/useJobOperations';
 import { Switch } from '@headlessui/react';
 import { ClockIcon, UserIcon, DocumentTextIcon } from '@heroicons/react/24/outline';
 
-export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSave, onDiscard, onFormChange, onLocationChange, showToast, isMacOS, onJobChange, crontabMutate, selectedCrontab, setSelectedCrontab, readOnly = false }) {
+export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSave, onDiscard, onFormChange, onLocationChange, showToast, isMacOS, onJobChange, crontabMutate, selectedCrontab, setSelectedCrontab, readOnly = false, settings }) {
   const [isEditing, setIsEditing] = React.useState(isNew);
   const [isEditingCommand, setIsEditingCommand] = React.useState(isNew);
   const [isEditingSchedule, setIsEditingSchedule] = React.useState(isNew);
@@ -46,6 +46,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [wasMonitoredBeforeSuspend, setWasMonitoredBeforeSuspend] = React.useState(false);
   const [pendingChanges, setPendingChanges] = React.useState(null);
+  const [pendingMonitoringJob, setPendingMonitoringJob] = React.useState(null);
 
   const { jobs, createJob, updateJob, deleteJob, toggleJobMonitoring, toggleJobSuspension, killJobProcess, mutate: jobsMutate } = useJobOperations();
 
@@ -770,7 +771,11 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                         }
                       }
                     }}
-                    onShowLearnMore={() => setShowLearnMore(true)}
+                    onShowLearnMore={() => {
+                      setPendingMonitoringJob(initialJob);
+                      setShowLearnMore(true);
+                    }}
+                    settings={settings}
                   />
                 </td>
                 <td className="py-2 text-sm text-gray-900 dark:text-gray-100" style={{ width: '37.5%' }}>
@@ -863,14 +868,59 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         {showLearnMore && (
           <LearnMoreModal
             isOpen={showLearnMore}
-            onClose={() => setShowLearnMore(false)}
-            onSignupSuccess={(apiKeys) => {
+            onClose={() => {
               setShowLearnMore(false);
-              showToast('Account created! Refreshing settings...', 'success');
-              // Reload settings after signup
-              window.location.reload();
+              setPendingMonitoringJob(null);
+            }}
+            onSignupSuccess={async (apiKeys) => {
+              setShowLearnMore(false);
+              showToast('Account created! Enabling monitoring...', 'success');
+              
+              // If we have a pending monitoring job, enable monitoring for it
+              if (pendingMonitoringJob) {
+                try {
+                  // For new jobs, just update the form
+                  if (isNew) {
+                    handleFormChange('monitored', true);
+                    onFormChange({
+                      ...initialJob,
+                      monitored: true
+                    });
+                  } else {
+                    // For existing jobs, make the API call
+                    const response = await fetch('/api/jobs', {
+                      method: 'PUT',
+                      headers: {
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify({
+                        ...pendingMonitoringJob,
+                        monitored: true
+                      }),
+                    });
+
+                    if (!response.ok) {
+                      throw new Error('Failed to enable monitoring');
+                    }
+                    
+                    // Refresh the jobs list
+                    mutate();
+                    if (onJobChange) onJobChange();
+                  }
+                  
+                  showToast('Monitoring enabled successfully!', 'success');
+                } catch (error) {
+                  showToast('Failed to enable monitoring: ' + error.message, 'error');
+                }
+              }
+              
+              // Reload to refresh settings with new API key
+              setTimeout(() => {
+                window.location.reload();
+              }, 1500);
             }}
             showToast={showToast}
+            settings={settings}
           />
         )}
 

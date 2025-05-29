@@ -259,7 +259,14 @@ func (api CronitorApi) send(method string, url string, body string) ([]byte, err
 		Timeout: 120 * time.Second,
 	}
 	request, err := http.NewRequest(method, url, strings.NewReader(body))
-	request.SetBasicAuth(viper.GetString(api.ApiKey), "")
+
+	// Always fetch the latest API key from viper to pick up settings changes
+	currentApiKey := viper.GetString("CRONITOR_API_KEY")
+	if currentApiKey == "" {
+		// Fallback to the API key stored in the struct if viper doesn't have it
+		currentApiKey = api.ApiKey
+	}
+	request.SetBasicAuth(currentApiKey, "")
 
 	if strings.HasSuffix(url, "/signup") || strings.HasSuffix(url, "/sign-up") {
 		request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
@@ -405,7 +412,13 @@ func (c *CronitorApi) PauseMonitor(code string, hours string) error {
 		return err
 	}
 
-	req.SetBasicAuth(viper.GetString(c.ApiKey), "")
+	// Always fetch the latest API key from viper to pick up settings changes
+	currentApiKey := viper.GetString("CRONITOR_API_KEY")
+	if currentApiKey == "" {
+		// Fallback to the API key stored in the struct if viper doesn't have it
+		currentApiKey = c.ApiKey
+	}
+	req.SetBasicAuth(currentApiKey, "")
 
 	_, err, statusCode := c.send("GET", url, "")
 	if err != nil {

@@ -2,9 +2,12 @@ import React from 'react';
 import { SignupForm } from './SignupForm';
 import cronitorScreenshot from '../../assets/cronitor-screenshot.png';
 
-export function LearnMoreModal({ isOpen, onClose, onSignupSuccess, showToast }) {
+export function LearnMoreModal({ isOpen, onClose, onSignupSuccess, showToast, settings }) {
   if (!isOpen) return null;
 
+  // Check if user already has an API key
+  const hasApiKey = settings?.CRONITOR_API_KEY && settings.CRONITOR_API_KEY !== '';
+  
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style={{ margin: '0px' }}>
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full mx-4 relative max-h-[90vh] overflow-y-auto">
@@ -47,20 +50,55 @@ export function LearnMoreModal({ isOpen, onClose, onSignupSuccess, showToast }) 
                   <span className="text-base text-gray-700 dark:text-gray-300 leading-relaxed">Track performance with a year of data retention.</span>
                 </li>
               </ul>
-
             </div>
-            <div className="bg-gray-50 dark:bg-gray-900 p-6 rounded-lg">
-              <SignupForm 
-                onSuccess={onSignupSuccess}
-                onError={(error) => {
-                  if (showToast) {
-                    showToast(error, 'error');
-                  } else {
-                    console.error('Signup error:', error);
-                  }
-                }}
-              />
-            </div>
+            {hasApiKey ? (
+              <div className="bg-gray-50 dark:bg-gray-900 p-6 rounded-lg flex flex-col justify-center">
+                <div className="flex items-center mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="h-8 w-8 text-green-500 mr-3 flex-shrink-0">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"></path>
+                  </svg>
+                  <h3 className="text-2xl font-bold text-gray-900 dark:text-white">You're all set</h3>
+                </div>
+                <p className="text-base text-gray-700 dark:text-gray-300 mb-6">
+                  You have already connected your Cronitor account. To monitor this job, just flip the toggle switch.
+                </p>
+                <div>
+                  <a 
+                    href="https://cronitor.io/app" 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    Show Cronitor Dashboard
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="ml-2 -mr-1 w-4 h-4">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+                    </svg>
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-gray-50 dark:bg-gray-900 p-6 rounded-lg">
+                <SignupForm 
+                  onSuccess={(apiKeys) => {
+                    // Show immediate success toast
+                    if (showToast) {
+                      showToast('Account created successfully! Welcome to Cronitor.', 'success');
+                    }
+                    // Call the parent's success handler
+                    if (onSignupSuccess) {
+                      onSignupSuccess(apiKeys);
+                    }
+                  }}
+                  onError={(error) => {
+                    if (showToast) {
+                      showToast(error, 'error');
+                    } else {
+                      console.error('Signup error:', error);
+                    }
+                  }}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

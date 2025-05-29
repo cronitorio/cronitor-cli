@@ -68,12 +68,12 @@ export function SignupForm({ onSuccess, onError }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-5">
       <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6">
         Sign up for free
       </h3>
       <div>
-        <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+        <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
           Full Name
         </label>
         <input
@@ -93,7 +93,7 @@ export function SignupForm({ onSuccess, onError }) {
       </div>
       
       <div>
-        <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+        <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
           Email Address
         </label>
         <input
@@ -113,7 +113,7 @@ export function SignupForm({ onSuccess, onError }) {
       </div>
       
       <div>
-        <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+        <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
           Password
         </label>
         <input
@@ -132,7 +132,7 @@ export function SignupForm({ onSuccess, onError }) {
         )}
       </div>
       
-      <div className="text-xs text-gray-500 dark:text-gray-400">
+      <div className="text-sm text-gray-500 dark:text-gray-400">
         By signing up, you agree to our{' '}
         <a href="https://cronitor.io/terms" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">
           terms and conditions
@@ -148,7 +148,7 @@ export function SignupForm({ onSuccess, onError }) {
             : 'bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500'
         }`}
       >
-        {isSubmitting ? 'Creating Account...' : 'Get Your API Key'}
+        {isSubmitting ? 'Creating Account...' : 'Sign Up and Get Your API Key'}
       </button>
     </form>
   );

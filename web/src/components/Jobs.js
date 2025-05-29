@@ -215,19 +215,34 @@ export default function Jobs() {
     if (!jobs || !monitors) return jobs;
     
     return jobs.map(job => {
-      if (!job.monitored) return job;
+      // If job has a code (should be monitored) but no monitor found, treat as unmonitored
+      if (job.code && job.monitored) {
+        const monitor = monitors.find(m => m.key === job.key || m.attributes?.code === job.code);
+        if (!monitor) {
+          // Monitor not found in response, treat as unmonitored
+          return {
+            ...job,
+            monitored: false,
+            passing: false,
+            disabled: false,
+            paused: false,
+            initialized: false
+          };
+        }
+        
+        // Monitor found, merge its data
+        return {
+          ...job,
+          name: monitor.name || job.name,
+          passing: monitor.passing,
+          disabled: monitor.disabled,
+          paused: monitor.paused,
+          initialized: monitor.initialized
+        };
+      }
       
-      const monitor = monitors.find(m => m.key === job.key || m.attributes?.code === job.code);
-      if (!monitor) return job;
-
-      return {
-        ...job,
-        name: monitor.name || job.name,
-        passing: monitor.passing,
-        disabled: monitor.disabled,
-        paused: monitor.paused,
-        initialized: monitor.initialized
-      };
+      // Job not monitored, return as-is
+      return job;
     });
   }, [jobs, monitors]);
 
@@ -435,6 +450,7 @@ export default function Jobs() {
               showToast={showToast}
               isMacOS={settings?.os === 'darwin'}
               readOnly={settings?.safe_mode}
+              settings={settings}
             />
           ))
         ) : (
