@@ -6,7 +6,7 @@ export function LearnMoreModal({ isOpen, onClose, onSignupSuccess, showToast, se
   if (!isOpen) return null;
 
   // Check if user already has an API key
-  const hasApiKey = settings?.CRONITOR_API_KEY && settings.CRONITOR_API_KEY !== '';
+  const hasApiKey = settings?.CRONITOR_API_KEY && settings.CRONITOR_API_KEY.trim() !== '';
   
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style={{ margin: '0px' }}>

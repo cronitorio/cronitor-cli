@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-export function useJobMonitoring(job, onUpdate) {
+export function useJobMonitoring(job, onUpdate, monitorsLoading = false) {
   const [isLoading, setIsLoading] = useState(false);
 
   const handleToggle = useCallback(async () => {
@@ -28,6 +28,15 @@ export function useJobMonitoring(job, onUpdate) {
   }, [job, onUpdate]);
 
   const getStatusInfo = useCallback(() => {
+    // If monitors are still loading and job is monitored, show syncing
+    if (monitorsLoading && job.monitored && job.key) {
+      return {
+        color: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+        text: 'Syncing',
+        title: 'Loading monitoring status...'
+      };
+    }
+
     if (job.disabled) {
       return {
         color: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
@@ -73,7 +82,7 @@ export function useJobMonitoring(job, onUpdate) {
       text: 'Not Monitored',
       title: 'This job is not being monitored. Enable monitoring to track its health.'
     };
-  }, [job]);
+  }, [job, monitorsLoading]);
 
   return {
     isLoading,

@@ -23,20 +23,10 @@ const fetcher = async url => {
 };
 
 export default function Crontabs() {
-  const [enableAutoRefresh, setEnableAutoRefresh] = useState(false);
   const [revalidationKey, setRevalidationKey] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState('');
   const textareaRef = useRef(null);
-  
-  // Enable auto-refresh after initial load completes
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setEnableAutoRefresh(true);
-    }, 2000); // Wait 2 seconds before enabling auto-refresh
-    
-    return () => clearTimeout(timer);
-  }, []);
   
   // Load settings first (non-critical, no refresh)
   const { data: settings } = useSWR('/api/settings', fetcher, {
@@ -44,27 +34,35 @@ export default function Crontabs() {
     refreshInterval: 0
   });
   
-  // Load crontabs with controlled refresh
+  // Load crontabs with auto-refresh
   const { data: crontabs, error, mutate } = useSWR(
     `/api/crontabs?key=${revalidationKey}`,
     fetcher,
     {
-      refreshInterval: enableAutoRefresh ? 10000 : 0, // Only auto-refresh after initial load
-      revalidateOnFocus: true, // Enable revalidation on focus
-      dedupingInterval: 2000 // Prevent duplicate requests within 2s
+      refreshInterval: 5000, // Auto-refresh every 5 seconds
+      revalidateOnFocus: true,
+      dedupingInterval: 5000 // 5 seconds deduplication to match refresh
     }
   );
   
-  // Only load jobs after crontabs are loaded
+  // Load jobs with auto-refresh
   const { data: jobs, mutate: jobsMutate } = useSWR(
     crontabs ? `/api/jobs?key=${revalidationKey}` : null, 
     fetcher, 
     {
-      refreshInterval: enableAutoRefresh ? 10000 : 0, // Only auto-refresh after initial load
+      refreshInterval: 5000, // Auto-refresh every 5 seconds
       revalidateOnFocus: true,
-      dedupingInterval: 2000
+      dedupingInterval: 5000 // 5 seconds deduplication to match refresh
     }
   );
+  
+  // Load users data with minimal refresh since it changes infrequently
+  const { data: users } = useSWR('/api/users', fetcher, {
+    refreshInterval: 0, // No auto-refresh - users rarely change
+    revalidateOnFocus: true, // Revalidate when window gets focus
+    revalidateOnReconnect: false,
+    dedupingInterval: 300000 // 5 minutes deduplication
+  });
   
   const [selectedCrontab, setSelectedCrontab] = useState(null);
   const [selectedLine, setSelectedLine] = useState(null);
@@ -72,7 +70,6 @@ export default function Crontabs() {
   const [isToastVisible, setIsToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState('error');
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
   
   const [newCrontabForm, setNewCrontabForm] = useState({
     filename: '',
@@ -94,7 +91,6 @@ export default function Crontabs() {
   useEffect(() => {
     if (crontabs && crontabs.length > 0 && !selectedCrontab) {
       setSelectedCrontab(crontabs[0]);
-      setIsInitialLoad(false);
     }
   }, [crontabs, selectedCrontab]);
 
@@ -459,7 +455,7 @@ export default function Crontabs() {
     );
   }
 
-  if (!crontabs || isInitialLoad) {
+  if (!crontabs) {
     return <div className="text-gray-600 dark:text-gray-300">Loading...</div>;
   }
 
@@ -653,6 +649,8 @@ export default function Crontabs() {
                     setSelectedCrontab={setSelectedCrontab}
                     readOnly={settings?.safe_mode}
                     settings={settings}
+                    users={users || []}
+                    crontabs={crontabs || []}
                   />
                 );
               } else if (selectedLine.is_comment === true) {

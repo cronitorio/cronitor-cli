@@ -14,7 +14,6 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
 #### Current State
 - Basic authentication is implemented
 - No rate limiting on authentication attempts
-- No session management
 - No CSRF protection
 - No IP-based access restrictions
 
@@ -22,63 +21,61 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
 - Implement rate limiting for authentication attempts
   - Problem: Prevents brute force attacks by limiting failed login attempts
   - Implementation: Use golang.org/x/time/rate package to implement a token bucket rate limiter, storing attempt counts in memory with a 5-minute window
-
-- Add session management with secure session tokens
-  - Problem: Current stateless auth allows token reuse and doesn't support session invalidation
-  - Implementation: Implement JWT-based sessions with short expiration times, refresh tokens, and server-side session tracking
+  - Details:
+    • Create a map[string]*rate.Limiter indexed by client IP address to track per-IP rate limits
+    • Set limit to 5 failed attempts per minute using rate.NewLimiter(rate.Every(12*time.Second), 5)
+    • On authentication failure, check if client IP has exceeded rate limit before processing
+    • Implement cleanup goroutine to remove stale entries from the map every 10 minutes
+    • Return HTTP 429 (Too Many Requests) with Retry-After header when rate limit exceeded
 
 - Add CSRF protection for all POST/PUT/DELETE requests
   - Problem: Current implementation vulnerable to cross-site request forgery attacks
   - Implementation: Add CSRF tokens to all forms and API requests, validate tokens on server side
+  - Details:
+    • Generate cryptographically secure random CSRF tokens using crypto/rand package
+    • Store tokens in secure HTTP-only cookies with SameSite=Strict attribute
+    • Add hidden CSRF token fields to all HTML forms and X-CSRF-Token header to AJAX requests
+    • Implement middleware to validate CSRF tokens on all state-changing requests (POST/PUT/DELETE)
+    • Regenerate CSRF tokens after successful authentication to prevent session fixation
 
 - Add IP-based access restrictions
   - Problem: No way to restrict access to specific IP ranges
   - Implementation: Add configurable IP whitelist/blacklist with CIDR support, implement middleware to check client IPs
+  - Details:
+    • Accept CRONITOR_ALLOWED_IPS environment variable with comma-separated CIDR notation, if empty then no filtering is applied
+    • Use net.ParseCIDR() to parse and validate IP ranges during startup
+    • Implement middleware that extracts client IP from X-Forwarded-For, X-Real-IP, or RemoteAddr
+    • Create IPFilter middleware that checks client IP against whitelist using net.Contains()
+    • Support both IPv4 and IPv6 addresses, with proper handling of IPv4-mapped IPv6 addresses
 
 - Add support for TLS/HTTPS
   - Problem: Current implementation allows unencrypted communication
   - Implementation: Add TLS configuration with modern cipher suites, make HTTPS mandatory in production
+  - Details:
+    • Implement automated certificate acquisition using ACME/Let's Encrypt protocol
+    • Accept CRONITOR_ACME_EMAIL and CRONITOR_ACME_DIRECTORY environment variables for Let's Encrypt configuration
+    • Configure TLS with minimum version 1.2 and secure cipher suites (exclude RC4, DES, 3DES)
+    • Implement HTTP to HTTPS redirect middleware when TLS is enabled
+    • Add CRONITOR_TLS_REQUIRED environment variable to enforce HTTPS-only mode
+    • Support automatic certificate renewal with 90-day Let's Encrypt cycle
+    • Fallback to manual certificate files via CRONITOR_TLS_CERT_FILE/CRONITOR_TLS_KEY_FILE for custom deployments
 
-- Add support for additional authentication methods
-  - Problem: Basic auth may not be sufficient for enterprise environments
-  - Implementation: Add OAuth2 and LDAP support as optional authentication methods
 
 ### 2. Command Execution Security
 #### Current State
-- No command validation/sanitization
-- No command execution timeouts
-- No command whitelisting
-- No user permission checks
 - No logging of command execution
 
 #### Proposed Improvements
-- Implement command validation using regex patterns
-  - Problem: No validation of commands before execution
-  - Implementation: Create regex patterns for allowed commands, validate against patterns before execution
-
-- Add command execution timeouts
-  - Problem: Commands can run indefinitely
-  - Implementation: Add context with timeout to all command executions, kill processes that exceed timeout
-
-- Create a whitelist of allowed commands
-  - Problem: Any command can be executed
-  - Implementation: Create configurable whitelist of allowed commands and arguments
-
-- Add user permission checks before execution
-  - Problem: No verification of user permissions
-  - Implementation: Check user permissions against command requirements before execution
-
 - Implement comprehensive command execution logging
   - Problem: No audit trail of command execution
-  - Implementation: Log all command executions with user, command, arguments, and outcome
+  - Implementation: Log all command executions with user, command, arguments, and outcome - log to syslog unless a path is provided in settings
+  - Details:
+    • Create structured log entries with timestamp, user ID, command, arguments, exit code, and execution duration
+    • Use log/syslog package to send logs to system syslog daemon with LOG_AUTH facility
+    • Implement CRONITOR_LOG_FILE environment variable to override syslog and write to specific file
+    • Include process PID, working directory, and environment variables (sanitized) in log entries
+    • Implement log rotation and retention policies when writing to files (max 100MB, keep 10 files)
 
-- Add command output sanitization
-  - Problem: Command output may contain sensitive information
-  - Implementation: Sanitize command output to remove sensitive data before sending to client
-
-- Add support for command execution in isolated environments
-  - Problem: Commands run in same environment as dashboard
-  - Implementation: Add support for running commands in containers or isolated environments
 
 ### 3. Process Management Security
 #### Current State
@@ -91,26 +88,31 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
 - Add PID validation
   - Problem: No validation of process IDs before killing
   - Implementation: Validate PID format and existence before attempting to kill
+  - Details:
+    • Check PID is a positive integer using strconv.Atoi() and range validation (1-4194304 on Linux)
+    • Verify process exists by checking /proc/{pid}/stat file or using os.FindProcess()
+    • Implement process state validation to ensure process is not a kernel thread
+    • Add safety checks to prevent killing PID 1 (init) or other critical system processes
+    • Return descriptive error messages for invalid PIDs or non-existent processes
 
 - Implement process ownership checks
-  - Problem: Can kill processes owned by other users
-  - Implementation: Check process ownership before allowing kill operation
-
-- Add permission verification before process termination
-  - Problem: No verification of user permissions for process management
-  - Implementation: Check user permissions against process requirements
+  - Problem: Can kill processes started by any parent
+  - Implementation: Verify that the process parent is either cron, crond, launchd (as appropriate) or this same binary or another instance of this "cronitor" binary. When finding associated processes, only return those with this criteria, and check it again during kill process handling.
+  - Details:
+    • Read process parent from /proc/{pid} or use os/user package
+    • Maintain whitelist of allowed process parents: cron, crond, launchd user IDs, cronitor
+    • Check process executable path using /proc/{pid}/exe to verify it's cronitor binary
+    • Implement process tree validation to ensure child processes belong to cron jobs or to cronitor itself. 
 
 - Add comprehensive process management logging
   - Problem: No audit trail of process management operations
-  - Implementation: Log all process management operations with user, action, and outcome
-
-- Add process kill confirmation for critical processes
-  - Problem: No confirmation for killing important processes
-  - Implementation: Add confirmation step for critical process termination
-
-- Implement process kill rate limiting
-  - Problem: No limit on number of processes that can be killed
-  - Implementation: Add rate limiting for process kill operations
+  - Implementation: Log all process management operations with user, action, and outcome - log to syslog unless a path is provided in settings
+  - Details:
+    • Log process kill attempts with PID, process name, owner, and result status
+    • Include process command line and parent PID in log entries using /proc/{pid}/cmdline
+    • Use structured logging format with consistent fields for parsing and analysis
+    • Send logs to syslog with LOG_CRIT facility for failed operations, LOG_INFO for successful ones
+    • Implement configurable log levels and filtering options via CRONITOR_LOG_LEVEL
 
 ### 4. File Operations Security
 #### Current State
@@ -122,27 +124,34 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
 #### Proposed Improvements
 - Implement file path validation
   - Problem: No validation of file paths before operations
-  - Implementation: Validate and sanitize all file paths, prevent directory traversal
-
-- Add permission checks for file operations
-  - Problem: No verification of file permissions
-  - Implementation: Check file permissions before read/write operations
+  - Implementation: Validate and sanitize all file paths, prevent directory traversal. this binary should only be able to write to /etc/cronitor, /etc/cron.d/, /etc/crontab, /tmp
+  - Details:
+    • Define whitelist of allowed directories: /etc/cronitor, /etc/cron.d/, /etc/crontab, /tmp
+    • Use filepath.Clean() and filepath.Abs() to resolve and normalize all paths
+    • Check resolved paths start with allowed prefixes using strings.HasPrefix()
+    • Reject paths containing "..", symbolic links, or null bytes
+    • Implement path validation middleware that runs before any file operation
 
 - Add comprehensive file operation logging
   - Problem: No audit trail of file operations
-  - Implementation: Log all file operations with user, action, and file path
+  - Implementation: Log all file operations with user, action, and file path - log to syslog unless a path is provided in settings
+  - Details:
+    • Log file operations with timestamp, user, action (read/write/delete), path, and size
+    • Include file permissions, ownership, and modification time in log entries
+    • Use structured logging with consistent field names for automated analysis
+    • Send logs to syslog with LOG_AUTHPRIV facility for security-sensitive operations
+    • Add file content hashing (SHA256) for integrity verification in logs
 
 - Implement path traversal protection
   - Problem: Vulnerable to directory traversal attacks
   - Implementation: Sanitize paths and use absolute path resolution
+  - Details:
+    • Use filepath.Join() exclusively for path construction to prevent manual concatenation
+    • Implement chroot-style path resolution that treats allowed directories as filesystem roots
+    • Reject any path operation that would access files outside allowed directories
+    • Add comprehensive test suite for edge cases like Unicode normalization attacks
+    • Implement filesystem permission checks using os.Stat() before file operations
 
-- Add file operation rate limiting
-  - Problem: No limit on file operations
-  - Implementation: Add rate limiting for file operations
-
-- Implement file access controls
-  - Problem: No fine-grained file access control
-  - Implementation: Add configurable file access rules
 
 ### 5. Network Security
 #### Current State
@@ -155,26 +164,52 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
 - Add TLS/HTTPS support with modern cipher suites
   - Problem: No encryption for network traffic
   - Implementation: Configure TLS with modern cipher suites and proper certificate handling
+  - Details:
+    • Configure TLS 1.2+ only with secure cipher suites excluding weak algorithms (RC4, DES, MD5)
+    • Implement certificate validation with OCSP stapling and proper chain verification
+    • Add support for HSTS headers with max-age of 1 year and includeSubDomains
+    • Use crypto/tls.Config with MinVersion: tls.VersionTLS12 and CurvePreferences
+    • Implement automatic certificate renewal using ACME/Let's Encrypt when available
 
 - Implement IP-based access restrictions
   - Problem: No IP-based access control
   - Implementation: Add configurable IP whitelist/blacklist with CIDR support
+  - Details:
+    • Parse CRONITOR_ALLOWED_IPS environment variables
+    • Use net.IPNet.Contains() for efficient IP range checking in middleware
+    • Support IPv4, IPv6, and mixed environments with proper precedence rules
+    • Implement X-Forwarded-For header parsing for proxy/load balancer scenarios
+    • Add /health endpoint that bypasses IP restrictions for monitoring systems
 
 - Configure proper CORS policies
   - Problem: No CORS configuration
   - Implementation: Add strict CORS policies with configurable allowed origins
-
-- Add request rate limiting
-  - Problem: No protection against request flooding
-  - Implementation: Add rate limiting for all API endpoints
+  - Details:
+    • Implement CORS middleware using gorilla/handlers or custom implementation
+    • Set strict default policy: only same-origin requests allowed
+    • Add CRONITOR_CORS_ALLOWED_ORIGINS environment variable for configuration
+    • Configure secure headers: Access-Control-Allow-Credentials: false by default
+    • Implement preflight request handling with proper method and header validation
 
 - Implement request size limits
   - Problem: No limit on request size
-  - Implementation: Add configurable request size limits
+  - Implementation: Add size limit, we should never have very large requests
+  - Details:
+    • Set maximum request body size to 1MB using http.MaxBytesReader()
+    • Implement separate limits for different content types (JSON: 100KB, form data: 10KB)
+    • Add request header size limits to prevent header-based attacks
+    • Use middleware to enforce limits before request processing begins
+    • Return HTTP 413 (Payload Too Large) with appropriate error messages
 
 - Add support for reverse proxy configurations
   - Problem: No support for running behind reverse proxy
   - Implementation: Add proper headers and configuration for reverse proxy support
+  - Details:
+    • Trust X-Forwarded-For, X-Forwarded-Proto, X-Real-IP headers
+    • Implement proper client IP extraction with configurable proxy IP ranges
+    • Add support for X-Forwarded-Host header for multi-tenant deployments
+    • Configure proper redirect URLs and cookie domains for proxy scenarios
+    • Validate and sanitize all forwarded headers to prevent header injection attacks
 
 ### 6. Logging & Monitoring
 #### Current State
@@ -185,129 +220,31 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
 #### Proposed Improvements
 - Implement comprehensive security event logging
   - Problem: Insufficient security event logging
-  - Implementation: Add structured logging for all security events
+  - Implementation: Add structured logging for all security events - log to syslog unless a path is provided in settings
+  - Details:
+    • Define security events: authentication attempts, authorization failures, suspicious activity
+    • Use structured JSON logging with consistent fields: timestamp, user, action, resource, outcome
+    • Send to syslog with appropriate facilities (LOG_AUTH, LOG_AUTHPRIV, LOG_SECURITY)
+    • Implement CRONITOR_SECURITY_LOG_FILE environment variable for file-based logging
+    • Add log level filtering and configurable verbosity via CRONITOR_LOG_LEVEL
 
 - Add audit trail for sensitive operations
   - Problem: No audit trail for sensitive operations
   - Implementation: Log all sensitive operations with user, action, and outcome
-
-- Add monitoring for suspicious activities
-  - Problem: No monitoring for suspicious behavior
-  - Implementation: Add monitoring for unusual patterns and suspicious activities
-
-- Implement log rotation and retention policies
-  - Problem: No log management
-  - Implementation: Add configurable log rotation and retention policies
+  - Details:
+    • Define sensitive operations: process kills, file modifications, configuration changes
+    • Create immutable audit log entries with cryptographic signatures using HMAC-SHA256
+    • Include before/after state for configuration changes and file modifications
+    • Implement audit log rotation with integrity verification and tamper detection
+    • Add CRONITOR_AUDIT_RETENTION environment variable for retention period (default 90 days)
 
 - Add support for external logging systems
   - Problem: No integration with external logging
   - Implementation: Add support for syslog and other external logging systems
+  - Details:
+    • Implement syslog client supporting RFC 5424 format with structured data
+    • Add support for remote syslog servers via TCP/UDP with TLS encryption
+    • Integrate with popular log aggregation systems (ELK stack, Splunk, Fluentd)
+    • Support multiple log outputs simultaneously (local file + remote syslog)
+    • Add CRONITOR_LOG_ENDPOINTS environment variable for configuring multiple destinations
 
-- Add security event alerts
-  - Problem: No alerts for security events
-  - Implementation: Add configurable alerts for security events
-
-## Implementation Phases
-
-### Phase 1: Critical Security Improvements
-1. Add TLS/HTTPS support
-2. Implement command validation
-3. Add process ownership checks
-4. Implement basic rate limiting
-5. Add comprehensive logging
-
-### Phase 2: Enhanced Security Features
-1. Add session management
-2. Implement CSRF protection
-3. Add IP-based access restrictions
-4. Enhance command validation
-5. Implement file operation security
-
-### Phase 3: Advanced Security Features
-1. Add support for additional authentication methods
-2. Implement advanced monitoring
-3. Add support for isolated execution environments
-4. Enhance logging and alerting
-5. Add security audit features
-
-## Deployment Recommendations
-
-### Local Development
-- Run dashboard only on localhost
-- Use strong authentication credentials
-- Enable TLS in development
-- Implement proper logging
-
-### Production Deployment
-- Run behind a reverse proxy
-- Use proper TLS certificates
-- Implement IP restrictions
-- Set up monitoring and alerting
-- Regular security audits
-- Keep dependencies updated
-
-## Documentation Requirements
-
-### Security Documentation
-- Clear security warnings
-- Deployment security guidelines
-- Authentication configuration
-- TLS setup instructions
-- Monitoring setup guide
-
-### User Documentation
-- Security best practices
-- Access control guidelines
-- Command execution guidelines
-- Process management guidelines
-- Logging and monitoring guide
-
-## Testing Requirements
-
-### Security Testing
-- Authentication testing
-- Command execution testing
-- Process management testing
-- File operation testing
-- Network security testing
-- Logging verification
-
-### Penetration Testing
-- Regular security audits
-- Vulnerability scanning
-- Access control testing
-- Command injection testing
-- Process manipulation testing
-
-## Maintenance Plan
-
-### Regular Updates
-- Security patch management
-- Dependency updates
-- Configuration reviews
-- Log analysis
-- Security audit reviews
-
-### Monitoring
-- Security event monitoring
-- Access pattern analysis
-- Command execution monitoring
-- Process management monitoring
-- File operation monitoring
-
-## Questions for Review
-1. Should we implement additional authentication methods beyond basic auth?
-2. What level of command validation is appropriate?
-3. Should we implement process isolation for command execution?
-4. What logging retention policies should we implement?
-5. Should we add support for external authentication systems?
-6. What level of IP restriction is appropriate?
-7. Should we implement additional monitoring features?
-8. What security testing requirements should we implement?
-
-## Next Steps
-1. Review and approve security plan
-2. Prioritize security improvements
-3. Create implementation timeline
-4. Assign security responsibilities
-5. Begin implementation of critical security features 

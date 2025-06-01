@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"os/user"
 	"path/filepath"
 	"regexp"
@@ -20,6 +22,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/cronitorio/cronitor-cli/lib"
@@ -63,6 +67,19 @@ func (ch *CommandHistory) MoveHistory(oldKey, newKey, oldCommand string) {
 		// No existing history, just create new entry with old command
 		ch.history[newKey] = []string{oldCommand}
 	}
+
+	// Clean up old entries if we have too many keys
+	if len(ch.history) > 1000 {
+		// Remove half of the oldest entries
+		keys := make([]string, 0, len(ch.history))
+		for k := range ch.history {
+			keys = append(keys, k)
+		}
+		// Remove first 500 keys (oldest)
+		for i := 0; i < 500 && i < len(keys); i++ {
+			delete(ch.history, keys[i])
+		}
+	}
 }
 
 func (ch *CommandHistory) GetCommands(key, currentCommand string) []string {
@@ -79,6 +96,81 @@ func (ch *CommandHistory) GetCommands(key, currentCommand string) []string {
 var commandHistory = NewCommandHistory()
 
 var isSafeModeEnabled bool
+
+// Cache for avoiding unnecessary crontab re-parsing
+type crontabFileCache struct {
+	jobs         []Job
+	timestamp    time.Time
+	fileModTimes map[string]time.Time
+	mutex        sync.RWMutex
+}
+
+var fileCache = &crontabFileCache{
+	fileModTimes: make(map[string]time.Time),
+}
+
+// checkCrontabFilesChanged returns true if any crontab files have been modified
+func checkCrontabFilesChanged() bool {
+	fileCache.mutex.RLock()
+	defer fileCache.mutex.RUnlock()
+
+	// Check user crontab (always consider it potentially changed)
+
+	// Check system crontab
+	if info, err := os.Stat("/etc/crontab"); err == nil {
+		if lastMod, exists := fileCache.fileModTimes["/etc/crontab"]; !exists || info.ModTime().After(lastMod) {
+			return true
+		}
+	}
+
+	// Check cron.d directory
+	if entries, err := os.ReadDir("/etc/cron.d"); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				filePath := filepath.Join("/etc/cron.d", entry.Name())
+				if info, err := entry.Info(); err == nil {
+					if lastMod, exists := fileCache.fileModTimes[filePath]; !exists || info.ModTime().After(lastMod) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// updateFileModTimes updates the cached modification times
+func updateFileModTimes() {
+	fileCache.mutex.Lock()
+	defer fileCache.mutex.Unlock()
+
+	// Update system crontab
+	if info, err := os.Stat("/etc/crontab"); err == nil {
+		fileCache.fileModTimes["/etc/crontab"] = info.ModTime()
+	}
+
+	// Update cron.d files
+	if entries, err := os.ReadDir("/etc/cron.d"); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				filePath := filepath.Join("/etc/cron.d", entry.Name())
+				if info, err := entry.Info(); err == nil {
+					fileCache.fileModTimes[filePath] = info.ModTime()
+				}
+			}
+		}
+	}
+}
+
+// Simple cache to prevent re-parsing unchanged crontab files
+type crontabCache struct {
+	data      []*lib.Crontab
+	timestamp time.Time
+	mutex     sync.RWMutex
+}
+
+var cronCache = &crontabCache{}
 
 func openBrowser(url string) {
 	var err error
@@ -201,10 +293,19 @@ The dashboard provides a web interface for managing your Cronitor monitors and c
 		// Add signup endpoint
 		http.Handle("/api/signup", authMiddleware(http.HandlerFunc(handleSignup)))
 
+		// Create HTTP server with proper configuration
+		server := &http.Server{
+			Addr:         fmt.Sprintf(":%d", port),
+			Handler:      nil, // Use default ServeMux
+			ReadTimeout:  10 * time.Second,
+			WriteTimeout: 10 * time.Second,
+			IdleTimeout:  60 * time.Second,
+		}
+
 		// Start the server in a goroutine
 		go func() {
 			fmt.Printf("Starting Cronitor dashboard on port %d...\n", port)
-			if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				fatal(err.Error(), 1)
 			}
 		}()
@@ -217,8 +318,25 @@ The dashboard provides a web interface for managing your Cronitor monitors and c
 		fmt.Printf("Opening browser to %s...\n", url)
 		openBrowser(url)
 
-		// Keep the main goroutine running
-		select {}
+		// Wait for interrupt signal to gracefully shutdown
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+		fmt.Printf("Dashboard running on %s (Press Ctrl+C to stop)\n", url)
+		<-c
+
+		fmt.Println("\nShutting down dashboard...")
+
+		// Create a context with timeout for graceful shutdown
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// Attempt graceful shutdown
+		if err := server.Shutdown(ctx); err != nil {
+			fmt.Printf("Server forced to shutdown: %v\n", err)
+		} else {
+			fmt.Println("Dashboard stopped gracefully")
+		}
 	},
 }
 
@@ -452,6 +570,12 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Force viper to reload the configuration from the file to pick up changes immediately
+		// This ensures API key changes take effect without requiring a server restart
+		if err := viper.ReadInConfig(); err != nil {
+			log("Warning: Failed to reload config file after settings update: " + err.Error())
+		}
+
 		w.WriteHeader(http.StatusOK)
 		w.Write(b)
 
@@ -485,6 +609,8 @@ type Job struct {
 	Instances          []JobInstance `json:"instances"`
 	Suspended          *bool         `json:"suspended"`
 	PauseHours         string        `json:"pause_hours"`
+	IsMetaCronJob      bool          `json:"is_meta_cron_job"`
+	Ignored            bool          `json:"ignored"`
 }
 
 // handleJobs handles requests for jobs
@@ -506,20 +632,57 @@ func handleJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetJobs(w http.ResponseWriter, r *http.Request) {
+	// Check cache first - use cached data if files haven't changed and cache is recent
+	fileCache.mutex.RLock()
+	cacheAge := time.Since(fileCache.timestamp)
+	hasCachedData := len(fileCache.jobs) > 0
+	fileCache.mutex.RUnlock()
+
+	// Use cache if it's less than 10 seconds old and files haven't changed
+	if hasCachedData && cacheAge < 10*time.Second && !checkCrontabFilesChanged() {
+		fileCache.mutex.RLock()
+		cachedJobs := fileCache.jobs
+		fileCache.mutex.RUnlock()
+
+		responseData, err := json.Marshal(cachedJobs)
+		if err != nil {
+			http.Error(w, "Failed to marshal cached response", http.StatusInternalServerError)
+			return
+		}
+		w.Write(responseData)
+		return
+	}
+
+	// Cache miss or files changed - parse crontabs
 	crontabs, err := lib.GetAllCrontabs()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// Get monitors to sync names
+	var monitors []lib.Monitor
+	if api := getCronitorApi(); api != nil {
+		if monitorData, err := api.GetMonitors(); err == nil {
+			monitors = monitorData
+		}
+	}
+
 	var jobs []Job
+	var crontabsToSave []*lib.Crontab
 
 	// Process each crontab
 	for _, crontab := range crontabs {
-		hasChanges := false
+		crontabModified := false
+
 		for i := range crontab.Lines {
 			line := crontab.Lines[i]
 			if !line.IsJob {
+				continue
+			}
+
+			// Skip ignored jobs - they should not be shown on the dashboard
+			if line.Ignored {
 				continue
 			}
 
@@ -533,33 +696,89 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 				runAsUser = crontab.User
 			}
 
+			// Check if this job has a monitor and if the name needs updating
+			jobKey := line.Key(crontab.CanonicalName())
+			if len(line.Code) > 0 && monitors != nil {
+				for _, monitor := range monitors {
+					// Match by code or key
+					if (monitor.Attributes.Code == line.Code) || monitor.Key == jobKey {
+						// If monitor name differs from crontab line name, update the crontab
+						if monitor.Name != "" && monitor.Name != line.Name {
+							line.Name = monitor.Name
+							crontabModified = true
+						}
+						break
+					}
+				}
+			}
+
+			// Basic exclusions for cleaner names
+			excludeFromName := []string{
+				"2>&1",
+				"/bin/bash -l -c",
+				"/bin/bash -lc",
+				"/bin/bash -c -l",
+				"/bin/bash -cl",
+				"/dev/null",
+				"'",
+				"\"",
+				"\\",
+			}
+			allNameCandidates := make(map[string]bool)
+
 			job := Job{
 				Name:               line.Name,
-				DefaultName:        createDefaultName(line, crontab, "", []string{}, map[string]bool{}),
+				DefaultName:        createDefaultName(line, crontab, "", excludeFromName, allNameCandidates),
 				Command:            line.CommandToRun,
 				Expression:         line.CronExpression,
 				RunAsUser:          runAsUser,
-				CrontabDisplayName: strings.Replace(crontab.DisplayName(), "user ", "User ", 1),
+				CrontabDisplayName: crontab.DisplayName(),
 				CrontabFilename:    crontab.Filename,
 				LineNumber:         line.LineNumber + 1,
 				Monitored:          len(line.Code) > 0,
 				Timezone:           timezone,
-				Passing:            false, // Will be updated by frontend
-				Disabled:           false, // Will be updated by frontend
-				Paused:             false, // Will be updated by frontend
-				Initialized:        false, // Will be updated by frontend
+				Passing:            false,
+				Disabled:           false,
+				Paused:             false,
+				Initialized:        false,
 				Code:               line.Code,
-				Key:                line.Key(crontab.CanonicalName()),
-				Instances:          findInstances(commandHistory.GetCommands(line.Key(crontab.CanonicalName()), line.CommandToRun)),
+				Key:                jobKey,
+				Instances:          []JobInstance{}, // Keep empty to avoid other leaks
 				Suspended:          &line.IsComment,
+				IsMetaCronJob:      line.IsMetaCronJob(),
+				Ignored:            line.Ignored,
 			}
 
 			jobs = append(jobs, job)
+
+			// Prevent memory issues by limiting the number of jobs returned
+			if len(jobs) > 1000 { // Reasonable limit
+				log("Warning: Too many jobs found, truncating response")
+				break
+			}
 		}
-		if hasChanges {
-			crontab.Save(crontab.Write())
+
+		// If this crontab was modified, mark it for saving
+		if crontabModified {
+			crontabsToSave = append(crontabsToSave, crontab)
 		}
 	}
+
+	// Save any modified crontabs
+	for _, crontab := range crontabsToSave {
+		if err := crontab.Save(crontab.Write()); err != nil {
+			log(fmt.Sprintf("Warning: Failed to save crontab %s after syncing monitor names: %v", crontab.Filename, err))
+		}
+	}
+
+	// Update cache
+	fileCache.mutex.Lock()
+	fileCache.jobs = jobs
+	fileCache.timestamp = time.Now()
+	fileCache.mutex.Unlock()
+
+	// Update file modification times
+	updateFileModTimes()
 
 	responseData, err := json.Marshal(jobs)
 	if err != nil {
@@ -659,6 +878,10 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 }
 
 func findInstances(commandStrings []string) []JobInstance {
+	// TEMPORARILY DISABLED: Early return to prevent CPU saturation
+	// TODO: Re-enable with proper caching and rate limiting
+	return []JobInstance{}
+
 	cmd := exec.Command("ps", "-eo", "pgid,lstart,args")
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -760,6 +983,7 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
 
 	// Set up SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -772,11 +996,20 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 
 	// Track the last position we read from the file
 	lastPos := int64(0)
+	const maxOutputSize = 10 * 1024 * 1024 // 10MB limit
+	const maxChunkSize = 8192              // 8KB chunks
+	var totalSent int64 = 0
+
+	// Create context with timeout for the entire operation
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 
 	// Start the command in a goroutine
 	go func() {
+		defer close(done)
+
 		startTime := time.Now()
-		cmd := exec.Command("sh", "-c", request.Command)
+		cmd := exec.CommandContext(ctx, "sh", "-c", request.Command)
 		cmd.Env = makeCronLikeEnv()
 		cmd.Stdout = tempFile
 		cmd.Stderr = tempFile
@@ -786,7 +1019,6 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 			errorData, _ := json.Marshal(map[string]string{"error": fmt.Sprintf("Error starting command: %v", err)})
 			fmt.Fprintf(w, "data: %s\n\n", errorData)
 			w.(http.Flusher).Flush()
-			close(done)
 			return
 		}
 
@@ -804,63 +1036,91 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Read any remaining output that might not have been streamed yet
-		fileInfo, _ := tempFile.Stat()
-		if fileInfo.Size() > lastPos {
-			content, _ := ioutil.ReadFile(tempFile.Name())
-			if len(content) > 0 {
-				outputData, _ := json.Marshal(map[string]string{"output": string(content[lastPos:])})
-				fmt.Fprintf(w, "data: %s\n\n", outputData)
-				w.(http.Flusher).Flush()
-			}
-		}
-
+		// Send completion message
 		completionData, _ := json.Marshal(map[string]string{
 			"completion": fmt.Sprintf("Done in %.2f seconds [Exit code %d]", duration.Seconds(), exitCode),
 		})
 		fmt.Fprintf(w, "data: %s\n\n", completionData)
 		w.(http.Flusher).Flush()
-		close(done)
 	}()
 
-	// Stream the log file contents
+	// Stream the log file contents with memory limits
 	go func() {
-		ticker := time.NewTicker(100 * time.Millisecond)
+		ticker := time.NewTicker(500 * time.Millisecond) // Reduced frequency
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-done:
+				// Read any final output
+				streamRemainingOutput(tempFile, &lastPos, &totalSent, maxOutputSize, maxChunkSize, w)
+				return
+			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				fileInfo, err := tempFile.Stat()
-				if err != nil {
-					continue
-				}
-
-				if fileInfo.Size() > lastPos {
-					content, err := ioutil.ReadFile(tempFile.Name())
-					if err != nil {
-						continue
-					}
-
-					if len(content) > 0 {
-						// Only send new content
-						newContent := content[lastPos:]
-						if len(newContent) > 0 {
-							outputData, _ := json.Marshal(map[string]string{"output": string(newContent)})
-							fmt.Fprintf(w, "data: %s\n\n", outputData)
-							w.(http.Flusher).Flush()
-							lastPos = fileInfo.Size()
-						}
-					}
-				}
+				streamRemainingOutput(tempFile, &lastPos, &totalSent, maxOutputSize, maxChunkSize, w)
 			}
 		}
 	}()
 
-	// Wait for the command to complete
-	<-done
+	// Wait for the command to complete or timeout
+	select {
+	case <-done:
+	case <-ctx.Done():
+		fmt.Fprintf(w, "data: %s\n\n", `{"error":"Command timed out"}`)
+		w.(http.Flusher).Flush()
+	}
+}
+
+// Helper function to stream output with memory limits
+func streamRemainingOutput(tempFile *os.File, lastPos *int64, totalSent *int64, maxOutputSize int64, maxChunkSize int64, w http.ResponseWriter) {
+	if *totalSent >= maxOutputSize {
+		return // Stop streaming if we've hit the limit
+	}
+
+	fileInfo, err := tempFile.Stat()
+	if err != nil {
+		return
+	}
+
+	if fileInfo.Size() > *lastPos {
+		remainingAllowed := maxOutputSize - *totalSent
+		toRead := fileInfo.Size() - *lastPos
+
+		if toRead > remainingAllowed {
+			toRead = remainingAllowed
+		}
+		if toRead > maxChunkSize {
+			toRead = maxChunkSize
+		}
+
+		// Read only the new portion in a small chunk
+		buffer := make([]byte, toRead)
+		tempFile.Seek(*lastPos, 0)
+		n, err := tempFile.Read(buffer)
+		if err != nil && err != io.EOF {
+			return
+		}
+
+		if n > 0 {
+			// Truncate to actual bytes read
+			newContent := string(buffer[:n])
+			outputData, _ := json.Marshal(map[string]string{"output": newContent})
+			fmt.Fprintf(w, "data: %s\n\n", outputData)
+			w.(http.Flusher).Flush()
+			*lastPos += int64(n)
+			*totalSent += int64(n)
+		}
+
+		if *totalSent >= maxOutputSize {
+			// Send truncation warning
+			warningData, _ := json.Marshal(map[string]string{
+				"output": "\n[OUTPUT TRUNCATED - Limit of 10MB reached]\n",
+			})
+			fmt.Fprintf(w, "data: %s\n\n", warningData)
+			w.(http.Flusher).Flush()
+		}
+	}
 }
 
 // handleKillInstances handles POST requests to kill processes
@@ -969,6 +1229,9 @@ func handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Invalidate cache since we modified a crontab
+	invalidateCrontabCache()
+
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1047,11 +1310,14 @@ func handlePostJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Invalidate cache since we modified a crontab
+	invalidateCrontabCache()
+
 	// If monitoring is enabled, create a new monitor
 	if job.Monitored {
 		monitor := &lib.Monitor{
 			Name:        job.Name,
-			DefaultName: createDefaultName(line, crontab, effectiveHostname(), []string{}, map[string]bool{}),
+			DefaultName: createDefaultName(line, crontab, "", []string{}, map[string]bool{}),
 			Schedule:    job.Expression,
 			Type:        "job",
 			Platform:    lib.CRON,
@@ -1379,35 +1645,10 @@ func handlePutCrontabs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create a new crontab instance for parsing
-	username := ""
-	if u, err := user.Current(); err == nil {
-		username = u.Username
-	}
-	updatedCrontab := lib.CrontabFactory(username, filename)
+	// Invalidate cache since we modified a crontab
+	invalidateCrontabCache()
 
-	// Parse the crontab to ensure all line types are properly set
-	if err, _ := updatedCrontab.Parse(true); err != nil {
-		http.Error(w, "Failed to parse crontab after save", http.StatusInternalServerError)
-		return
-	}
-
-	// Set response headers
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-
-	// Marshal the response
-	responseData, err := json.Marshal(updatedCrontab)
-	if err != nil {
-		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
-		return
-	}
-
-	// Write the response
-	if _, err := w.Write(responseData); err != nil {
-		http.Error(w, "Failed to write response", http.StatusInternalServerError)
-		return
-	}
 }
 
 // handleCrontab handles requests for individual crontabs
@@ -1562,6 +1803,12 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 		hasChanges = true
 	}
 
+	// Handle ignored status update
+	if job.Ignored != foundLine.Ignored {
+		crontab.Lines[foundLineIndex].Ignored = job.Ignored
+		hasChanges = true
+	}
+
 	// If monitor exists or needs to be created, update it with all changes
 	if monitor != nil {
 		monitors := map[string]*lib.Monitor{
@@ -1589,6 +1836,9 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Invalidate cache since we modified a crontab
+	invalidateCrontabCache()
+
 	// Update the job with the latest values
 	job.Name = foundLine.Name
 	job.Code = foundLine.Code
@@ -1596,4 +1846,14 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(job)
+}
+
+// Helper function to invalidate crontab cache
+func invalidateCrontabCache() {
+	fileCache.mutex.Lock()
+	fileCache.jobs = nil
+	fileCache.timestamp = time.Time{}
+	// Clear file modification times to force re-checking
+	fileCache.fileModTimes = make(map[string]time.Time)
+	fileCache.mutex.Unlock()
 }

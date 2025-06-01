@@ -150,5 +150,20 @@ func configFilePath() string {
 func init() {
 	RootCmd.AddCommand(configureCmd)
 	configureCmd.Flags().StringSliceP("exclude-from-name", "e", []string{}, "Substring to always exclude from generated monitor name e.g. $ cronitor configure -e '> /dev/null' -e '/path/to/app'")
+	configureCmd.Flags().String("dash-username", "", "Username for the dashboard authentication")
+	configureCmd.Flags().String("dash-password", "", "Password for the dashboard authentication")
+	configureCmd.Flags().String("api-key", "", "Your Cronitor API key")
+	configureCmd.Flags().String("ping-api-key", "", "Your Cronitor Ping API key")
+	configureCmd.Flags().String("hostname", "", "Hostname to use for monitor identification")
+	configureCmd.Flags().String("log", "", "Path to debug log file")
+	configureCmd.Flags().String("env", "", "Environment name (e.g. staging, production)")
+
 	viper.BindPFlag(varExcludeText, configureCmd.Flags().Lookup("exclude-from-name"))
+	viper.BindPFlag(varDashUsername, configureCmd.Flags().Lookup("dash-username"))
+	viper.BindPFlag(varDashPassword, configureCmd.Flags().Lookup("dash-password"))
+	viper.BindPFlag(varApiKey, configureCmd.Flags().Lookup("api-key"))
+	viper.BindPFlag(varPingApiKey, configureCmd.Flags().Lookup("ping-api-key"))
+	viper.BindPFlag(varHostname, configureCmd.Flags().Lookup("hostname"))
+	viper.BindPFlag(varLog, configureCmd.Flags().Lookup("log"))
+	viper.BindPFlag(varEnv, configureCmd.Flags().Lookup("env"))
 }

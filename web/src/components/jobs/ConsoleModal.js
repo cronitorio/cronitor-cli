@@ -32,9 +32,10 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange, onComm
 
   // Cleanup event source on unmount
   React.useEffect(() => {
+    const eventSource = eventSourceRef.current;
     return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
+      if (eventSource) {
+        eventSource.close();
       }
     };
   }, []);

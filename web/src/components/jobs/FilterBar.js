@@ -75,7 +75,7 @@ export function FilterBar({ activeFilters, setActiveFilters, inputValue, onInput
         value={inputValue}
         onChange={onInputChange}
         placeholder="Search..."
-        className="px-3 py-3 w-64 ml-2 flex-shrink-0 bg-gray-200 dark:bg-gray-800 dark:text-gray-100 rounded-md text-base placeholder-gray-500 dark:placeholder-gray-500 focus:outline-none"
+        className="px-3 py-3 w-64 ml-2 flex-shrink-0 bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-md text-base placeholder-gray-500 dark:placeholder-gray-500 focus:outline-none"
       />
     </div>
   );

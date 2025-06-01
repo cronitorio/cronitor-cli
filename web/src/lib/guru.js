@@ -1,6 +1,3 @@
-"use strict";
-
-import { formatTimeFromDate } from './dateFormatter';
 import normalize from './normalize';
 import prenormalize from './prenormalize';
 import nextDate from './nextDate';
@@ -17,19 +14,6 @@ function replaceFromHash(string, hash) {
   return Object.keys(hash).reduce((text, key) => saveReplace(text, key, hash[key]), string);
 }
 
-const WEEKDAYS = {
-  sun: "0",
-  mon: "1",
-  tue: "2",
-  wed: "3",
-  thu: "4",
-  fri: "5",
-  sat: "6",
-};
-function substituteWeekdays(part) {
-  return replaceFromHash(part, WEEKDAYS);
-}
-
 const MONTHS = {
   jan: "1",
   feb: "2",
@@ -44,9 +28,6 @@ const MONTHS = {
   nov: "11",
   dec: "12",
 };
-function substituteMonths(part) {
-  return replaceFromHash(part, MONTHS);
-}
 
 const SPECIAL_STRING_SUBSTITUTIONS = {
   "@yearly": ["0", "0", "1", "1", "*"],
@@ -57,6 +38,10 @@ const SPECIAL_STRING_SUBSTITUTIONS = {
   "@midnight": ["0", "0", "*", "*", "*"],
   "@hourly": ["0", "*", "*", "*", "*"],
 };
+
+function substituteMonths(part) {
+  return replaceFromHash(part, MONTHS);
+}
 
 function substituteSpecialStrings(scheduleExpression) {
   const substitution = SPECIAL_STRING_SUBSTITUTIONS[scheduleExpression];

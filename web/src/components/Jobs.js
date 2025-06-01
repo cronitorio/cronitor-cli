@@ -2,9 +2,6 @@ import React from 'react';
 import useSWR from 'swr';
 import { JobCard } from './jobs/JobCard';
 import { Toast } from './Toast';
-import { Dialog } from '@headlessui/react';
-import { XMarkIcon, CheckIcon } from '@heroicons/react/24/outline';
-import { CloseButton } from './CloseButton';
 import { NewCrontabOverlay } from './jobs/NewCrontabOverlay';
 import { useSearchParams } from 'react-router-dom';
 import { FilterBar, FILTER_OPTIONS } from './jobs/FilterBar';
@@ -26,7 +23,7 @@ const fetcher = async url => {
 };
 
 export default function Jobs() {
-  const { data: jobs, error, mutate, isValidating } = useSWR('/api/jobs', fetcher, {
+  const { data: jobs, error, mutate } = useSWR('/api/jobs', fetcher, {
     refreshInterval: 5000,
     revalidateOnFocus: true
   });
@@ -34,7 +31,25 @@ export default function Jobs() {
     refreshInterval: 5000,
     revalidateOnFocus: true
   });
-  const { data: settings } = useSWR('/api/settings', fetcher);
+  const { data: settings, mutate: settingsMutate } = useSWR('/api/settings', fetcher, {
+    revalidateOnFocus: true,
+    refreshInterval: 0
+  });
+  
+  // Add SWR fetching for users and crontabs to share across all JobCard components
+  const { data: users } = useSWR('/api/users', fetcher, {
+    refreshInterval: 0, // No auto-refresh - users rarely change
+    revalidateOnFocus: true, // Revalidate when window gets focus
+    revalidateOnReconnect: false,
+    dedupingInterval: 300000 // 5 minutes deduplication
+  });
+  const { data: crontabs } = useSWR('/api/crontabs', fetcher, {
+    refreshInterval: 5000, // Auto-refresh every 5 seconds
+    revalidateOnFocus: true, // Revalidate when window gets focus
+    revalidateOnReconnect: false,
+    dedupingInterval: 5000 // 5 seconds deduplication to match refresh
+  });
+
   const [searchParams, setSearchParams] = useSearchParams();
   const [showNewJob, setShowNewJob] = React.useState(false);
   const [showNewCrontab, setShowNewCrontab] = React.useState(false);
@@ -70,23 +85,29 @@ export default function Jobs() {
 
   React.useEffect(() => {
     const searchFromURL = searchParams.get('search') || '';
-    if (searchFromURL !== inputValue) {
-      setInputValue(searchFromURL);
-    }
-    // Update activeFilters from URL as well, in case of back/forward navigation
-    let filtersChanged = false;
-    const newFiltersFromURL = { ...activeFilters };
-    FILTER_OPTIONS.forEach(filter => {
-      const paramValue = searchParams.get(filter.id) === 'true';
-      if (newFiltersFromURL[filter.id] !== paramValue) {
-        newFiltersFromURL[filter.id] = paramValue;
-        filtersChanged = true;
+    
+    // Update inputValue if it differs from URL
+    setInputValue(prev => {
+      if (searchFromURL !== prev) {
+        return searchFromURL;
       }
+      return prev;
     });
-    if (filtersChanged) {
-      setActiveFilters(newFiltersFromURL);
-    }
-  }, [searchParams]); // Only listen to searchParams changes here for syncing input values
+    
+    // Update activeFilters from URL as well, in case of back/forward navigation
+    setActiveFilters(prev => {
+      let filtersChanged = false;
+      const newFiltersFromURL = { ...prev };
+      FILTER_OPTIONS.forEach(filter => {
+        const paramValue = searchParams.get(filter.id) === 'true';
+        if (newFiltersFromURL[filter.id] !== paramValue) {
+          newFiltersFromURL[filter.id] = paramValue;
+          filtersChanged = true;
+        }
+      });
+      return filtersChanged ? newFiltersFromURL : prev;
+    });
+  }, [searchParams]);
 
   React.useEffect(() => {
     const handler = setTimeout(() => {
@@ -116,7 +137,7 @@ export default function Jobs() {
     if (newParams.toString() !== searchParams.toString()) {
         setSearchParams(newParams, { replace: true });
     }
-  }, [activeFilters, searchTerm, setSearchParams]); // Removed searchParams from this dependency array
+  }, [activeFilters, searchTerm, setSearchParams, searchParams]);
   
   // Update timezone when settings are loaded
   React.useEffect(() => {
@@ -251,7 +272,10 @@ export default function Jobs() {
     if (!jobsWithMonitors) return [];
     
     return jobsWithMonitors.filter(job => {
-      console.log(job, activeFilters);
+      // Exclude meta cron jobs (system plumbing jobs like run-parts) from Jobs view
+      if (job.is_meta_cron_job === true || job.is_meta_cron_job === "true") {
+        return false;
+      }
 
       // Group 1: Status (Active/Suspended)
       if (activeFilters.active && job.suspended) return false;
@@ -418,6 +442,9 @@ export default function Jobs() {
               isMacOS={settings?.os === 'darwin'}
               readOnly={settings?.safe_mode}
               settings={settings}
+              monitorsLoading={!monitors}
+              users={users || []}
+              crontabs={crontabs || []}
               key={showNewCrontab ? 'new-crontab' : 'no-crontab'}
             />
             {showNewCrontab && (
@@ -451,6 +478,9 @@ export default function Jobs() {
               isMacOS={settings?.os === 'darwin'}
               readOnly={settings?.safe_mode}
               settings={settings}
+              monitorsLoading={!monitors}
+              users={users || []}
+              crontabs={crontabs || []}
             />
           ))
         ) : (
@@ -462,25 +492,57 @@ export default function Jobs() {
             </p>
           </div>
         )}
-        {jobsWithMonitors.length > 0 && filteredJobs.length < jobsWithMonitors.length && (
-          <div className="bg-gray-50 dark:bg-gray-800/50 shadow-sm rounded-lg p-4 text-center">
-            <p className="text-gray-500 dark:text-gray-400">
-              {(() => {
-                const hiddenCount = jobsWithMonitors.length - filteredJobs.length;
-                return `${hiddenCount} Job${hiddenCount === 1 ? '' : 's'} Hidden`;
-              })()} {' '}
-              <button
-                onClick={() => {
-                  setActiveFilters({});
-                  setInputValue('');
-                }}
-                className="ml-2 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium"
-              >
-                Clear Filters
-              </button>
-            </p>
-          </div>
-        )}
+        {(() => {
+          // Only count non-meta jobs as potentially visible
+          const nonMetaJobs = jobsWithMonitors.filter(job => !job.is_meta_cron_job);
+          
+          // Apply only user filters to non-meta jobs (not the automatic meta filter)
+          const nonMetaJobsAfterUserFilters = nonMetaJobs.filter(job => {
+            // Group 1: Status (Active/Suspended)
+            if (activeFilters.active && job.suspended) return false;
+            if (activeFilters.suspended && !job.suspended) return false;
+
+            // Group 2: Running
+            if (activeFilters.running && !(job.instances && job.instances.length > 0)) return false;
+
+            // Group 3: Monitoring (Monitored/Unmonitored)
+            if (activeFilters.monitored && !job.monitored) return false;
+            if (activeFilters.unmonitored && job.monitored) return false;
+            
+            // Check if job matches (debounced) search term
+            if (searchTerm) {
+              const term = searchTerm.toLowerCase();
+              const nameMatch = job.name?.toLowerCase().includes(term);
+              const commandMatch = job.command?.toLowerCase().includes(term);
+              const expressionMatch = job.expression?.toLowerCase().includes(term);
+              if (!(nameMatch || commandMatch || expressionMatch)) {
+                return false;
+              }
+            }
+            
+            return true;
+          });
+          
+          const hiddenCount = nonMetaJobs.length - nonMetaJobsAfterUserFilters.length;
+          
+          // Only show the "hidden jobs" section if there are actually jobs hidden by user filters
+          return hiddenCount > 0 ? (
+            <div className="bg-gray-50 dark:bg-gray-800/50 shadow-sm rounded-lg p-4 text-center">
+              <p className="text-gray-500 dark:text-gray-400">
+                {`${hiddenCount} Job${hiddenCount === 1 ? '' : 's'} Hidden`} {' '}
+                <button
+                  onClick={() => {
+                    setActiveFilters({});
+                    setInputValue('');
+                  }}
+                  className="ml-2 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium"
+                >
+                  Clear Filters
+                </button>
+              </p>
+            </div>
+          ) : null;
+        })()}
       </div>
       {isToastVisible && <Toast message={toastMessage} onClose={() => setIsToastVisible(false)} type={toastType} />}
     </div>

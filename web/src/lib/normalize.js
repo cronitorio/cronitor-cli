@@ -65,7 +65,7 @@ function tooHighOrLow(sortedNumbers, min, max) {
   return sortedNumbers.length && (sortedNumbers[0] < min || sortedNumbers[sortedNumbers.length - 1] > max);
 }
 
-const INVALID_PART_REGEX = /[^\d\-\/\,]/i;
+const INVALID_PART_REGEX = /[^\d\-/,]/i;
 
 function normalizeSingleSteps(parts) {
   // '*/1 */6,*/1,11-13/11 * */3 */1' => '* */6,*,11-13/11 * */3 *'

@@ -2,8 +2,8 @@ import React from 'react';
 import { useJobMonitoring } from '../../hooks/useJobMonitoring';
 import { BellSlashIcon } from '@heroicons/react/24/outline';
 
-export function MonitoringSection({ job, onUpdate, onShowLearnMore, settings }) {
-  const { isLoading, handleToggle, getStatusInfo } = useJobMonitoring(job, onUpdate);
+export function MonitoringSection({ job, onUpdate, onShowLearnMore, settings, monitorsLoading = false }) {
+  const { isLoading, handleToggle, getStatusInfo } = useJobMonitoring(job, onUpdate, monitorsLoading);
   const statusInfo = getStatusInfo();
 
   if (!statusInfo) return null;

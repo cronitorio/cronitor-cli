@@ -33,6 +33,72 @@ type Crontab struct {
 	UsesSixFieldExpressions bool                  `json:"-"`
 }
 
+// isExampleCronLine checks if a line contains obvious placeholder/example text
+func isExampleCronLine(line string) bool {
+	line = strings.ToLower(line)
+
+	// Common placeholder patterns that indicate this is an example, not a real job
+	examplePatterns := []string{
+		"user-name",
+		"username",
+		"command to be executed",
+		"your-command",
+		"your command",
+		"script to run",
+		"/path/to/script",
+		"/path/to/command",
+		"example command",
+		"sample command",
+		"run this command",
+		"enter command here",
+		"<command>",
+		"[command]",
+		"{command}",
+		"somecommand",
+		"testcommand",
+	}
+
+	for _, pattern := range examplePatterns {
+		if strings.Contains(line, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isValidCronExpression checks if a line looks like a valid cron expression
+func isValidCronExpression(line string) bool {
+	fields := strings.Fields(line)
+	if len(fields) < 6 {
+		return false
+	}
+
+	// Check if this looks like an example/placeholder line
+	if isExampleCronLine(line) {
+		return false
+	}
+
+	// Check for special @keywords
+	if strings.HasPrefix(fields[0], "@") {
+		validKeywords := map[string]bool{
+			"@reboot": true, "@yearly": true, "@annually": true, "@monthly": true,
+			"@weekly": true, "@daily": true, "@midnight": true, "@hourly": true,
+		}
+		return validKeywords[fields[0]]
+	}
+
+	// Check if the first 5 fields look like cron time fields
+	cronFieldRegex := regexp.MustCompile(`^([0-9*\/\-,]+|[A-Za-z]{3}(-[A-Za-z]{3})?)$`)
+	for i := 0; i < 5 && i < len(fields); i++ {
+		if !cronFieldRegex.MatchString(fields[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 	lines, errCode, err := c.load()
 	if err != nil {
@@ -45,6 +111,7 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 
 	var autoDiscoverLine *Line
 	var name string
+	var ignored bool
 
 	for lineNumber, fullLine := range lines {
 		var cronExpression string
@@ -60,11 +127,43 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			continue
 		}
 
-		// If the line is a comment, see if it is a disabled job
+		// Check for special cronitor: ignore comment
+		if ignoreMatch := regexp.MustCompile(`^#\s*cronitor:\s*ignore\s*$`).FindStringSubmatch(fullLine); ignoreMatch != nil {
+			ignored = true
+			continue
+		}
+
+		// If the line is a comment, check if it's a disabled job or just a regular comment
 		if strings.HasPrefix(fullLine, "#") {
-			// Remove the # and trim whitespace before splitting
-			fullLine = strings.TrimSpace(strings.TrimPrefix(fullLine, "#"))
-			isComment = true
+			commentContent := strings.TrimSpace(strings.TrimPrefix(fullLine, "#"))
+
+			// Only treat as a potential disabled job if it looks like a valid cron expression
+			if isValidCronExpression(commentContent) {
+				fullLine = commentContent
+				isComment = true
+			} else {
+				// This is just a regular comment, create a comment line and continue
+				line := Line{
+					IsComment:  true,
+					IsJob:      false,
+					Name:       name,
+					FullLine:   strings.TrimSpace(strings.TrimPrefix(fullLine, "#")),
+					LineNumber: lineNumber,
+					Ignored:    ignored,
+					Crontab:    c.lightweightCopy(),
+				}
+
+				// Reset the name and ignored for the next line
+				if name != "" {
+					name = ""
+				}
+				if ignored {
+					ignored = false
+				}
+
+				c.Lines = append(c.Lines, &line)
+				continue
+			}
 		}
 
 		splitLine := strings.Fields(fullLine)
@@ -111,7 +210,8 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			FullLine:       fullLine,
 			LineNumber:     lineNumber,
 			RunAs:          runAs,
-			Crontab:        *c,
+			Ignored:        ignored,
+			Crontab:        c.lightweightCopy(),
 		}
 
 		// If this job is already being wrapped by the Cronitor client, read current code.
@@ -136,9 +236,10 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			}
 		}
 
-		// Reset the name for the next line after we've found its command line
+		// Reset the name and ignored for the next line after we've found its command line
 		if line.CronExpression != "" {
 			name = ""
+			ignored = false
 		}
 
 		c.Lines = append(c.Lines, &line)
@@ -308,6 +409,7 @@ type Line struct {
 	CommandToRun   string
 	Code           string
 	RunAs          string
+	Ignored        bool
 	Mon            Monitor
 	Crontab        Crontab
 }
@@ -327,7 +429,16 @@ func (l Line) HasLegacyIntegration() bool {
 }
 
 func (l Line) IsMetaCronJob() bool {
-	return strings.Contains(l.CommandToRun, "cron.hourly") || strings.Contains(l.CommandToRun, "cron.daily") || strings.Contains(l.CommandToRun, "cron.weekly") || strings.Contains(l.CommandToRun, "cron.monthly")
+	// Check for run-parts commands (these are system maintenance jobs)
+	if strings.Contains(l.CommandToRun, "run-parts") {
+		return true
+	}
+
+	// Check for standard cron.* directories
+	return strings.Contains(l.CommandToRun, "cron.hourly") ||
+		strings.Contains(l.CommandToRun, "cron.daily") ||
+		strings.Contains(l.CommandToRun, "cron.weekly") ||
+		strings.Contains(l.CommandToRun, "cron.monthly")
 }
 
 func (l Line) CommandIsComplex() bool {
@@ -337,6 +448,11 @@ func (l Line) CommandIsComplex() bool {
 func (l Line) Write() string {
 	var outputLines []string
 	var lineParts []string
+
+	// Add the cronitor: ignore comment if present
+	if l.Ignored {
+		outputLines = append(outputLines, "# cronitor: ignore")
+	}
 
 	// Add the name comment if present
 	if len(l.Name) > 0 {
@@ -436,6 +552,7 @@ func (l Line) MarshalJSON() ([]byte, error) {
 		CommandToRun    string `json:"command_to_run"`
 		Code            string `json:"code"`
 		RunAs           string `json:"run_as"`
+		Ignored         bool   `json:"ignored"`
 		EnvVarKey       string `json:"env_var_key,omitempty"`
 		EnvVarValue     string `json:"env_var_value,omitempty"`
 		Key             string `json:"key,omitempty"`
@@ -453,6 +570,7 @@ func (l Line) MarshalJSON() ([]byte, error) {
 		CommandToRun:   l.CommandToRun,
 		Code:           l.Code,
 		RunAs:          l.RunAs,
+		Ignored:        l.Ignored,
 		EnvVarKey:      l.GetEnvVarKey(),
 		EnvVarValue:    l.GetEnvVarValue(),
 	}
@@ -551,6 +669,8 @@ func (l Line) MarshalJSON() ([]byte, error) {
 			Suspended          bool          `json:"suspended"`
 			Instances          []interface{} `json:"instances"`
 			IsDraft            bool          `json:"is_draft"`
+			IsMetaCronJob      bool          `json:"is_meta_cron_job"`
+			Ignored            bool          `json:"ignored"`
 		}
 
 		timezone := "UTC"
@@ -574,6 +694,8 @@ func (l Line) MarshalJSON() ([]byte, error) {
 			Suspended:          l.IsComment,
 			Instances:          []interface{}{}, // Empty array for now
 			IsDraft:            false,
+			IsMetaCronJob:      l.IsMetaCronJob(),
+			Ignored:            l.Ignored,
 		}
 
 		// Include the job in the JSON output
@@ -588,6 +710,7 @@ func (l Line) MarshalJSON() ([]byte, error) {
 			CommandToRun    string `json:"command_to_run"`
 			Code            string `json:"code"`
 			RunAs           string `json:"run_as"`
+			Ignored         bool   `json:"ignored"`
 			EnvVarKey       string `json:"env_var_key,omitempty"`
 			EnvVarValue     string `json:"env_var_value,omitempty"`
 			Key             string `json:"key,omitempty"`
@@ -605,6 +728,7 @@ func (l Line) MarshalJSON() ([]byte, error) {
 			CommandToRun:    base.CommandToRun,
 			Code:            base.Code,
 			RunAs:           base.RunAs,
+			Ignored:         base.Ignored,
 			EnvVarKey:       base.EnvVarKey,
 			EnvVarValue:     base.EnvVarValue,
 			Key:             base.Key,
@@ -761,4 +885,17 @@ func GetCrontab(filename string) (*Crontab, error) {
 		return nil, fmt.Errorf("no crontab found at %s", filename)
 	}
 	return crontabs[0], nil
+}
+
+// lightweightCrontab creates a copy of Crontab without the Lines field to prevent circular references
+func (c *Crontab) lightweightCopy() Crontab {
+	return Crontab{
+		User:                    c.User,
+		IsUserCrontab:           c.IsUserCrontab,
+		IsSaved:                 c.IsSaved,
+		Filename:                c.Filename,
+		Lines:                   nil, // Explicitly nil to break circular reference
+		TimezoneLocationName:    c.TimezoneLocationName,
+		UsesSixFieldExpressions: c.UsesSixFieldExpressions,
+	}
 }

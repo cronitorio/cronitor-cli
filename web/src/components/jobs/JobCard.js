@@ -7,14 +7,13 @@ import { MonitoringSection } from './MonitoringSection';
 import { LocationSection } from './LocationSection';
 import { InstancesTable } from './InstancesTable';
 import { SuspendOverlay } from './SuspendOverlay';
+import { HideOverlay } from './HideOverlay';
 import { DeleteConfirmation } from './DeleteConfirmation';
 import { ConsoleModal } from './ConsoleModal';
 import { LearnMoreModal } from './LearnMoreModal';
 import { useJobOperations } from '../../hooks/useJobOperations';
-import { Switch } from '@headlessui/react';
-import { ClockIcon, UserIcon, DocumentTextIcon } from '@heroicons/react/24/outline';
 
-export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSave, onDiscard, onFormChange, onLocationChange, showToast, isMacOS, onJobChange, crontabMutate, selectedCrontab, setSelectedCrontab, readOnly = false, settings }) {
+export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSave, onDiscard, onFormChange, onLocationChange, showToast, isMacOS, onJobChange, crontabMutate, selectedCrontab, setSelectedCrontab, readOnly = false, settings, monitorsLoading = false, users = [], crontabs = [] }) {
   const [isEditing, setIsEditing] = React.useState(isNew);
   const [isEditingCommand, setIsEditingCommand] = React.useState(isNew);
   const [isEditingSchedule, setIsEditingSchedule] = React.useState(isNew);
@@ -23,16 +22,14 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
   const [editedSchedule, setEditedSchedule] = React.useState(initialJob.expression || '');
   const [editedCronFile, setEditedCronFile] = React.useState(initialJob.crontab_filename || '');
   const [editedRunAsUser, setEditedRunAsUser] = React.useState(initialJob.run_as_user || '');
-  const [cronFiles, setCronFiles] = React.useState([]);
-  const [users, setUsers] = React.useState([]);
   const [selectedLocation, setSelectedLocation] = React.useState('');
   const [selectedUser, setSelectedUser] = React.useState('');
   const [isUserCrontab, setIsUserCrontab] = React.useState(false);
   const [showInstances, setShowInstances] = React.useState(false);
-  const [showNextTimes, setShowNextTimes] = React.useState(false);
   const [killingPids, setKillingPids] = React.useState(new Set());
   const [isKillingAll, setIsKillingAll] = React.useState(false);
   const [showSuspendedOverlay, setShowSuspendedOverlay] = React.useState(false);
+  const [showHideOverlay, setShowHideOverlay] = React.useState(false);
   const [savingStatus, setSavingStatus] = React.useState(null);
   const [showConsole, setShowConsole] = React.useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = React.useState(false);
@@ -43,12 +40,10 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
   const [suspendedReason, setSuspendedReason] = React.useState('');
   const [scheduledTime, setScheduledTime] = React.useState('');
   const [scheduledReason, setScheduledReason] = React.useState('');
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
-  const [wasMonitoredBeforeSuspend, setWasMonitoredBeforeSuspend] = React.useState(false);
   const [pendingChanges, setPendingChanges] = React.useState(null);
   const [pendingMonitoringJob, setPendingMonitoringJob] = React.useState(null);
 
-  const { jobs, createJob, updateJob, deleteJob, toggleJobMonitoring, toggleJobSuspension, killJobProcess, mutate: jobsMutate } = useJobOperations();
+  const { deleteJob, toggleJobMonitoring, killJobProcess, mutate: jobsMutate } = useJobOperations();
 
   // Get the current job data from allJobs and update local state
   React.useEffect(() => {
@@ -73,49 +68,26 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     }
   }, [allJobs, initialJob, isEditing, isEditingCommand, isEditingSchedule, pendingChanges]);
 
-  React.useEffect(() => {
-    // Fetch cron files and users when component mounts
-    const fetchData = async () => {
-      try {
-        const [cronFilesRes, usersRes] = await Promise.all([
-          fetch('/api/crontabs'),
-          fetch('/api/users')
-        ]);
-        
-        if (cronFilesRes.ok) {
-          const data = await cronFilesRes.json();
-          setCronFiles(data);
-        }
-        
-        if (usersRes.ok) {
-          const data = await usersRes.json();
-          setUsers(data);
-        }
-      } catch (error) {
-        console.error('Error fetching data:', error);
-      }
-    };
-
-    fetchData();
-  }, []);
-
   // Update parent form state when local state changes
   React.useEffect(() => {
     if (isNew) {
+      // Find the selected crontab to get display name
+      const selectedCrontab = crontabs.find(c => c.filename === editedCronFile);
+      
       onFormChange({
         ...initialJob,
         name: editedName,
         expression: editedSchedule,
         command: editedCommand,
-        crontab_filename: editedCronFile?.filename || initialJob.crontab_filename,
-        crontab_display_name: editedCronFile?.display_name || initialJob.crontab_display_name,
+        crontab_filename: editedCronFile || initialJob.crontab_filename,
+        crontab_display_name: selectedCrontab?.display_name || initialJob.crontab_display_name,
         run_as_user: editedRunAsUser,
         is_draft: false,
         suspended: initialJob.suspended,
         monitored: initialJob.monitored
       });
     }
-  }, [isNew, onFormChange, editedName, editedSchedule, editedCommand, editedCronFile, editedRunAsUser, initialJob.monitored, initialJob]);
+  }, [isNew, onFormChange, editedName, editedSchedule, editedCommand, editedCronFile, editedRunAsUser, initialJob.monitored, initialJob, crontabs]);
 
   const handleFormChange = (field, value) => {
     const newData = { ...initialJob, [field]: value };
@@ -212,65 +184,6 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     }
   };
 
-  const handleDiscard = () => {
-    if (isNew) {
-      onDiscard();
-    } else {
-      setEditedName(initialJob.name || initialJob.default_name);
-      setEditedCommand(initialJob.command);
-      setEditedSchedule(initialJob.expression || '');
-      setIsEditing(false);
-      setIsEditingCommand(false);
-      setIsEditingSchedule(false);
-    }
-  };
-
-  const handleSuspendedToggle = async () => {
-    if (!initialJob.is_suspended) {
-      setShowSuspendedDialog(true);
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/jobs/${initialJob.id}/unsuspend`, {
-        method: 'POST',
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to unsuspend job');
-      }
-
-      mutate();
-      showToast('Job unsuspended successfully', 'success');
-    } catch (error) {
-      console.error('Error unsuspending job:', error);
-      showToast('Failed to unsuspend job: ' + error.message);
-    }
-  };
-
-  const handleScheduledToggle = async () => {
-    if (!initialJob.is_scheduled) {
-      setShowScheduledDialog(true);
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/jobs/${initialJob.id}/unschedule`, {
-        method: 'POST',
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to unschedule job');
-      }
-
-      mutate();
-      showToast('Job unscheduled successfully', 'success');
-    } catch (error) {
-      console.error('Error unscheduling job:', error);
-      showToast('Failed to unschedule job: ' + error.message);
-    }
-  };
-
   const handleSuspendedSubmit = async () => {
     try {
       const response = await fetch(`/api/jobs/${initialJob.id}/suspend`, {
@@ -285,6 +198,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         throw new Error('Failed to suspend job');
       }
 
+      setShowSuspendedDialog(false);
       mutate();
       if (onJobChange) onJobChange();
       showToast('Job suspended successfully', 'success');
@@ -329,7 +243,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
       return;
     }
     
-    const selectedCronFile = cronFiles.find(file => file.filename === location);
+    const selectedCronFile = crontabs.find(file => file.filename === location);
     if (selectedCronFile) {
       setIsUserCrontab(selectedCronFile.isUserCrontab);
       setSelectedUser('');
@@ -398,27 +312,85 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     setShowSuspendedOverlay(!showSuspendedOverlay);
   };
 
+  const handleHideJob = async () => {
+    setShowHideOverlay(false); // Close overlay first
+    
+    // Get the current job state from allJobs to ensure we have latest data
+    const currentJob = allJobs.find(j => j.key === initialJob.key) || initialJob;
+    
+    const updatedJob = { 
+      ...currentJob,
+      ignored: true
+    };
+
+    try {
+      // For existing jobs, use direct API call
+      const requestBody = {
+        key: currentJob.key,
+        code: currentJob.code,
+        command: currentJob.command,
+        expression: currentJob.expression,
+        name: currentJob.name,
+        crontab_filename: currentJob.crontab_filename,
+        run_as_user: currentJob.run_as_user,
+        monitored: currentJob.monitored,
+        suspended: currentJob.suspended,
+        ignored: true
+      };
+      
+      const response = await fetch('/api/jobs', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to hide job: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
+      }
+      
+      // Refresh data from server
+      mutate();
+      if (onJobChange) {
+        setTimeout(onJobChange, 100);
+      }
+      
+      // Also refresh crontab data since hiding modifies the crontab
+      if (crontabMutate) {
+        setTimeout(async () => {
+          await crontabMutate();
+          if (selectedCrontab && setSelectedCrontab) {
+            const updatedCrontabs = await crontabMutate();
+            if (updatedCrontabs) {
+              const updatedCrontab = updatedCrontabs.find(c => c.filename === selectedCrontab.filename);
+              if (updatedCrontab) {
+                setSelectedCrontab(updatedCrontab);
+              }
+            }
+          }
+        }, 150);
+      }
+      
+      showToast('Job hidden successfully', 'success');
+    } catch (error) {
+      console.error('Error hiding job:', error);
+      showToast('Failed to hide job: ' + error.message);
+    }
+  };
+
   const handleToggleSuspend = async (explicitSuspendedState, explicitPauseHours) => {
     setShowSuspendedOverlay(false); // Close overlay first
     
     // Get the current job state from allJobs to ensure we have latest data
     const currentJob = allJobs.find(j => j.key === initialJob.key) || initialJob;
     
-    // Add debugging
-    console.log('handleToggleSuspend called');
-    console.log('initialJob.key:', initialJob.key);
-    console.log('allJobs:', allJobs);
-    console.log('Found currentJob:', currentJob);
-    console.log('isNew:', isNew);
-    
     // Use the explicit state if provided, otherwise toggle the current state
     // Convert to explicit boolean with Boolean()
     const newSuspendedState = explicitSuspendedState !== undefined 
       ? Boolean(explicitSuspendedState) 
       : !currentJob.suspended;
-    
-    console.log('Current suspended state:', currentJob.suspended);
-    console.log('New suspended state:', newSuspendedState);
     
     const updatedJob = { 
       ...currentJob,
@@ -448,25 +420,15 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     try {
       // For new jobs, use onSave from props
       if (isNew && typeof onSave === 'function') {
-        console.log('Calling onSave for new job');
         await onSave(updatedJob, true); // Pass true to indicate it's a suspend/resume toggle
       } else {
-        console.log('Making PUT request for existing job');
         // For existing jobs, use direct API call instead of toggleJobSuspension
         // This bypasses any potential issues with the toggleJobSuspension function
         const job = allJobs.find(j => j.key === currentJob.key);
         if (!job) {
-          console.error('Job not found in allJobs!');
           throw new Error('Job not found');
         }
         
-        console.log('Sending API request with suspended =', newSuspendedState);
-        console.log('and monitored =', updatedJob.monitored);
-        if (updatedJob.pause_hours !== undefined) {
-          console.log('and pause_hours =', updatedJob.pause_hours);
-        }
-        
-        // CREATE A COMPLETELY NEW REQUEST BODY WITH EXPLICIT SUSPENDED STATE
         const requestBody = {
           key: job.key,
           code: job.code, // Include the code field for monitoring API
@@ -484,7 +446,6 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         
         // For ultra-explicit safety, use a string representation in the body
         const requestBodyStr = JSON.stringify(requestBody);
-        console.log('REQUEST BODY STRING:', requestBodyStr);
         
         const response = await fetch('/api/jobs', {
           method: 'PUT',
@@ -497,14 +458,6 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         if (!response.ok) {
           const errorText = await response.text();
           throw new Error(`Failed to update job suspension status: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
-        }
-        
-        // Try to read the response body for debugging
-        try {
-          const responseData = await response.clone().json();
-          console.log('Response data:', responseData);
-        } catch(e) {
-          console.log('Could not parse response as JSON');
         }
       }
       
@@ -632,11 +585,9 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                     isEditing={isEditingSchedule}
                     editedSchedule={editedSchedule}
                     onScheduleChange={(value) => {
-                      console.log('Schedule changed to:', value); // Debug log
                       setEditedSchedule(value);
                     }}
                     onEditStart={() => {
-                      console.log('Starting edit with schedule:', getDisplayValue('expression')); // Debug log
                       setIsEditingSchedule(true);
                       setEditedSchedule(getDisplayValue('expression') || '');
                     }}
@@ -706,11 +657,9 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                     isEditing={isEditingSchedule}
                     editedSchedule={editedSchedule}
                     onScheduleChange={(value) => {
-                      console.log('Schedule changed to:', value); // Debug log
                       setEditedSchedule(value);
                     }}
                     onEditStart={() => {
-                      console.log('Starting edit with schedule:', getDisplayValue('expression')); // Debug log
                       setIsEditingSchedule(true);
                       setEditedSchedule(getDisplayValue('expression') || '');
                     }}
@@ -746,7 +695,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                 <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[25%] min-w-[200px]">Monitoring</th>
                 <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: 'calc(75% * 0.5)' }}>Location</th>
                 <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '37.5%' }}>
-                  {isNew && selectedLocation && !isUserCrontab && <>User</>}
+                  {isNew && selectedLocation && !isUserCrontab ? 'User' : 'Actions'}
                 </th>
               </tr>
             </thead>
@@ -776,13 +725,14 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                       setShowLearnMore(true);
                     }}
                     settings={settings}
+                    monitorsLoading={monitorsLoading}
                   />
                 </td>
                 <td className="py-2 text-sm text-gray-900 dark:text-gray-100" style={{ width: '37.5%' }}>
                   <LocationSection
                     job={initialJob}
                     isNew={isNew}
-                    cronFiles={cronFiles}
+                    crontabs={crontabs}
                     users={users}
                     selectedLocation={selectedLocation}
                     selectedUser={selectedUser}
@@ -792,8 +742,8 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                     isMacOS={isMacOS}
                   />
                 </td>
-                {isNew && selectedLocation && !isUserCrontab && (
-                  <td className="py-2 text-sm text-gray-900 dark:text-gray-100" style={{ width: '37.5%' }}>
+                <td className="py-2 text-sm text-gray-900 dark:text-gray-100" style={{ width: '37.5%' }}>
+                  {isNew && selectedLocation && !isUserCrontab ? (
                     <select
                       value={selectedUser}
                       onChange={handleUserChange}
@@ -804,8 +754,19 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                         <option key={user} value={user}>{user}</option>
                       ))}
                     </select>
-                  </td>
-                )}
+                  ) : (
+                    !readOnly && (
+                      <div className="flex justify-end">
+                        <button
+                          onClick={() => setShowHideOverlay(true)}
+                          className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-500 dark:hover:text-gray-300"
+                        >
+                          Hide
+                        </button>
+                      </div>
+                    )
+                  )}
+                </td>
               </tr>
             </tbody>
           </table>
@@ -833,6 +794,14 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
               setShowDeleteConfirmation(true);
             }}
             mutate={jobsMutate}
+          />
+        )}
+
+        {showHideOverlay && (
+          <HideOverlay
+            job={initialJob}
+            onClose={() => setShowHideOverlay(false)}
+            onHideJob={handleHideJob}
           />
         )}
 
