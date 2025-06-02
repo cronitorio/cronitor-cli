@@ -29,6 +29,15 @@ type GithubRelease struct {
 	} `json:"assets"`
 }
 
+type UpdateStatus struct {
+	CurrentVersion string `json:"current_version"`
+	LatestVersion  string `json:"latest_version"`
+	HasUpdate      bool   `json:"has_update"`
+	DownloadURL    string `json:"download_url,omitempty"`
+	AssetName      string `json:"asset_name,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
 const (
 	checksumExtension = ".sha256"
 )
@@ -44,90 +53,135 @@ func init() {
 }
 
 func runUpdate(cmd *cobra.Command, args []string) {
-	currentVersion := Version
-
-	// Get latest release info
-	release, err := getLatestRelease()
+	status, err := checkForUpdate()
 	if err != nil {
 		fatal(fmt.Sprintf("Error checking for updates: %v", err), 1)
 	}
 
-	latestVersion := strings.TrimPrefix(release.TagName, "v")
-
-	if !isNewer(latestVersion, currentVersion) {
-		fmt.Printf("You are already on the latest version (%s)\n", currentVersion)
+	if !status.HasUpdate {
+		fmt.Printf("You are already on the latest version (%s)\n", status.CurrentVersion)
 		return
 	}
 
-	fmt.Printf("Updating from version %s to %s...\n", currentVersion, latestVersion)
+	fmt.Printf("Updating from version %s to %s...\n", status.CurrentVersion, status.LatestVersion)
 
-	// Find the appropriate asset for current platform
-	assetURL := ""
-	expectedName := fmt.Sprintf("%s_%s", runtime.GOOS, runtime.GOARCH)
-	var assetName string
-	for _, asset := range release.Assets {
-		if strings.HasPrefix(asset.Name, expectedName) && !strings.HasSuffix(asset.Name, checksumExtension) {
-			assetURL = asset.BrowserDownloadURL
-			assetName = asset.Name
-			break
+	if err := performUpdate(status); err != nil {
+		fatal(fmt.Sprintf("Error during update: %v", err), 1)
+	}
+
+	fmt.Printf("Update complete! You are now on version %s\n", status.LatestVersion)
+}
+
+// checkForUpdate checks if a new version is available
+func checkForUpdate() (*UpdateStatus, error) {
+	currentVersion := Version
+	status := &UpdateStatus{
+		CurrentVersion: currentVersion,
+	}
+
+	// Get latest release info
+	release, err := getLatestRelease()
+	if err != nil {
+		status.Error = err.Error()
+		return status, err
+	}
+
+	latestVersion := strings.TrimPrefix(release.TagName, "v")
+	status.LatestVersion = latestVersion
+	status.HasUpdate = isNewer(latestVersion, currentVersion)
+
+	if status.HasUpdate {
+		// Find the appropriate asset for current platform
+		expectedName := fmt.Sprintf("%s_%s", runtime.GOOS, runtime.GOARCH)
+		for _, asset := range release.Assets {
+			if strings.HasPrefix(asset.Name, expectedName) && !strings.HasSuffix(asset.Name, checksumExtension) {
+				status.DownloadURL = asset.BrowserDownloadURL
+				status.AssetName = asset.Name
+				break
+			}
+		}
+
+		if status.DownloadURL == "" {
+			err := fmt.Errorf("no release found for %s/%s", runtime.GOOS, runtime.GOARCH)
+			status.Error = err.Error()
+			return status, err
 		}
 	}
 
-	if assetURL == "" {
-		fatal(fmt.Sprintf("No release found for %s/%s", runtime.GOOS, runtime.GOARCH), 1)
+	return status, nil
+}
+
+// performUpdate downloads and installs the update
+func performUpdate(status *UpdateStatus) error {
+	if !status.HasUpdate {
+		return fmt.Errorf("no update available")
+	}
+
+	// Get latest release info again to get checksum
+	release, err := getLatestRelease()
+	if err != nil {
+		return err
 	}
 
 	// Get checksum
-	checksum, err := downloadChecksum(release, assetName+checksumExtension)
+	checksum, err := downloadChecksum(release, status.AssetName+checksumExtension)
 	if err != nil {
-		fatal(fmt.Sprintf("Error downloading checksum: %v", err), 1)
+		return fmt.Errorf("error downloading checksum: %v", err)
 	}
 
 	// Get current executable path
 	executable, err := os.Executable()
 	if err != nil {
-		fatal(fmt.Sprintf("Error getting executable path: %v", err), 1)
+		return fmt.Errorf("error getting executable path: %v", err)
 	}
 
 	// Download and verify binary
 	tmpFile := executable + ".new"
-	if err := downloadAndVerifyFile(assetURL, tmpFile, strings.TrimSpace(string(checksum))); err != nil {
+	if err := downloadAndVerifyFile(status.DownloadURL, tmpFile, strings.TrimSpace(string(checksum))); err != nil {
 		os.Remove(tmpFile)
-		fatal(fmt.Sprintf("Error downloading update: %v", err), 1)
+		return fmt.Errorf("error downloading update: %v", err)
 	}
 
 	// Make new file executable
 	if err := os.Chmod(tmpFile, 0755); err != nil {
 		os.Remove(tmpFile) // Clean up
-		fatal(fmt.Sprintf("Error setting permissions: %v", err), 1)
+		return fmt.Errorf("error setting permissions: %v", err)
 	}
 
 	// Test that the new binary is executable by running it with --version
-	execCmd := exec.Command(tmpFile)
+	execCmd := exec.Command(tmpFile, "--help")
 	if err := execCmd.Run(); err != nil {
 		os.Remove(tmpFile) // Clean up
-		fatal(fmt.Sprintf("Error verifying new binary: %v", err), 1)
+		return fmt.Errorf("error verifying new binary: %v", err)
 	}
 
+	// Replace the current executable
+	if err := replaceExecutable(executable, tmpFile); err != nil {
+		os.Remove(tmpFile)
+		return fmt.Errorf("error installing new version: %v", err)
+	}
+
+	return nil
+}
+
+// replaceExecutable safely replaces the current executable with the new one
+func replaceExecutable(currentPath, newPath string) error {
 	// Rename current executable to .old (backup)
-	oldFile := executable + ".old"
-	if err := os.Rename(executable, oldFile); err != nil {
-		os.Remove(tmpFile) // Clean up
-		fatal(fmt.Sprintf("Error backing up current version: %v", err), 1)
+	oldFile := currentPath + ".old"
+	if err := os.Rename(currentPath, oldFile); err != nil {
+		return fmt.Errorf("error backing up current version: %v", err)
 	}
 
 	// Move new executable into place
-	if err := os.Rename(tmpFile, executable); err != nil {
+	if err := os.Rename(newPath, currentPath); err != nil {
 		// Try to restore old version
-		os.Rename(oldFile, executable)
-		os.Remove(tmpFile)
-		fatal(fmt.Sprintf("Error installing new version: %v", err), 1)
+		os.Rename(oldFile, currentPath)
+		return fmt.Errorf("error installing new version: %v", err)
 	}
 
 	// Clean up old version
 	os.Remove(oldFile)
-
-	fmt.Printf("Update complete! You are now on version %s\n", latestVersion)
+	return nil
 }
 
 func getLatestRelease() (*GithubRelease, error) {

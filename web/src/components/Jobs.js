@@ -31,7 +31,7 @@ export default function Jobs() {
     refreshInterval: 5000,
     revalidateOnFocus: true
   });
-  const { data: settings, mutate: settingsMutate } = useSWR('/api/settings', fetcher, {
+  const { data: settings } = useSWR('/api/settings', fetcher, {
     revalidateOnFocus: true,
     refreshInterval: 0
   });

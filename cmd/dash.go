@@ -293,6 +293,10 @@ The dashboard provides a web interface for managing your Cronitor monitors and c
 		// Add signup endpoint
 		http.Handle("/api/signup", authMiddleware(http.HandlerFunc(handleSignup)))
 
+		// Add update endpoints
+		http.Handle("/api/update/check", authMiddleware(http.HandlerFunc(handleUpdateCheck)))
+		http.Handle("/api/update/perform", authMiddleware(http.HandlerFunc(handleUpdatePerform)))
+
 		// Create HTTP server with proper configuration
 		server := &http.Server{
 			Addr:         fmt.Sprintf(":%d", port),
@@ -394,6 +398,7 @@ type SettingsResponse struct {
 	Timezones      []string        `json:"timezones"`
 	OS             string          `json:"os"`
 	SafeMode       bool            `json:"safe_mode"`
+	UpdateStatus   *UpdateStatus   `json:"update_status,omitempty"`
 }
 
 // handleSettings handles GET and POST requests for settings
@@ -479,6 +484,25 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		// Add system timezone at the top
 		timezones = append([]string{systemTZ}, timezones...)
 
+		// Check for updates with a reasonable timeout to avoid slowing down the response
+		var updateStatus *UpdateStatus
+		updateDone := make(chan *UpdateStatus, 1)
+		go func() {
+			if status, err := checkForUpdate(); err == nil {
+				updateDone <- status
+			} else {
+				updateDone <- nil
+			}
+		}()
+
+		// Wait for update check with timeout
+		select {
+		case status := <-updateDone:
+			updateStatus = status
+		case <-time.After(5 * time.Second):
+			// Timeout after 5 seconds - proceed without update status
+		}
+
 		// Create response with env var information
 		response := SettingsResponse{
 			ConfigFile:     configData,
@@ -497,8 +521,9 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 				"CRONITOR_DASH_USER":    os.Getenv(varDashUsername) != "",
 				"CRONITOR_DASH_PASS":    os.Getenv(varDashPassword) != "",
 			},
-			OS:       runtime.GOOS,
-			SafeMode: isSafeModeEnabled,
+			OS:           runtime.GOOS,
+			SafeMode:     isSafeModeEnabled,
+			UpdateStatus: updateStatus,
 		}
 
 		// Override config values with environment variables if they exist
@@ -1856,4 +1881,151 @@ func invalidateCrontabCache() {
 	// Clear file modification times to force re-checking
 	fileCache.fileModTimes = make(map[string]time.Time)
 	fileCache.mutex.Unlock()
+}
+
+// handleUpdateCheck handles GET requests to check for updates
+func handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	status, err := checkForUpdate()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+// handleUpdatePerform handles POST requests to perform an update
+func handleUpdatePerform(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if isSafeModeEnabled {
+		http.Error(w, "Updates are disabled in safe mode", http.StatusForbidden)
+		return
+	}
+
+	// Check for update first
+	status, err := checkForUpdate()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if !status.HasUpdate {
+		http.Error(w, "No update available", http.StatusBadRequest)
+		return
+	}
+
+	// Set up SSE headers for streaming progress
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Function to send progress updates
+	sendProgress := func(message string) {
+		defer func() {
+			if r := recover(); r != nil {
+				// Connection was likely closed during update, silently ignore
+				log(fmt.Sprintf("Progress update failed (connection closed): %v", r))
+			}
+		}()
+
+		// Check if w is nil
+		if w == nil {
+			return
+		}
+
+		progressData, _ := json.Marshal(map[string]string{"progress": message})
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", progressData); err != nil {
+			return
+		}
+
+		// Simple flush without nested defer
+		if flusher, ok := w.(http.Flusher); ok && flusher != nil {
+			flusher.Flush() // This will be caught by the main defer/recover if it panics
+		}
+	}
+
+	sendProgress("Starting update process...")
+
+	// Perform the update in a goroutine
+	go func() {
+		if err := performUpdateWithRestart(status, sendProgress); err != nil {
+			defer func() {
+				if r := recover(); r != nil {
+					// Connection was likely closed during update, ignore the panic
+					log(fmt.Sprintf("Error response failed (connection closed): %v", r))
+				}
+			}()
+
+			// Check if w is nil before writing error
+			if w == nil {
+				return
+			}
+
+			errorData, _ := json.Marshal(map[string]string{"error": err.Error()})
+			if _, writeErr := fmt.Fprintf(w, "data: %s\n\n", errorData); writeErr != nil {
+				return // Write failed, connection likely closed
+			}
+
+			// Simple flush without nested defer
+			if flusher, ok := w.(http.Flusher); ok && flusher != nil {
+				flusher.Flush() // This will be caught by the main defer/recover if it panics
+			}
+		}
+	}()
+
+	// Keep the connection alive briefly to ensure messages are sent
+	time.Sleep(1 * time.Second)
+}
+
+// performUpdateWithRestart performs the update and handles the restart
+func performUpdateWithRestart(status *UpdateStatus, sendProgress func(string)) error {
+	sendProgress("Downloading new version...")
+
+	// Perform the update (download and replace executable)
+	if err := performUpdate(status); err != nil {
+		return fmt.Errorf("failed to download update: %v", err)
+	}
+
+	sendProgress("Update downloaded successfully. Restarting server...")
+
+	// Give the UI a moment to receive the message
+	time.Sleep(1 * time.Second)
+
+	// Get current executable path and arguments
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %v", err)
+	}
+
+	sendProgress("Starting new server instance...")
+
+	// Start new process with same arguments
+	cmd := exec.Command(executable, os.Args[1:]...)
+	cmd.Env = os.Environ()
+
+	// Start the new process but don't wait for it
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start new process: %v", err)
+	}
+
+	sendProgress("Update complete! Server restarting...")
+
+	// Give a brief moment for the response to be sent, then exit
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		os.Exit(0)
+	}()
+
+	return nil
 }

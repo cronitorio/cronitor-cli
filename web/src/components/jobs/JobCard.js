@@ -318,11 +318,6 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
     // Get the current job state from allJobs to ensure we have latest data
     const currentJob = allJobs.find(j => j.key === initialJob.key) || initialJob;
     
-    const updatedJob = { 
-      ...currentJob,
-      ignored: true
-    };
-
     try {
       // For existing jobs, use direct API call
       const requestBody = {
@@ -695,7 +690,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                 <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[25%] min-w-[200px]">Monitoring</th>
                 <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: 'calc(75% * 0.5)' }}>Location</th>
                 <th className="py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '37.5%' }}>
-                  {isNew && selectedLocation && !isUserCrontab ? 'User' : 'Actions'}
+                  {isNew && selectedLocation && !isUserCrontab ? 'User' : ''}
                 </th>
               </tr>
             </thead>
