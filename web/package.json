@@ -15,7 +15,8 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "GENERATE_SOURCEMAP=true react-scripts build && mkdir -p static && cp -r build/static/* static/ && cp build/index.html static/ && cp build/asset-manifest.json static/",
+    "build": "GENERATE_SOURCEMAP=true react-scripts build && mkdir -p static && cp -r build/static/* static/ && cp build/index.html static/ && cp build/asset-manifest.json static/ && cp -r build/screenshots static/ 2>/dev/null || true",
+    "screenshots": "node scripts/capture-screenshots.js",
     "analyze": "source-map-explorer 'build/static/js/*.js'",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
@@ -41,6 +42,7 @@
   "devDependencies": {
     "autoprefixer": "^10.4.17",
     "postcss": "^8.4.35",
+    "puppeteer": "^24.10.0",
     "source-map-explorer": "^2.5.3",
     "tailwindcss": "^3.4.1"
   }

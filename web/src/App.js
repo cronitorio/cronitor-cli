@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { ClockIcon, Cog6ToothIcon, SunIcon, MoonIcon, FolderOpenIcon } from '@heroicons/react/24/outline';
+import { ClockIcon, Cog6ToothIcon, SunIcon, MoonIcon, FolderOpenIcon, DocumentTextIcon } from '@heroicons/react/24/outline';
 import Cookies from 'js-cookie';
 import cronitorLogo from './assets/cronitor.png';
 import Settings from './components/Settings';
 import useSWR from 'swr';
 import Jobs from './components/Jobs';
 import Crontabs from './components/Crontabs';
+import Docs from './components/Docs';
 import { usePrefetch } from './hooks/usePrefetch';
 
 const fetcher = url => fetch(url).then(res => res.json());
@@ -15,6 +16,7 @@ const navigation = [
   { name: 'Jobs', href: '/', icon: ClockIcon },
   { name: 'Crontabs', href: '/crontabs', icon: FolderOpenIcon },
   { name: 'Settings', href: '/settings', icon: Cog6ToothIcon },
+  { name: 'Docs', href: '/docs', icon: DocumentTextIcon },
 ];
 
 function ToggleSwitch({ isOn, onChange }) {
@@ -258,6 +260,7 @@ function App() {
                     <Route path="/" element={<Jobs />} />
                     <Route path="/crontabs" element={<Crontabs />} />
                     <Route path="/settings" element={<Settings />} />
+                    <Route path="/docs" element={<Docs />} />
                   </Routes>
                 </div>
               </div>
