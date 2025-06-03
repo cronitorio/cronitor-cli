@@ -32,7 +32,7 @@ export function LocationSection({
         </select>
       ) : (
         <div>
-          {job.crontab_display_name} L{job.line_number}
+          {job.crontab_display_name.replace(/^user /, 'User ')} L{job.line_number}
         </div>
       )}
     </div>

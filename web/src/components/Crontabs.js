@@ -112,24 +112,6 @@ export default function Crontabs() {
     }
   }, [selectedCrontab, selectedLine]);
 
-  // Debug selected line
-  useEffect(() => {
-    if (selectedLine) {
-      console.log('Selected line full object:', selectedLine);
-      console.log('Line type checks:', {
-        is_job: selectedLine.is_job,
-        is_job_type: typeof selectedLine.is_job,
-        is_job_truthy: !!selectedLine.is_job,
-        is_comment: selectedLine.is_comment,
-        is_comment_type: typeof selectedLine.is_comment,
-        is_env_var: selectedLine.is_env_var,
-        is_env_var_type: typeof selectedLine.is_env_var,
-        has_line_text: !!selectedLine.line_text,
-        line_text_preview: selectedLine.line_text?.substring(0, 50)
-      });
-    }
-  }, [selectedLine]);
-
   const showToast = (message, type = 'error') => {
     setToastMessage(message);
     setToastType(type);

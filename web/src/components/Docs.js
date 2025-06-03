@@ -202,15 +202,11 @@ export default function Docs() {
 15 10 * * SUN       → "At 10:15 on Sunday"
 0 9-17 * * MON-FRI  → "At minute 0 past every hour from 9 through 17 on every day-of-week from Monday through Friday"`}
           </CodeBlock>
-          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mt-4">
-            <p className="text-blue-800 dark:text-blue-200">
-              <strong>Understanding Timezones:</strong> Cron is timezone-aware and schedule descriptions and "Next At" times are always shown in the job's configured timezone. 
-              Click "Show More" on any job to see the schedule translated to your local browser timezone.
-            </p>
-          </div>
 
-
-
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Timezone Handling</h4>
+          <p className="text-gray-700 dark:text-gray-300">
+          Cron is timezone-aware and schedule descriptions and "Next At" times are always shown in the job's configured timezone. 
+          Click "Show More" on any job to see the schedule translated to your local browser timezone.          </p>
           <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Monitoring and Troubleshooting Failed Jobs</h4>
           <p className="text-gray-700 dark:text-gray-300">
             By default, the dashboard does not track job failures or collect logs. To use these features, enable monitoring for your jobs. With monitoring enabled, the Cronitor dashboard provides tools to diagnose and resolve issues:
@@ -272,9 +268,9 @@ export default function Docs() {
             Standard crontab syntax is supported with additional validation:
           </p>
           <CodeBlock>
-# Minute Hour Day Month Weekday Command
+{`# Minute Hour Day Month Weekday Command
 0 2 * * * /path/to/backup-script.sh
-30 14 * * 1-5 /usr/bin/work-reminder
+30 14 * * 1-5 /usr/bin/work-reminder`}
           </CodeBlock>
           <p className="text-gray-700 dark:text-gray-300">
             The dashboard validates expressions and provides helpful error messages for invalid syntax.
@@ -387,7 +383,7 @@ export default function Docs() {
           
           <h4 className="text-md font-medium text-gray-900 dark:text-white">Understanding the CLI Connection</h4>
           <p className="text-gray-700 dark:text-gray-300">
-            When the dashboard is running and monitoring is enabled, job names and schedules are synced automatically with the Cronitor. There is no need to run "cronitor sync" manually if you also use the dashboard. For job names, this is a 2-way sync: Names changed on Cronitor will show up on this dashboard, and names changed here will be synced with Cronitor. Schedules are only synced one-way: Changes made on Cronitor do not impact your actual job schedule. 
+            When the dashboard is running and monitoring is enabled, job names and schedules are synced automatically with Cronitor. There is no need to run "cronitor sync" manually if you also use the dashboard. For job names, this is a 2-way sync: Names changed on Cronitor will show up on this dashboard, and names changed here will be synced with Cronitor. Schedules are only synced one-way: Changes made on Cronitor do not impact your actual job schedule. 
           </p>
 
           <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Version Management</h4>
@@ -395,11 +391,10 @@ export default function Docs() {
             Keep your CronitorCLI installation up to date. An "update" button will be shown on the dashboard when a new version is available. To schedule updates you can use the command line:
           </p>
           <CodeBlock>
-# Update to latest version (via dashboard or CLI)
-
+{`# Update to latest version (via dashboard or CLI)
 cronitor update
 
-# Restart your dashboard to apply the update
+# Restart your dashboard to apply the update`}
           </CodeBlock>
 
           <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Troubleshooting Connection Issues</h4>
@@ -431,10 +426,10 @@ cronitor update
             For secure remote access, use SSH tunneling or VPN connections:
           </p>
           <CodeBlock>
-# SSH tunnel example
-ssh -L 9000:localhost:9000 user@remote-server
+{`# SSH tunnel example
+ssh -L 9000:localhost:9000 user@remote-cron-server
 
-# Then access via http://localhost:9000
+# Then access via http://localhost:9000`}
           </CodeBlock>
           
           <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Safe Mode Explanation</h4>
@@ -442,8 +437,8 @@ ssh -L 9000:localhost:9000 user@remote-server
             Safe mode provides additional security by restricting some sensitive operations:
           </p>
           <CodeBlock>
-# Start dashboard in safe mode
-cronitor dash --safe-mode
+{`# Start dashboard in safe mode
+cronitor dash --safe-mode`}
           </CodeBlock>
           <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
             <li>Prevents cron command modifications</li>
