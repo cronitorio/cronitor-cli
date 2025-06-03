@@ -327,13 +327,13 @@ func (c Crontab) IsRoot() bool {
 
 func (c Crontab) Exists() bool {
 
-	if c.Filename != "" {
-		if _, err := os.Stat(c.Filename); os.IsNotExist(err) {
+	if c.IsUserCrontab {
+		cmd := exec.Command("crontab", "-l")
+		if _, err := cmd.CombinedOutput(); err != nil {
 			return false
 		}
 	} else {
-		cmd := exec.Command("crontab", "-l")
-		if _, err := cmd.CombinedOutput(); err != nil {
+		if _, err := os.Stat(c.Filename); os.IsNotExist(err) {
 			return false
 		}
 	}

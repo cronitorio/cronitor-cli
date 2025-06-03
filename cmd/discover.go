@@ -98,41 +98,43 @@ var timezone lib.TimezoneLocationName
 var maxNameLen = 75
 var notificationList string
 var existingMonitors = ExistingMonitors{}
+var processingMultipleCrontabs = false
 
 // To deprecate this feature we are hijacking this flag that will trigger removal of auto-discover lines from existing user's crontabs.
 var noAutoDiscover = true
 
 var discoverCmd = &cobra.Command{
-	Use:   "discover <optional path>",
-	Short: "Attach monitoring to new cron jobs and watch for schedule updates",
+	Use:     "sync <optional path>",
+	Aliases: []string{"discover"},
+	Short:   "Add monitoring to new cron jobs and sync changes to existing jobs",
 	Long: `
-Cronitor discover will parse your crontab and create or update monitors using the Cronitor API.
+Cronitor sync will parse your crontab and create or update monitors using the Cronitor API.
 
 Note: You must supply your Cronitor API key. This can be passed as a flag, environment variable, or saved in your Cronitor configuration file. See 'help configure' for more details.
 
 Example:
-  $ cronitor discover
+  $ cronitor sync
       > Read user crontab and step through line by line
       > Creates monitors on your Cronitor dashboard for each entry in the crontab. The command string will be used as the monitor name.
       > Adds Cronitor integration to your crontab
 
-  $ cronitor discover /path/to/crontab
+  $ cronitor sync /path/to/crontab
       > Instead of the user crontab, provide a crontab file (or directory of crontabs) to use
 
 Example that does not use an interactive shell:
-  $ cronitor discover --auto
+  $ cronitor sync --auto
       > The only output to stdout will be your updated crontab file, suitable for piplines or writing to another crontab.
 
 Example excluding secrets or common text from monitor names:
-  $ cronitor discover /path/to/crontab -e "secret-token" -e "/var/common/app/path/"
+  $ cronitor sync /path/to/crontab -e "secret-token" -e "/var/common/app/path/"
       > Updates previously discovered monitors or creates new monitors, excluding the provided snippets from the monitor name.
       > Adds Cronitor integration to your crontab and outputs to stdout
-      > Names you create yourself in "discover" or from the dashboard are unchanged.
+      > Names you create yourself in "sync" or from the dashboard are unchanged.
 
   You can run the command as many times as you need, accumulating exclusion params until the job names on your Cronitor dashboard are clear and readable.
 
 Example where you perform a dry-run without any crontab modifications:
-  $ cronitor discover /path/to/crontab --dry-run
+  $ cronitor sync /path/to/crontab --dry-run
       > Steps line by line, creates or updates monitors
       > Checks permissions to ensure integration can be applied later
 	`,
@@ -149,9 +151,12 @@ Example where you perform a dry-run without any crontab modifications:
 
 	Run: func(cmd *cobra.Command, args []string) {
 
+		// Reset the flag for each command execution
+		processingMultipleCrontabs = false
+
 		if len(viper.GetString(varApiKey)) < 10 {
 			fatal(fmt.Sprintf("\n%s\n\n%s Run %s to create an account.\n\n%s Copy an SDK key from https://cronitor.io/app/settings/api and save it with %s\n\n",
-				color.New(color.FgRed, color.Bold).Sprint("Add your API key before running discover."),
+				color.New(color.FgRed, color.Bold).Sprint("Add your API key before running sync."),
 				lipgloss.NewStyle().Bold(true).Render("New user?"),
 				lipgloss.NewStyle().Italic(true).Render("cronitor signup"),
 				lipgloss.NewStyle().Bold(true).Render("Existing user?"),
@@ -175,6 +180,7 @@ Example where you perform a dry-run without any crontab modifications:
 		} else if len(args) > 0 {
 			// A supplied argument can be a specific file or a directory
 			if isPathToDirectory(args[0]) {
+				processingMultipleCrontabs = true
 				processDirectory(username, args[0])
 			} else {
 				if processCrontab(lib.CrontabFactory(username, args[0])) {
@@ -183,7 +189,9 @@ Example where you perform a dry-run without any crontab modifications:
 			}
 		} else {
 			// Without a supplied argument look at the user crontab, the system crontab and the system drop-in directory
-			if processCrontab(lib.CrontabFactory(username, "")) {
+			processingMultipleCrontabs = true
+
+			if processCrontab(lib.CrontabFactory(username, fmt.Sprintf("user:%s", username))) {
 				importedCrontabs++
 			}
 
@@ -196,7 +204,7 @@ Example where you perform a dry-run without any crontab modifications:
 			processDirectory(username, lib.DROP_IN_DIRECTORY)
 		}
 
-		printDoneText("Discover complete", false)
+		printDoneText("Sync complete", false)
 		printSuccessText("View your dashboard https://cronitor.io/app/dashboard", false)
 		if dryRun {
 			saveCommand := strings.Join(os.Args, " ")
@@ -287,17 +295,37 @@ func processCrontab(crontab *lib.Crontab) bool {
 			continue
 		}
 
+		// Automatically skip jobs marked with "# cronitor: ignore"
+		if line.Ignored {
+			continue
+		}
+
+		// Automatically skip jobs that are commented out (disabled)
+		if line.IsComment {
+			continue
+		}
+
 		defaultName := createDefaultName(line, crontab, effectiveHostname(), excludeFromName, allNameCandidates)
 		tags := createTags()
 		key := line.Key(crontab.CanonicalName())
 		name := defaultName
 		skip := false
 
-		// If we know this monitor exists already, return the name
-		existingMonitors.CurrentKey = key
-		existingMonitors.CurrentCode = line.Code
-		if existingName, err := existingMonitors.GetNameForCurrent(); err == nil {
-			name = existingName
+		// Priority order for name selection:
+		// 1. Use Line.Name if it exists (from "# Name: <name>" comment)
+		// 2. Use existing monitor name if available
+		// 3. Use default generated name or prompt user
+
+		if line.Name != "" {
+			// Use the name from the crontab comment
+			name = line.Name
+		} else {
+			// If we know this monitor exists already, return the name
+			existingMonitors.CurrentKey = key
+			existingMonitors.CurrentCode = line.Code
+			if existingName, err := existingMonitors.GetNameForCurrent(); err == nil {
+				name = existingName
+			}
 		}
 
 		if !isAutoDiscover && !line.IsAutoDiscoverCommand() {
@@ -328,7 +356,9 @@ func processCrontab(crontab *lib.Crontab) bool {
 
 		existingMonitors.AddName(name)
 
-		if name == defaultName {
+		// Only clear the name if it was the auto-generated default name
+		// Preserve Line.Name (from "# Name:" comments) and existing monitor names
+		if name == defaultName && line.Name == "" {
 			name = ""
 		}
 
@@ -369,11 +399,28 @@ func processCrontab(crontab *lib.Crontab) bool {
 		fatal(err.Error(), 1)
 	}
 
+	// Update the line objects with the returned monitor codes
+	for _, line := range crontab.Lines {
+		if !line.IsMonitorable() {
+			continue
+		}
+
+		key := line.Key(crontab.CanonicalName())
+		if updatedMonitor, exists := monitors[key]; exists {
+			line.Mon = *updatedMonitor
+			line.Code = updatedMonitor.Attributes.Code
+			// Ensure the line name is set so it gets written as a comment
+			if updatedMonitor.Name != "" {
+				line.Name = updatedMonitor.Name
+			}
+		}
+	}
+
 	// Re-write crontab lines with new/updated monitoring
 	updatedCrontabLines := crontab.Write()
 
-	if !isSilent && isAutoDiscover {
-		// When running --auto mode, you should be able to pipe or redirect crontab output elsewhere. Skip status-related messages.
+	if !isSilent && isAutoDiscover && !processingMultipleCrontabs {
+		// When running --auto mode with a single crontab, you should be able to pipe or redirect crontab output elsewhere. Skip status-related messages.
 		fmt.Println(strings.TrimSpace(updatedCrontabLines))
 	}
 
@@ -632,9 +679,10 @@ const (
 
 func init() {
 	RootCmd.AddCommand(discoverCmd)
+
 	discoverCmd.Flags().BoolVar(&saveCrontabFile, "save", saveCrontabFile, "Save the updated crontab file")
 	discoverCmd.Flags().BoolVar(&dryRun, "dry-run", dryRun, "Import crontab into Cronitor without applying necessary integration")
-	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from auto-generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
+	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from auto-generated monitor name e.g. $ cronitor sync -e '> /dev/null' -e '/path/to/app'")
 	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")
