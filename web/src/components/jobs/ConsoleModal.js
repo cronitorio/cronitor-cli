@@ -230,7 +230,7 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange, onComm
           </div>
           <div
             ref={outputRef}
-            className="bg-black p-4 rounded font-mono text-sm h-96 overflow-y-auto whitespace-pre-wrap"
+            className="bg-black text-white p-4 rounded font-mono text-sm h-96 overflow-y-auto whitespace-pre-wrap"
           >
             {output}
           </div>

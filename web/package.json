@@ -15,7 +15,8 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "GENERATE_SOURCEMAP=true react-scripts build && mkdir -p static && cp -r build/static/* static/ && cp build/index.html static/ && cp build/asset-manifest.json static/ && cp -r build/screenshots static/ 2>/dev/null || true",
+    "build": "rm -rf static/* && GENERATE_SOURCEMAP=true react-scripts build && mkdir -p static && cp -r build/static/* static/ && cp build/index.html static/ && cp build/asset-manifest.json static/ && cp -r build/screenshots static/ 2>/dev/null || true",
+    "clean": "rm -rf static/* build/*",
     "screenshots": "node scripts/capture-screenshots.js",
     "analyze": "source-map-explorer 'build/static/js/*.js'",
     "test": "react-scripts test",

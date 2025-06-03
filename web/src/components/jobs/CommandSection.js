@@ -29,7 +29,7 @@ export function CommandSection({
 
   return (
     <>
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-start">
             {isEditing ? (
@@ -61,14 +61,14 @@ export function CommandSection({
                   placeholder={isNew ? "/path/to/command" : ""}
                 />
               )
-            ) : (
+            ) :
               <div 
                 className="text-sm text-gray-900 dark:text-gray-100 font-mono break-all overflow-wrap-anywhere whitespace-pre-wrap"
                 title={job.command}
               >
                 {job.command}
               </div>
-            )}
+            }
             {!isNew && !readOnly && (
               <button
                 onClick={onEditStart}
@@ -79,14 +79,6 @@ export function CommandSection({
             )}
           </div>
         </div>
-        {!readOnly && (
-          <button
-            onClick={onShowConsole}
-            className="flex-shrink-0 text-sm text-gray-900 hover:text-black dark:text-gray-300 dark:hover:text-white"
-          >
-            Console
-          </button>
-        )}
       </div>
     </>
   );

@@ -145,14 +145,71 @@ export default function Docs() {
           <p className="text-gray-700 dark:text-gray-300">
             Manage your jobs with these available actions:
           </p>
-          <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
-            <li><strong>Run Now:</strong> Execute a job immediately. Click the "Idle"/"Running" indicator to show the Run Now button.</li>
-            <li><strong>Suspend:</strong> Temporarily pause job execution. Click the "Scheduled" indicator to show the Suspend option.</li>
-            <li><strong>Resume:</strong> Reactivate a suspended job. Click the "Suspended" indicator to show the Resume option.</li>
-            <li><strong>Kill:</strong> Stop a currently running job. Click the "Running" indicator to show the Kill option.</li>
-            <li><strong>Edit:</strong> Modify job parameters and schedule. Job fields can be edited inline.</li>
-            <li><strong>Delete:</strong> Remove a job permanently. Click the "Scheduled"/"Suspended" indicator to show the Delete option.</li>
-          </ul>
+          <div className="overflow-x-auto mt-4">
+            <table className="min-w-full border border-gray-300 dark:border-gray-600">
+              <thead className="bg-gray-50 dark:bg-gray-800">
+                <tr>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-900 dark:text-white border-b border-gray-300 dark:border-gray-600">Action</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-900 dark:text-white border-b border-gray-300 dark:border-gray-600">Description</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-900 dark:text-white border-b border-gray-300 dark:border-gray-600">How to Access</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">Run Now</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Execute a job immediately</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Click the "Idle"/"Running" indicator to show the Run Now button</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">Suspend</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Temporarily pause job execution</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Click the "Scheduled" indicator to show the Suspend option</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">Resume</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Reactivate a suspended job</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Click the "Suspended" indicator to show the Resume option</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">Kill</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Stop a currently running job</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Click the "Running" indicator to show the Kill option</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">Edit</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Modify job parameters and schedule</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Job fields can be edited inline</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">Delete</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Remove a job permanently</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Click the "Scheduled"/"Suspended" indicator to show the Delete option</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Schedule Interpretation with Crontab.guru</h4>
+          <p className="text-gray-700 dark:text-gray-300">
+            The dashboard integrates the same cron expression parser that powers <a href="https://crontab.guru" className="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">crontab.guru</a>. 
+            This powers the human-readable schedule descriptions and "Next At" times.
+          </p>
+          <CodeBlock>
+{`# Examples of schedule descriptions:
+0 2 * * *           → "At 02:00"
+30 14 * * 1-5       → "At 14:30 on every day-of-week from Monday through Friday"
+0 */6 * * *         → "At minute 0 past every 6th hour"
+15 10 * * SUN       → "At 10:15 on Sunday"
+0 9-17 * * MON-FRI  → "At minute 0 past every hour from 9 through 17 on every day-of-week from Monday through Friday"`}
+          </CodeBlock>
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mt-4">
+            <p className="text-blue-800 dark:text-blue-200">
+              <strong>Understanding Timezones:</strong> Cron is timezone-aware and schedule descriptions and "Next At" times are always shown in the job's configured timezone. 
+              Click "Show More" on any job to see the schedule translated to your local browser timezone.
+            </p>
+          </div>
+
+
 
           <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Monitoring and Troubleshooting Failed Jobs</h4>
           <p className="text-gray-700 dark:text-gray-300">
@@ -160,7 +217,8 @@ export default function Docs() {
           </p>
           <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
             <li>Detailed error messages and stack traces</li>
-            <li>Exit codes and signal information</li>
+            <li>Exit codes and logs</li>
+            <li>Job performance metrics</li>
           </ul>
         </div>
       </CollapsibleSection>
@@ -301,15 +359,15 @@ export default function Docs() {
             <li>Rollback capabilities</li>
           </ul>
 
-          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Safe Mode Operations</h4>
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Safe Mode</h4>
           <p className="text-gray-700 dark:text-gray-300">
-            Safe mode restricts certain operations for enhanced security:
+            Running the dashboard in safe mode restricts certain operations for enhanced security:
           </p>
           <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
-            <li>Disables crontab editing</li>
-            <li>Prevents automatic updates</li>
-            <li>Restricts file system operations</li>
-            <li>Enables read-only monitoring</li>
+            <li>Prevents cron command modifications</li>
+            <li>Disables web-based job console</li>
+            <li>Disables adding new jobs from the dashboard</li>
+            <li>Crontabs are shown in read-only mode</li>
           </ul>
 
           <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Data Retention Settings</h4>

@@ -644,39 +644,51 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
               </tr>
               <tr>
                 <td colSpan="2" className="py-2 text-sm text-gray-900 dark:text-gray-100">
-                  <ScheduleSection
-                    job={{
-                      ...initialJob,
-                      expression: getDisplayValue('expression') || ''
-                    }}
-                    isEditing={isEditingSchedule}
-                    editedSchedule={editedSchedule}
-                    onScheduleChange={(value) => {
-                      setEditedSchedule(value);
-                    }}
-                    onEditStart={() => {
-                      setIsEditingSchedule(true);
-                      setEditedSchedule(getDisplayValue('expression') || '');
-                    }}
-                    onEditEnd={() => {
-                      if (!isNew) {
-                        setIsEditingSchedule(false);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleSave();
-                      } else if (e.key === 'Escape') {
-                        if (!isNew) {
-                          setIsEditingSchedule(false);
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <ScheduleSection
+                        job={{
+                          ...initialJob,
+                          expression: getDisplayValue('expression') || ''
+                        }}
+                        isEditing={isEditingSchedule}
+                        editedSchedule={editedSchedule}
+                        onScheduleChange={(value) => {
+                          setEditedSchedule(value);
+                        }}
+                        onEditStart={() => {
+                          setIsEditingSchedule(true);
                           setEditedSchedule(getDisplayValue('expression') || '');
-                        }
-                      }
-                    }}
-                    showDescription={true}
-                    isNew={isNew}
-                  />
+                        }}
+                        onEditEnd={() => {
+                          if (!isNew) {
+                            setIsEditingSchedule(false);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSave();
+                          } else if (e.key === 'Escape') {
+                            if (!isNew) {
+                              setIsEditingSchedule(false);
+                              setEditedSchedule(getDisplayValue('expression') || '');
+                            }
+                          }
+                        }}
+                        showDescription={true}
+                        isNew={isNew}
+                      />
+                    </div>
+                    {!readOnly && (
+                      <button
+                        onClick={() => setShowConsole(true)}
+                        className="flex-shrink-0 ml-4 text-sm text-gray-900 hover:text-black dark:text-gray-300 dark:hover:text-white"
+                      >
+                        Console
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -750,7 +762,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                       ))}
                     </select>
                   ) : (
-                    !readOnly && (
+                    !readOnly && !isNew && (
                       <div className="flex justify-end">
                         <button
                           onClick={() => setShowHideOverlay(true)}
