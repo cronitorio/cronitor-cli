@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -29,6 +30,7 @@ import (
 	"github.com/cronitorio/cronitor-cli/lib"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/time/rate"
 )
 
 var webAssets embed.FS
@@ -203,7 +205,7 @@ The dashboard provides a web interface for managing your cron jobs and crontab f
 		safeMode, _ := cmd.Flags().GetBool("safe-mode")
 		isSafeModeEnabled = safeMode
 
-		// Basic auth middleware
+		// Basic auth middleware with rate limiting
 		authMiddleware := func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				username := viper.GetString(varDashUsername)
@@ -213,6 +215,9 @@ The dashboard provides a web interface for managing your cron jobs and crontab f
 					http.Error(w, "Dashboard credentials not configured", http.StatusInternalServerError)
 					return
 				}
+
+				// Get client IP for rate limiting
+				clientIP := getClientIP(r)
 
 				auth := r.Header.Get("Authorization")
 				if auth == "" {
@@ -224,11 +229,30 @@ The dashboard provides a web interface for managing your cron jobs and crontab f
 				payload, _ := base64.StdEncoding.DecodeString(strings.TrimPrefix(auth, "Basic "))
 				pair := strings.SplitN(string(payload), ":", 2)
 
+				// Check for authentication failure
 				if len(pair) != 2 || pair[0] != username || pair[1] != password {
+					// Get rate limiter for this IP
+					limiter := authRateLimiter.GetLimiter(clientIP)
+
+					// Check if rate limit exceeded
+					if !limiter.Allow() {
+						// Rate limit exceeded - return 429 with Retry-After header
+						retryAfter := int(limiter.Reserve().Delay().Seconds())
+						if retryAfter <= 0 {
+							retryAfter = 12 // Default to 12 seconds based on our rate (every 12 seconds)
+						}
+
+						w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfter))
+						http.Error(w, "Too Many Requests - Rate limit exceeded", http.StatusTooManyRequests)
+						return
+					}
+
+					// Not rate limited, but still unauthorized
 					http.Error(w, "Unauthorized", http.StatusUnauthorized)
 					return
 				}
 
+				// Authentication successful - proceed to next handler
 				next.ServeHTTP(w, r)
 			})
 		}
@@ -2029,3 +2053,98 @@ func performUpdateWithRestart(status *UpdateStatus, sendProgress func(string)) e
 
 	return nil
 }
+
+// RateLimiter manages rate limiting per IP address
+type RateLimiter struct {
+	limiters map[string]*rate.Limiter
+	mutex    sync.RWMutex
+}
+
+// NewRateLimiter creates a new rate limiter instance
+func NewRateLimiter() *RateLimiter {
+	rl := &RateLimiter{
+		limiters: make(map[string]*rate.Limiter),
+	}
+
+	// Start cleanup goroutine to remove stale entries every 10 minutes
+	go rl.cleanupRoutine()
+
+	return rl
+}
+
+// GetLimiter returns a rate limiter for the given IP address
+func (rl *RateLimiter) GetLimiter(ip string) *rate.Limiter {
+	rl.mutex.Lock()
+	defer rl.mutex.Unlock()
+
+	limiter, exists := rl.limiters[ip]
+	if !exists {
+		// 5 failed attempts per minute: rate.Every(12*time.Second) = 1 request every 12 seconds = 5 per minute
+		limiter = rate.NewLimiter(rate.Every(12*time.Second), 5)
+		rl.limiters[ip] = limiter
+	}
+
+	return limiter
+}
+
+// cleanupRoutine removes stale entries from the rate limiter map every 10 minutes
+func (rl *RateLimiter) cleanupRoutine() {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			rl.cleanup()
+		}
+	}
+}
+
+// cleanup removes entries that haven't been used recently
+func (rl *RateLimiter) cleanup() {
+	rl.mutex.Lock()
+	defer rl.mutex.Unlock()
+
+	// Remove entries that have full tokens (indicating no recent activity)
+	for ip, limiter := range rl.limiters {
+		// If the limiter has all its tokens, it hasn't been used recently
+		if limiter.Tokens() == float64(limiter.Burst()) {
+			delete(rl.limiters, ip)
+		}
+	}
+}
+
+// getClientIP extracts the client IP from the request, handling proxy headers
+func getClientIP(r *http.Request) string {
+	// Check X-Forwarded-For header first (for reverse proxies)
+	xff := r.Header.Get("X-Forwarded-For")
+	if xff != "" {
+		// Take the first IP in the chain
+		ips := strings.Split(xff, ",")
+		if len(ips) > 0 {
+			ip := strings.TrimSpace(ips[0])
+			if net.ParseIP(ip) != nil {
+				return ip
+			}
+		}
+	}
+
+	// Check X-Real-IP header
+	xri := r.Header.Get("X-Real-IP")
+	if xri != "" {
+		ip := strings.TrimSpace(xri)
+		if net.ParseIP(ip) != nil {
+			return ip
+		}
+	}
+
+	// Fall back to RemoteAddr
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// Global rate limiter instance
+var authRateLimiter = NewRateLimiter()

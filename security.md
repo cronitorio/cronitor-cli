@@ -18,15 +18,15 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
 - No IP-based access restrictions
 
 #### Proposed Improvements
-- Implement rate limiting for authentication attempts
+- ✅ Implement rate limiting for authentication attempts
   - Problem: Prevents brute force attacks by limiting failed login attempts
   - Implementation: Use golang.org/x/time/rate package to implement a token bucket rate limiter, storing attempt counts in memory with a 5-minute window
   - Details:
-    • Create a map[string]*rate.Limiter indexed by client IP address to track per-IP rate limits
-    • Set limit to 5 failed attempts per minute using rate.NewLimiter(rate.Every(12*time.Second), 5)
-    • On authentication failure, check if client IP has exceeded rate limit before processing
-    • Implement cleanup goroutine to remove stale entries from the map every 10 minutes
-    • Return HTTP 429 (Too Many Requests) with Retry-After header when rate limit exceeded
+    • ✅ Create a map[string]*rate.Limiter indexed by client IP address to track per-IP rate limits
+    • ✅ Set limit to 5 failed attempts per minute using rate.NewLimiter(rate.Every(12*time.Second), 5)
+    • ✅ On authentication failure, check if client IP has exceeded rate limit before processing
+    • ✅ Implement cleanup goroutine to remove stale entries from the map every 10 minutes
+    • ✅ Return HTTP 429 (Too Many Requests) with Retry-After header when rate limit exceeded
 
 - Add CSRF protection for all POST/PUT/DELETE requests
   - Problem: Current implementation vulnerable to cross-site request forgery attacks

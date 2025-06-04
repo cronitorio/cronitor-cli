@@ -1,6 +1,8 @@
 module github.com/cronitorio/cronitor-cli
 
-go 1.23
+go 1.23.0
+
+toolchain go1.23.4
 
 require (
 	github.com/capnspacehook/taskmaster v0.0.0-20210519235353-1629df7c85e9
@@ -57,6 +59,7 @@ require (
 	golang.org/x/sync v0.9.0 // indirect
 	golang.org/x/sys v0.27.0 // indirect
 	golang.org/x/text v0.3.8 // indirect
+	golang.org/x/time v0.11.0 // indirect
 	gopkg.in/ini.v1 v1.63.2 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
