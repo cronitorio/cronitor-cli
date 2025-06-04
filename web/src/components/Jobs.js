@@ -5,45 +5,30 @@ import { Toast } from './Toast';
 import { NewCrontabOverlay } from './jobs/NewCrontabOverlay';
 import { useSearchParams } from 'react-router-dom';
 import { FilterBar, FILTER_OPTIONS } from './jobs/FilterBar';
-
-const fetcher = async url => {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`Server error: ${res.status} ${res.statusText}${errorText ? ` - ${errorText}` : ''}`);
-    }
-    return res.json();
-  } catch (error) {
-    if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
-      throw new Error(`Unable to connect to the dash server.  Check that it's running and try again.`);
-    }
-    throw error;
-  }
-};
+import { csrfFetcher, csrfFetch } from '../utils/api';
 
 export default function Jobs() {
-  const { data: jobs, error, mutate } = useSWR('/api/jobs', fetcher, {
+  const { data: jobs, error, mutate } = useSWR('/api/jobs', csrfFetcher, {
     refreshInterval: 5000,
     revalidateOnFocus: true
   });
-  const { data: monitors } = useSWR('/api/monitors', fetcher, {
+  const { data: monitors } = useSWR('/api/monitors', csrfFetcher, {
     refreshInterval: 5000,
     revalidateOnFocus: true
   });
-  const { data: settings } = useSWR('/api/settings', fetcher, {
+  const { data: settings } = useSWR('/api/settings', csrfFetcher, {
     revalidateOnFocus: true,
     refreshInterval: 0
   });
   
   // Add SWR fetching for users and crontabs to share across all JobCard components
-  const { data: users } = useSWR('/api/users', fetcher, {
+  const { data: users } = useSWR('/api/users', csrfFetcher, {
     refreshInterval: 0, // No auto-refresh - users rarely change
     revalidateOnFocus: true, // Revalidate when window gets focus
     revalidateOnReconnect: false,
     dedupingInterval: 300000 // 5 minutes deduplication
   });
-  const { data: crontabs } = useSWR('/api/crontabs', fetcher, {
+  const { data: crontabs } = useSWR('/api/crontabs', csrfFetcher, {
     refreshInterval: 5000, // Auto-refresh every 5 seconds
     revalidateOnFocus: true, // Revalidate when window gets focus
     revalidateOnReconnect: false,
@@ -173,7 +158,7 @@ export default function Jobs() {
         }));
       }
       
-      const response = await fetch('/api/crontabs', {
+      const response = await csrfFetch('/api/crontabs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -359,7 +344,7 @@ export default function Jobs() {
 
   const handleSaveNewJob = async () => {
     try {
-      const response = await fetch('/api/jobs', {
+      const response = await csrfFetch('/api/jobs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

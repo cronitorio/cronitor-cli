@@ -1,21 +1,9 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import useSWR from 'swr';
+import { mutate } from 'swr';
+import { csrfFetcher, csrfFetch } from '../utils/api';
 
-const fetcher = async url => {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`Server error: ${res.status} ${res.statusText}${errorText ? ` - ${errorText}` : ''}`);
-    }
-    return res.json();
-  } catch (error) {
-    if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
-      throw new Error('Unable to connect to server. Please check if the server is running and try again.');
-    }
-    throw error;
-  }
-};
+const fetcher = csrfFetcher;
 
 export function useJobOperations() {
   const { data: jobs, mutate } = useSWR('/api/jobs', fetcher, {
@@ -36,7 +24,7 @@ export function useJobOperations() {
     mutate(optimisticData, false);
 
     try {
-      const response = await fetch('/api/jobs', {
+      const response = await csrfFetch('/api/jobs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -67,7 +55,7 @@ export function useJobOperations() {
     mutate(optimisticData, false);
 
     try {
-      const response = await fetch('/api/jobs', {
+      const response = await csrfFetch('/api/jobs', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -102,17 +90,12 @@ export function useJobOperations() {
     mutate(optimisticData, false);
 
     try {
-      const response = await fetch('/api/jobs', {
+      const response = await csrfFetch('/api/jobs', {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          key: jobKey,
-          crontab_filename: job.crontab_filename,
-          monitored: job.monitored,
-          code: job.code
-        }),
+        body: JSON.stringify(job),
       });
 
       if (!response.ok) {
@@ -143,7 +126,7 @@ export function useJobOperations() {
     }
 
     try {
-      const response = await fetch('/api/jobs', {
+      const response = await csrfFetch('/api/jobs', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -184,7 +167,7 @@ export function useJobOperations() {
     }
 
     try {
-      const response = await fetch('/api/jobs', {
+      const response = await csrfFetch('/api/jobs', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -218,7 +201,7 @@ export function useJobOperations() {
       // Convert string PIDs to integers
       const numericPids = pids.map(pid => parseInt(pid, 10));
       
-      const response = await fetch('/api/jobs/kill', {
+      const response = await csrfFetch('/api/jobs/kill', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

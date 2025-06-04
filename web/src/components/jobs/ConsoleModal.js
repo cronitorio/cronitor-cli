@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CloseButton } from '../CloseButton';
+import { csrfFetch } from '../../utils/api';
 
 export function ConsoleModal({ job, onClose, isNew = false, onFormChange, onCommandUpdate }) {
   const [output, setOutput] = React.useState('');
@@ -70,7 +71,7 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange, onComm
     }
 
     try {
-      const response = await fetch('/api/jobs/run', {
+      const response = await csrfFetch('/api/jobs/run', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -123,7 +124,7 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange, onComm
     if (!currentPid) return;
 
     try {
-      await fetch('/api/jobs/kill', {
+      await csrfFetch('/api/jobs/kill', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -173,7 +174,7 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange, onComm
           onClose();
         }, 500);
       } else {
-        const response = await fetch('/api/jobs', {
+        const response = await csrfFetch('/api/jobs', {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',

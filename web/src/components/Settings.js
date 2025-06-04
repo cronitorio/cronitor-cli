@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react';
 import useSWR from 'swr';
 import { ExclamationTriangleIcon, EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
-
-const fetcher = url => fetch(url).then(res => res.json());
+import { csrfFetcher, csrfFetch } from '../utils/api';
 
 export default function Settings() {
-  const { data, error, mutate } = useSWR('/api/settings', fetcher, {
+  const { data, error, mutate } = useSWR('/api/settings', csrfFetcher, {
     refreshInterval: 5000, // Refresh every 5 seconds
   });
 
@@ -54,7 +53,7 @@ export default function Settings() {
     setSaveSuccess(false);
 
     try {
-      const response = await fetch('/api/settings', {
+      const response = await csrfFetch('/api/settings', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

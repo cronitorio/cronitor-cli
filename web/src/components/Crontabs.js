@@ -5,22 +5,7 @@ import { Toast } from './Toast';
 import { JobCard } from './jobs/JobCard';
 import { CommentCard } from './crontabs/CommentCard';
 import { EnvVarCard } from './crontabs/EnvVarCard';
-
-const fetcher = async url => {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`Server error: ${res.status} ${res.statusText}${errorText ? ` - ${errorText}` : ''}`);
-    }
-    return res.json();
-  } catch (error) {
-    if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
-      throw new Error(`Unable to connect to the dash server. Check that it's running and try again.`);
-    }
-    throw error;
-  }
-};
+import { csrfFetcher, csrfFetch } from '../utils/api';
 
 export default function Crontabs() {
   const [revalidationKey, setRevalidationKey] = useState(0);
@@ -29,7 +14,7 @@ export default function Crontabs() {
   const textareaRef = useRef(null);
   
   // Load settings first (non-critical, no refresh)
-  const { data: settings } = useSWR('/api/settings', fetcher, {
+  const { data: settings } = useSWR('/api/settings', csrfFetcher, {
     revalidateOnFocus: false,
     refreshInterval: 0
   });
@@ -37,7 +22,7 @@ export default function Crontabs() {
   // Load crontabs with auto-refresh
   const { data: crontabs, error, mutate } = useSWR(
     `/api/crontabs?key=${revalidationKey}`,
-    fetcher,
+    csrfFetcher,
     {
       refreshInterval: 5000, // Auto-refresh every 5 seconds
       revalidateOnFocus: true,
@@ -48,7 +33,7 @@ export default function Crontabs() {
   // Load jobs with auto-refresh
   const { data: jobs, mutate: jobsMutate } = useSWR(
     crontabs ? `/api/jobs?key=${revalidationKey}` : null, 
-    fetcher, 
+    csrfFetcher, 
     {
       refreshInterval: 5000, // Auto-refresh every 5 seconds
       revalidateOnFocus: true,
@@ -57,7 +42,7 @@ export default function Crontabs() {
   );
   
   // Load users data with minimal refresh since it changes infrequently
-  const { data: users } = useSWR('/api/users', fetcher, {
+  const { data: users } = useSWR('/api/users', csrfFetcher, {
     refreshInterval: 0, // No auto-refresh - users rarely change
     revalidateOnFocus: true, // Revalidate when window gets focus
     revalidateOnReconnect: false,
@@ -128,7 +113,7 @@ export default function Crontabs() {
         }));
       }
       
-      const response = await fetch('/api/crontabs', {
+      const response = await csrfFetch('/api/crontabs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -353,7 +338,7 @@ export default function Crontabs() {
         }
       }
       
-      const response = await fetch(`/api/crontabs/${selectedCrontab.filename}`, {
+      const response = await csrfFetch(`/api/crontabs/${selectedCrontab.filename}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

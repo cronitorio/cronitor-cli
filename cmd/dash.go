@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"embed"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -38,6 +40,96 @@ var webAssets embed.FS
 func SetWebAssets(assets embed.FS) {
 	webAssets = assets
 }
+
+// CSRF token management
+type CSRFManager struct {
+	tokens map[string]time.Time // token -> expiry time
+	mutex  sync.RWMutex
+}
+
+// NewCSRFManager creates a new CSRF manager instance
+func NewCSRFManager() *CSRFManager {
+	cm := &CSRFManager{
+		tokens: make(map[string]time.Time),
+	}
+
+	// Start cleanup goroutine to remove expired tokens every 10 minutes
+	go cm.cleanupRoutine()
+
+	return cm
+}
+
+// GenerateToken generates a new CSRF token
+func (cm *CSRFManager) GenerateToken() (string, error) {
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+
+	token := hex.EncodeToString(bytes)
+
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	// Set token to expire in 1 hour
+	cm.tokens[token] = time.Now().Add(1 * time.Hour)
+
+	return token, nil
+}
+
+// ValidateToken validates a CSRF token and removes it (one-time use)
+func (cm *CSRFManager) ValidateToken(token string) bool {
+	if token == "" {
+		return false
+	}
+
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	expiry, exists := cm.tokens[token]
+	if !exists {
+		return false
+	}
+
+	// Check if token has expired
+	if time.Now().After(expiry) {
+		delete(cm.tokens, token)
+		return false
+	}
+
+	// Token is valid - remove it (one-time use)
+	delete(cm.tokens, token)
+	return true
+}
+
+// cleanupRoutine removes expired tokens every 10 minutes
+func (cm *CSRFManager) cleanupRoutine() {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			cm.cleanup()
+		}
+	}
+}
+
+// cleanup removes expired tokens
+func (cm *CSRFManager) cleanup() {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	now := time.Now()
+	for token, expiry := range cm.tokens {
+		if now.After(expiry) {
+			delete(cm.tokens, token)
+		}
+	}
+}
+
+// Global CSRF manager instance
+var csrfManager = NewCSRFManager()
 
 type CommandHistory struct {
 	history map[string][]string
@@ -205,6 +297,57 @@ The dashboard provides a web interface for managing your cron jobs and crontab f
 		safeMode, _ := cmd.Flags().GetBool("safe-mode")
 		isSafeModeEnabled = safeMode
 
+		// CSRF middleware
+		csrfMiddleware := func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// For GET requests, generate a new CSRF token and set it in a cookie
+				if r.Method == "GET" {
+					token, err := csrfManager.GenerateToken()
+					if err != nil {
+						http.Error(w, "Failed to generate CSRF token", http.StatusInternalServerError)
+						return
+					}
+
+					// Set CSRF token in secure HTTP-only cookie with SameSite=Strict
+					cookie := &http.Cookie{
+						Name:     "csrf_token",
+						Value:    token,
+						Path:     "/",
+						HttpOnly: true,
+						SameSite: http.SameSiteStrictMode,
+						Secure:   false, // Set to true when HTTPS is implemented
+						MaxAge:   3600,  // 1 hour
+					}
+					http.SetCookie(w, cookie)
+
+					// Also send token in response header for AJAX requests
+					w.Header().Set("X-CSRF-Token", token)
+				} else if r.Method == "POST" || r.Method == "PUT" || r.Method == "DELETE" {
+					// For state-changing requests, validate CSRF token
+					var token string
+
+					// Check for CSRF token in X-CSRF-Token header first (for AJAX requests)
+					token = r.Header.Get("X-CSRF-Token")
+
+					// If not found in header, check in form data
+					if token == "" {
+						token = r.FormValue("csrf_token")
+					}
+
+					// DO NOT accept CSRF tokens from cookies - this would defeat CSRF protection
+					// since cookies are automatically sent by browsers, including in CSRF attacks
+
+					// Validate the token
+					if !csrfManager.ValidateToken(token) {
+						http.Error(w, "CSRF token validation failed", http.StatusForbidden)
+						return
+					}
+				}
+
+				next.ServeHTTP(w, r)
+			})
+		}
+
 		// Basic auth middleware with rate limiting
 		authMiddleware := func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -252,6 +395,21 @@ The dashboard provides a web interface for managing your cron jobs and crontab f
 					return
 				}
 
+				// Authentication successful - regenerate CSRF token to prevent session fixation
+				if token, err := csrfManager.GenerateToken(); err == nil {
+					cookie := &http.Cookie{
+						Name:     "csrf_token",
+						Value:    token,
+						Path:     "/",
+						HttpOnly: true,
+						SameSite: http.SameSiteStrictMode,
+						Secure:   false, // Set to true when HTTPS is implemented
+						MaxAge:   3600,  // 1 hour
+					}
+					http.SetCookie(w, cookie)
+					w.Header().Set("X-CSRF-Token", token)
+				}
+
 				// Authentication successful - proceed to next handler
 				next.ServeHTTP(w, r)
 			})
@@ -289,37 +447,37 @@ The dashboard provides a web interface for managing your cron jobs and crontab f
 			http.ServeContent(w, r, "index.html", time.Now(), index.(io.ReadSeeker))
 		})
 
-		// Apply auth middleware to all routes
-		http.Handle("/", authMiddleware(handler))
+		// Apply auth and CSRF middleware to all routes
+		http.Handle("/", authMiddleware(csrfMiddleware(handler)))
 
 		// Add settings API endpoints
-		http.Handle("/api/settings", authMiddleware(http.HandlerFunc(handleSettings)))
+		http.Handle("/api/settings", authMiddleware(csrfMiddleware(http.HandlerFunc(handleSettings))))
 
 		// Add jobs endpoint
-		http.Handle("/api/jobs", authMiddleware(http.HandlerFunc(handleJobs)))
+		http.Handle("/api/jobs", authMiddleware(csrfMiddleware(http.HandlerFunc(handleJobs))))
 
 		// Add crontabs endpoint
-		http.Handle("/api/crontabs", authMiddleware(http.HandlerFunc(handleCrontabs)))
-		http.Handle("/api/crontabs/", authMiddleware(http.HandlerFunc(handleCrontab)))
+		http.Handle("/api/crontabs", authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontabs))))
+		http.Handle("/api/crontabs/", authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontab))))
 
 		// Add users endpoint
-		http.Handle("/api/users", authMiddleware(http.HandlerFunc(handleUsers)))
+		http.Handle("/api/users", authMiddleware(csrfMiddleware(http.HandlerFunc(handleUsers))))
 
 		// Add kill jobs endpoint
-		http.Handle("/api/jobs/kill", authMiddleware(http.HandlerFunc(handleKillInstances)))
+		http.Handle("/api/jobs/kill", authMiddleware(csrfMiddleware(http.HandlerFunc(handleKillInstances))))
 
 		// Add run job endpoint
-		http.Handle("/api/jobs/run", authMiddleware(http.HandlerFunc(handleRunJob)))
+		http.Handle("/api/jobs/run", authMiddleware(csrfMiddleware(http.HandlerFunc(handleRunJob))))
 
 		// Add monitors endpoint
-		http.Handle("/api/monitors", authMiddleware(http.HandlerFunc(handleGetMonitors)))
+		http.Handle("/api/monitors", authMiddleware(csrfMiddleware(http.HandlerFunc(handleGetMonitors))))
 
 		// Add signup endpoint
-		http.Handle("/api/signup", authMiddleware(http.HandlerFunc(handleSignup)))
+		http.Handle("/api/signup", authMiddleware(csrfMiddleware(http.HandlerFunc(handleSignup))))
 
 		// Add update endpoints
-		http.Handle("/api/update/check", authMiddleware(http.HandlerFunc(handleUpdateCheck)))
-		http.Handle("/api/update/perform", authMiddleware(http.HandlerFunc(handleUpdatePerform)))
+		http.Handle("/api/update/check", authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdateCheck))))
+		http.Handle("/api/update/perform", authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdatePerform))))
 
 		// Create HTTP server with proper configuration
 		server := &http.Server{

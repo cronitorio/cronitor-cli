@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { csrfFetch } from '../../utils/api';
 
 export function SignupForm({ onSuccess, onError }) {
   const [name, setName] = useState('');
@@ -41,7 +42,7 @@ export function SignupForm({ onSuccess, onError }) {
     setErrors({});
     
     try {
-      const response = await fetch('/api/signup', {
+      const response = await csrfFetch('/api/signup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

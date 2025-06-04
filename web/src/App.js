@@ -9,8 +9,7 @@ import Jobs from './components/Jobs';
 import Crontabs from './components/Crontabs';
 import Docs from './components/Docs';
 import { usePrefetch } from './hooks/usePrefetch';
-
-const fetcher = url => fetch(url).then(res => res.json());
+import { csrfFetcher, csrfFetch } from './utils/api';
 
 const navigation = [
   { name: 'Jobs', href: '/', icon: ClockIcon },
@@ -42,7 +41,7 @@ function ToggleSwitch({ isOn, onChange }) {
 
 function Sidebar({ isDark, toggleTheme }) {
   const location = useLocation();
-  const { data } = useSWR('/api/settings', fetcher, {
+  const { data } = useSWR('/api/settings', csrfFetcher, {
     refreshInterval: 30000, // Reduced from 5s to 30s - settings don't change often
     revalidateOnFocus: false
   });
@@ -66,7 +65,7 @@ function Sidebar({ isDark, toggleTheme }) {
     setUpdateProgress('Starting update...');
 
     try {
-      const response = await fetch('/api/update/perform', {
+      const response = await csrfFetch('/api/update/perform', {
         method: 'POST',
       });
 

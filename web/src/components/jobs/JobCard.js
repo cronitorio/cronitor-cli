@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { JobHeader } from './JobHeader';
 import { StatusBadges } from './StatusBadges';
 import { ScheduleSection } from './ScheduleSection';
@@ -12,6 +12,7 @@ import { DeleteConfirmation } from './DeleteConfirmation';
 import { ConsoleModal } from './ConsoleModal';
 import { LearnMoreModal } from './LearnMoreModal';
 import { useJobOperations } from '../../hooks/useJobOperations';
+import { csrfFetch } from '../../utils/api';
 
 export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSave, onDiscard, onFormChange, onLocationChange, showToast, isMacOS, onJobChange, crontabMutate, selectedCrontab, setSelectedCrontab, readOnly = false, settings, monitorsLoading = false, users = [], crontabs = [] }) {
   const [isEditing, setIsEditing] = React.useState(isNew);
@@ -132,7 +133,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         };
 
         // Make the API call
-        const response = await fetch('/api/jobs', {
+        const response = await csrfFetch('/api/jobs', {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -186,7 +187,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
 
   const handleSuspendedSubmit = async () => {
     try {
-      const response = await fetch(`/api/jobs/${initialJob.id}/suspend`, {
+      const response = await csrfFetch(`/api/jobs/${initialJob.id}/suspend`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -210,7 +211,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
 
   const handleScheduledSubmit = async () => {
     try {
-      const response = await fetch(`/api/jobs/${initialJob.id}/schedule`, {
+      const response = await csrfFetch(`/api/jobs/${initialJob.id}/schedule`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -289,7 +290,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
 
   const handleRunNow = async () => {
     try {
-      const response = await fetch('/api/jobs/run', {
+      const response = await csrfFetch('/api/jobs/run', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -333,7 +334,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         ignored: true
       };
       
-      const response = await fetch('/api/jobs', {
+      const response = await csrfFetch('/api/jobs', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -442,7 +443,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         // For ultra-explicit safety, use a string representation in the body
         const requestBodyStr = JSON.stringify(requestBody);
         
-        const response = await fetch('/api/jobs', {
+        const response = await csrfFetch('/api/jobs', {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -864,7 +865,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                     });
                   } else {
                     // For existing jobs, make the API call
-                    const response = await fetch('/api/jobs', {
+                    const response = await csrfFetch('/api/jobs', {
                       method: 'PUT',
                       headers: {
                         'Content-Type': 'application/json',
