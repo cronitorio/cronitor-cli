@@ -41,6 +41,127 @@ func SetWebAssets(assets embed.FS) {
 	webAssets = assets
 }
 
+// IP Filter for restricting access by IP address
+type IPFilter struct {
+	allowedNetworks []*net.IPNet
+	mutex           sync.RWMutex
+}
+
+// NewIPFilter creates a new IP filter instance
+func NewIPFilter() *IPFilter {
+	return &IPFilter{
+		allowedNetworks: make([]*net.IPNet, 0),
+	}
+}
+
+// LoadAllowedIPs parses the CRONITOR_ALLOWED_IPS environment variable
+func (ipf *IPFilter) LoadAllowedIPs() error {
+	ipf.mutex.Lock()
+	defer ipf.mutex.Unlock()
+
+	allowedIPsEnv := viper.GetString(varAllowedIPs)
+
+	if allowedIPsEnv == "" {
+		// No IP filtering if environment variable is empty
+		ipf.allowedNetworks = make([]*net.IPNet, 0)
+		return nil
+	}
+
+	var networks []*net.IPNet
+	ipRanges := strings.Split(allowedIPsEnv, ",")
+
+	for _, ipRange := range ipRanges {
+		ipRange = strings.TrimSpace(ipRange)
+		if ipRange == "" {
+			continue
+		}
+
+		// Check if it's a single IP (add /32 for IPv4 or /128 for IPv6)
+		if !strings.Contains(ipRange, "/") {
+			ip := net.ParseIP(ipRange)
+			if ip == nil {
+				return fmt.Errorf("invalid IP address: %s", ipRange)
+			}
+			if ip.To4() != nil {
+				ipRange += "/32" // IPv4
+			} else {
+				ipRange += "/128" // IPv6
+			}
+		}
+
+		_, network, err := net.ParseCIDR(ipRange)
+		if err != nil {
+			return fmt.Errorf("invalid CIDR notation: %s - %v", ipRange, err)
+		}
+
+		networks = append(networks, network)
+	}
+
+	ipf.allowedNetworks = networks
+	if len(networks) > 0 {
+		log(fmt.Sprintf("IP filtering enabled with %d allowed networks", len(networks)))
+	}
+	return nil
+}
+
+// IsAllowed checks if an IP address is allowed
+func (ipf *IPFilter) IsAllowed(clientIP string) bool {
+	ipf.mutex.RLock()
+	defer ipf.mutex.RUnlock()
+
+	// If no IP restrictions are configured, allow all
+	if len(ipf.allowedNetworks) == 0 {
+		return true
+	}
+
+	ip := net.ParseIP(clientIP)
+	if ip == nil {
+		return false
+	}
+
+	// Handle IPv4-mapped IPv6 addresses
+	if ipv4 := ip.To4(); ipv4 != nil {
+		ip = ipv4
+	}
+
+	// Check if IP is in any of the allowed networks
+	for _, network := range ipf.allowedNetworks {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// createIPFilterMiddleware creates middleware that checks client IP against whitelist
+func createIPFilterMiddleware(ipFilter *IPFilter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			clientIP := getClientIP(r)
+
+			if !ipFilter.IsAllowed(clientIP) {
+				log(fmt.Sprintf("IP access denied: %s", clientIP))
+				// Close connection silently without any response to make it appear like no service is running
+				if hijacker, ok := w.(http.Hijacker); ok {
+					conn, _, err := hijacker.Hijack()
+					if err == nil {
+						conn.Close() // Close connection immediately - appears like connection refused/timeout
+						return
+					}
+				}
+				// Fallback: if hijacking fails, just return nothing (no headers, no body)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// Global IP filter instance
+var ipFilter = NewIPFilter()
+
 // CSRF token management
 type CSRFManager struct {
 	tokens map[string]time.Time // token -> expiry time
@@ -297,6 +418,14 @@ The dashboard provides a web interface for managing your cron jobs and crontab f
 		safeMode, _ := cmd.Flags().GetBool("safe-mode")
 		isSafeModeEnabled = safeMode
 
+		// Load IP filtering configuration
+		if err := ipFilter.LoadAllowedIPs(); err != nil {
+			fatal(fmt.Sprintf("Failed to load IP filtering configuration: %v", err), 1)
+		}
+
+		// Create IP filter middleware
+		ipFilterMiddleware := createIPFilterMiddleware(ipFilter)
+
 		// CSRF middleware
 		csrfMiddleware := func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -447,37 +576,37 @@ The dashboard provides a web interface for managing your cron jobs and crontab f
 			http.ServeContent(w, r, "index.html", time.Now(), index.(io.ReadSeeker))
 		})
 
-		// Apply auth and CSRF middleware to all routes
-		http.Handle("/", authMiddleware(csrfMiddleware(handler)))
+		// Apply IP filter, auth and CSRF middleware to all routes
+		http.Handle("/", ipFilterMiddleware(authMiddleware(csrfMiddleware(handler))))
 
 		// Add settings API endpoints
-		http.Handle("/api/settings", authMiddleware(csrfMiddleware(http.HandlerFunc(handleSettings))))
+		http.Handle("/api/settings", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleSettings)))))
 
 		// Add jobs endpoint
-		http.Handle("/api/jobs", authMiddleware(csrfMiddleware(http.HandlerFunc(handleJobs))))
+		http.Handle("/api/jobs", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleJobs)))))
 
 		// Add crontabs endpoint
-		http.Handle("/api/crontabs", authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontabs))))
-		http.Handle("/api/crontabs/", authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontab))))
+		http.Handle("/api/crontabs", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontabs)))))
+		http.Handle("/api/crontabs/", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontab)))))
 
 		// Add users endpoint
-		http.Handle("/api/users", authMiddleware(csrfMiddleware(http.HandlerFunc(handleUsers))))
+		http.Handle("/api/users", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUsers)))))
 
 		// Add kill jobs endpoint
-		http.Handle("/api/jobs/kill", authMiddleware(csrfMiddleware(http.HandlerFunc(handleKillInstances))))
+		http.Handle("/api/jobs/kill", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleKillInstances)))))
 
 		// Add run job endpoint
-		http.Handle("/api/jobs/run", authMiddleware(csrfMiddleware(http.HandlerFunc(handleRunJob))))
+		http.Handle("/api/jobs/run", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleRunJob)))))
 
 		// Add monitors endpoint
-		http.Handle("/api/monitors", authMiddleware(csrfMiddleware(http.HandlerFunc(handleGetMonitors))))
+		http.Handle("/api/monitors", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleGetMonitors)))))
 
 		// Add signup endpoint
-		http.Handle("/api/signup", authMiddleware(csrfMiddleware(http.HandlerFunc(handleSignup))))
+		http.Handle("/api/signup", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleSignup)))))
 
 		// Add update endpoints
-		http.Handle("/api/update/check", authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdateCheck))))
-		http.Handle("/api/update/perform", authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdatePerform))))
+		http.Handle("/api/update/check", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdateCheck)))))
+		http.Handle("/api/update/perform", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdatePerform)))))
 
 		// Create HTTP server with proper configuration
 		server := &http.Server{
@@ -581,6 +710,8 @@ type SettingsResponse struct {
 	OS             string          `json:"os"`
 	SafeMode       bool            `json:"safe_mode"`
 	UpdateStatus   *UpdateStatus   `json:"update_status,omitempty"`
+	AllowedIPs     string          `json:"allowed_ips"`
+	ClientIP       string          `json:"client_ip"`
 }
 
 // handleSettings handles GET and POST requests for settings
@@ -702,10 +833,13 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 				"CRONITOR_ENV":          os.Getenv(varEnv) != "",
 				"CRONITOR_DASH_USER":    os.Getenv(varDashUsername) != "",
 				"CRONITOR_DASH_PASS":    os.Getenv(varDashPassword) != "",
+				"CRONITOR_ALLOWED_IPS":  os.Getenv(varAllowedIPs) != "",
 			},
 			OS:           runtime.GOOS,
 			SafeMode:     isSafeModeEnabled,
 			UpdateStatus: updateStatus,
+			AllowedIPs:   os.Getenv(varAllowedIPs),
+			ClientIP:     getClientIP(r),
 		}
 
 		// Override config values with environment variables if they exist
@@ -714,6 +848,9 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if os.Getenv(varDashPassword) != "" {
 			response.DashPassword = os.Getenv(varDashPassword)
+		}
+		if os.Getenv(varAllowedIPs) != "" {
+			response.AllowedIPs = os.Getenv(varAllowedIPs)
 		}
 
 		responseData, err := json.Marshal(response)
@@ -756,6 +893,16 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if !viper.IsSet(varDashPassword) {
 			viper.Set(varDashPassword, configData.DashPassword)
+		}
+
+		// Handle AllowedIPs specially - always update if not overridden by environment variable
+		if os.Getenv(varAllowedIPs) == "" {
+			viper.Set(varAllowedIPs, configData.AllowedIPs)
+			// ALWAYS reload IP filter configuration when AllowedIPs changes through settings
+			if err := ipFilter.LoadAllowedIPs(); err != nil {
+				http.Error(w, fmt.Sprintf("Invalid IP configuration: %v", err), http.StatusBadRequest)
+				return
+			}
 		}
 
 		// Marshal the config data

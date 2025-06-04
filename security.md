@@ -38,28 +38,16 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
     • ✅ Implement middleware to validate CSRF tokens on all state-changing requests (POST/PUT/DELETE)
     • ✅ Regenerate CSRF tokens after successful authentication to prevent session fixation
 
-- Add IP-based access restrictions
+- ✅ Add IP-based access restrictions
   - Problem: No way to restrict access to specific IP ranges
   - Implementation: Add configurable IP whitelist/blacklist with CIDR support, implement middleware to check client IPs
   - Details:
-    • Accept CRONITOR_ALLOWED_IPS environment variable with comma-separated CIDR notation, if empty then no filtering is applied
-    • Use net.ParseCIDR() to parse and validate IP ranges during startup
-    • Implement middleware that extracts client IP from X-Forwarded-For, X-Real-IP, or RemoteAddr
-    • Create IPFilter middleware that checks client IP against whitelist using net.Contains()
-    • Support both IPv4 and IPv6 addresses, with proper handling of IPv4-mapped IPv6 addresses
-
-- Add support for TLS/HTTPS
-  - Problem: Current implementation allows unencrypted communication
-  - Implementation: Add TLS configuration with modern cipher suites, make HTTPS mandatory in production
-  - Details:
-    • Implement automated certificate acquisition using ACME/Let's Encrypt protocol
-    • Accept CRONITOR_ACME_EMAIL and CRONITOR_ACME_DIRECTORY environment variables for Let's Encrypt configuration
-    • Configure TLS with minimum version 1.2 and secure cipher suites (exclude RC4, DES, 3DES)
-    • Implement HTTP to HTTPS redirect middleware when TLS is enabled
-    • Add CRONITOR_TLS_REQUIRED environment variable to enforce HTTPS-only mode
-    • Support automatic certificate renewal with 90-day Let's Encrypt cycle
-    • Fallback to manual certificate files via CRONITOR_TLS_CERT_FILE/CRONITOR_TLS_KEY_FILE for custom deployments
-
+    • ✅ Accept CRONITOR_ALLOWED_IPS environment variable with comma-separated CIDR notation, if empty then no filtering is applied
+    • ✅ Use net.ParseCIDR() to parse and validate IP ranges during startup
+    • ✅ Implement middleware that extracts client IP from X-Forwarded-For, X-Real-IP, or RemoteAddr
+    • ✅ Create IPFilter middleware that checks client IP against whitelist using net.Contains()
+    • ✅ Support both IPv4 and IPv6 addresses, with proper handling of IPv4-mapped IPv6 addresses
+    • ✅ Add this field to the Settings page
 
 ### 2. Command Execution Security
 #### Current State

@@ -65,6 +65,7 @@ var varExcludeText = "CRONITOR_EXCLUDE_TEXT"
 var varConfig = "CRONITOR_CONFIG"
 var varDashUsername = "CRONITOR_DASH_USER"
 var varDashPassword = "CRONITOR_DASH_PASS"
+var varAllowedIPs = "CRONITOR_ALLOWED_IPS"
 
 func init() {
 	userAgent = fmt.Sprintf("CronitorCLI/%s", Version)

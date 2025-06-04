@@ -19,6 +19,7 @@ type ConfigFile struct {
 	Env            string   `json:"CRONITOR_ENV"`
 	DashUsername   string   `json:"CRONITOR_DASH_USER"`
 	DashPassword   string   `json:"CRONITOR_DASH_PASS"`
+	AllowedIPs     string   `json:"CRONITOR_ALLOWED_IPS"`
 }
 
 // configureCmd represents the configure command
@@ -60,6 +61,7 @@ Example setting common exclude text for use with 'cronitor discover':
 		configData.Env = viper.GetString(varEnv)
 		configData.DashUsername = viper.GetString(varDashUsername)
 		configData.DashPassword = viper.GetString(varDashPassword)
+		configData.AllowedIPs = viper.GetString(varAllowedIPs)
 
 		fmt.Println("\nConfiguration File:")
 		fmt.Println(configFilePath())
@@ -115,6 +117,13 @@ Example setting common exclude text for use with 'cronitor discover':
 			fmt.Println("********")
 		}
 
+		fmt.Println("\nAllowed IP Addresses:")
+		if configData.AllowedIPs == "" {
+			fmt.Println("All IPs allowed (no restrictions)")
+		} else {
+			fmt.Println(configData.AllowedIPs)
+		}
+
 		if verbose {
 			fmt.Println("\nEnviornment Variables:")
 			for _, pair := range os.Environ() {
@@ -152,6 +161,7 @@ func init() {
 	configureCmd.Flags().StringSliceP("exclude-from-name", "e", []string{}, "Substring to always exclude from generated monitor name e.g. $ cronitor configure -e '> /dev/null' -e '/path/to/app'")
 	configureCmd.Flags().String("dash-username", "", "Username for the dashboard authentication")
 	configureCmd.Flags().String("dash-password", "", "Password for the dashboard authentication")
+	configureCmd.Flags().String("allowed-ips", "", "Comma-separated list of allowed IP addresses/CIDR ranges (e.g. 192.168.1.0/24,10.0.0.1)")
 	configureCmd.Flags().String("api-key", "", "Your Cronitor API key")
 	configureCmd.Flags().String("ping-api-key", "", "Your Cronitor Ping API key")
 	configureCmd.Flags().String("hostname", "", "Hostname to use for monitor identification")
@@ -161,6 +171,7 @@ func init() {
 	viper.BindPFlag(varExcludeText, configureCmd.Flags().Lookup("exclude-from-name"))
 	viper.BindPFlag(varDashUsername, configureCmd.Flags().Lookup("dash-username"))
 	viper.BindPFlag(varDashPassword, configureCmd.Flags().Lookup("dash-password"))
+	viper.BindPFlag(varAllowedIPs, configureCmd.Flags().Lookup("allowed-ips"))
 	viper.BindPFlag(varApiKey, configureCmd.Flags().Lookup("api-key"))
 	viper.BindPFlag(varPingApiKey, configureCmd.Flags().Lookup("ping-api-key"))
 	viper.BindPFlag(varHostname, configureCmd.Flags().Lookup("hostname"))
