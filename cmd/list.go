@@ -1,12 +1,13 @@
 package cmd
 
 import (
-	"github.com/cronitorio/cronitor-cli/lib"
 	"fmt"
-	"github.com/olekukonko/tablewriter"
-	"github.com/spf13/cobra"
 	"os"
 	"os/user"
+
+	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/olekukonko/tablewriter"
+	"github.com/spf13/cobra"
 )
 
 var listCmd = &cobra.Command{
@@ -45,7 +46,7 @@ Example:
 			}
 		} else {
 			// Without a supplied argument look at the user crontab, system crontab, and the system drop-in directory
-			crontabs = lib.ReadCrontabFromFile(username, "", crontabs)
+			crontabs = lib.ReadCrontabFromFile(username, fmt.Sprintf("user:%s", username), crontabs)
 			crontabs = lib.ReadCrontabFromFile(username, lib.SYSTEM_CRONTAB, crontabs)
 			crontabs = lib.ReadCrontabsInDirectory(username, lib.DROP_IN_DIRECTORY, crontabs)
 		}

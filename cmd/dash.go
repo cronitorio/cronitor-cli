@@ -191,9 +191,9 @@ func openBrowser(url string) {
 
 var dashCmd = &cobra.Command{
 	Use:   "dash",
-	Short: "Start the Cronitor web dashboard",
-	Long: `Start the Cronitor web dashboard server.
-The dashboard provides a web interface for managing your Cronitor monitors and crontabs.`,
+	Short: "Start the web dashboard",
+	Long: `Start the Crontab Guru web dashboard.
+The dashboard provides a web interface for managing your cron jobs and crontab files.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		port, _ := cmd.Flags().GetInt("port")
 		if port == 0 {
@@ -216,7 +216,7 @@ The dashboard provides a web interface for managing your Cronitor monitors and c
 
 				auth := r.Header.Get("Authorization")
 				if auth == "" {
-					w.Header().Set("WWW-Authenticate", `Basic realm="Cronitor Dashboard"`)
+					w.Header().Set("WWW-Authenticate", `Basic realm="Crontab Guru Dashboard"`)
 					http.Error(w, "Unauthorized", http.StatusUnauthorized)
 					return
 				}
