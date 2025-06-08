@@ -27,7 +27,9 @@ export function InstancesTable({
         </thead>
         <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
           {instances.length > 0 ? (
-            instances.map((instance) => (
+            instances
+              .sort((a, b) => new Date(a.started) - new Date(b.started))
+              .map((instance) => (
               <tr key={instance.pid}>
                 <td className="py-2 text-sm text-gray-900 dark:text-gray-100">
                   {instance.pid}

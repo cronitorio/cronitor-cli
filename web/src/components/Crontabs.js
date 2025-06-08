@@ -5,43 +5,47 @@ import { Toast } from './Toast';
 import { JobCard } from './jobs/JobCard';
 import { CommentCard } from './crontabs/CommentCard';
 import { EnvVarCard } from './crontabs/EnvVarCard';
+import { useLocation } from 'react-router-dom';
 import { csrfFetcher, csrfFetch } from '../utils/api';
 
 export default function Crontabs() {
+  const location = useLocation();
+  const isCrontabsView = location.pathname === '/crontabs';
+  
   const [revalidationKey, setRevalidationKey] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState('');
   const textareaRef = useRef(null);
   
-  // Load settings first (non-critical, no refresh)
+  // Settings data - minimal refresh
   const { data: settings } = useSWR('/api/settings', csrfFetcher, {
     revalidateOnFocus: false,
     refreshInterval: 0
   });
   
-  // Load crontabs with auto-refresh
+  // Primary data for Crontabs view - fast refresh
   const { data: crontabs, error, mutate } = useSWR(
     `/api/crontabs?key=${revalidationKey}`,
     csrfFetcher,
     {
-      refreshInterval: 5000, // Auto-refresh every 5 seconds
+      refreshInterval: 5000, // Keep fast refresh for primary data
       revalidateOnFocus: true,
       dedupingInterval: 5000 // 5 seconds deduplication to match refresh
     }
   );
   
-  // Load jobs with auto-refresh
+  // Jobs data - slower refresh since it's secondary on Crontabs view
   const { data: jobs, mutate: jobsMutate } = useSWR(
     crontabs ? `/api/jobs?key=${revalidationKey}` : null, 
     csrfFetcher, 
     {
-      refreshInterval: 5000, // Auto-refresh every 5 seconds
+      refreshInterval: isCrontabsView ? 30000 : 5000, // 30s on Crontabs view, 5s elsewhere
       revalidateOnFocus: true,
-      dedupingInterval: 5000 // 5 seconds deduplication to match refresh
+      dedupingInterval: isCrontabsView ? 30000 : 5000 // Match refresh interval
     }
   );
   
-  // Load users data with minimal refresh since it changes infrequently
+  // User data - minimal refresh since it changes infrequently
   const { data: users } = useSWR('/api/users', csrfFetcher, {
     refreshInterval: 0, // No auto-refresh - users rarely change
     revalidateOnFocus: true, // Revalidate when window gets focus

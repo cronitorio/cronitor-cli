@@ -48,19 +48,35 @@ export function usePrefetch() {
     mutate('/api/settings', data, false);
   }, []);
 
+  const prefetchUsers = useCallback(async () => {
+    const data = await fetcher('/api/users');
+    mutate('/api/users', data, false);
+  }, []);
+
+  const prefetchMonitors = useCallback(async () => {
+    const data = await fetcher('/api/monitors');
+    mutate('/api/monitors', data, false);
+  }, []);
+
   const prefetchAll = useCallback(async () => {
     // Stagger the requests to avoid congestion
     await prefetchSettings();
     await new Promise(resolve => setTimeout(resolve, 100));
+    await prefetchUsers();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await prefetchMonitors();
+    await new Promise(resolve => setTimeout(resolve, 100));
     await prefetchCrontabs();
     await new Promise(resolve => setTimeout(resolve, 100));
     await prefetchJobs();
-  }, [prefetchSettings, prefetchCrontabs, prefetchJobs]);
+  }, [prefetchSettings, prefetchUsers, prefetchMonitors, prefetchCrontabs, prefetchJobs]);
 
   return {
     prefetchCrontabs,
     prefetchJobs,
     prefetchSettings,
+    prefetchUsers,
+    prefetchMonitors,
     prefetchAll
   };
 } 

@@ -1,11 +1,17 @@
 import { useState, useEffect } from 'react';
 import useSWR from 'swr';
 import { ExclamationTriangleIcon, EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
+import { useLocation } from 'react-router-dom';
 import { csrfFetcher, csrfFetch } from '../utils/api';
 
 export default function Settings() {
+  const location = useLocation();
+  const isSettingsView = location.pathname === '/settings';
+  
   const { data, error, mutate } = useSWR('/api/settings', csrfFetcher, {
-    refreshInterval: 5000, // Refresh every 5 seconds
+    refreshInterval: isSettingsView ? 30000 : 0, // 30s on Settings view, no refresh elsewhere
+    revalidateOnFocus: true, // Revalidate when user comes back to the tab
+    revalidateOnMount: true, // Always fetch fresh data when component mounts
   });
 
   const [formData, setFormData] = useState({

@@ -312,70 +312,59 @@ var commandHistory = NewCommandHistory()
 
 var isSafeModeEnabled bool
 
-// Cache for avoiding unnecessary crontab re-parsing
-type crontabFileCache struct {
-	jobs         []Job
-	timestamp    time.Time
-	fileModTimes map[string]time.Time
-	mutex        sync.RWMutex
+// Process cache for debouncing expensive ps commands
+type processCache struct {
+	lines     []string // Parsed ps output lines
+	timestamp time.Time
+	mutex     sync.RWMutex
 }
 
-var fileCache = &crontabFileCache{
-	fileModTimes: make(map[string]time.Time),
-}
+var psCache = &processCache{}
 
-// checkCrontabFilesChanged returns true if any crontab files have been modified
-func checkCrontabFilesChanged() bool {
-	fileCache.mutex.RLock()
-	defer fileCache.mutex.RUnlock()
+// getCachedProcessList returns cached ps output or refreshes if older than 5 seconds
+func getCachedProcessList() []string {
+	psCache.mutex.RLock()
+	cacheAge := time.Since(psCache.timestamp)
+	hasValidCache := len(psCache.lines) > 0 && cacheAge < 5*time.Second
+	if hasValidCache {
+		cachedLines := make([]string, len(psCache.lines))
+		copy(cachedLines, psCache.lines)
+		psCache.mutex.RUnlock()
+		return cachedLines
+	}
+	psCache.mutex.RUnlock()
 
-	// Check user crontab (always consider it potentially changed)
+	// Cache miss or expired - refresh the cache
+	psCache.mutex.Lock()
+	defer psCache.mutex.Unlock()
 
-	// Check system crontab
-	if info, err := os.Stat("/etc/crontab"); err == nil {
-		if lastMod, exists := fileCache.fileModTimes["/etc/crontab"]; !exists || info.ModTime().After(lastMod) {
-			return true
-		}
+	// Double-check in case another goroutine refreshed while we were waiting
+	cacheAge = time.Since(psCache.timestamp)
+	if len(psCache.lines) > 0 && cacheAge < 5*time.Second {
+		cachedLines := make([]string, len(psCache.lines))
+		copy(cachedLines, psCache.lines)
+		return cachedLines
 	}
 
-	// Check cron.d directory
-	if entries, err := os.ReadDir("/etc/cron.d"); err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				filePath := filepath.Join("/etc/cron.d", entry.Name())
-				if info, err := entry.Info(); err == nil {
-					if lastMod, exists := fileCache.fileModTimes[filePath]; !exists || info.ModTime().After(lastMod) {
-						return true
-					}
-				}
-			}
-		}
+	// Execute ps command to refresh cache
+	cmd := exec.Command("ps", "-eo", "pgid,lstart,args")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	if err := cmd.Run(); err != nil {
+		// Return empty cache on error, don't update timestamp so next call will retry
+		return []string{}
 	}
 
-	return false
-}
+	// Parse and cache the output
+	output := out.String()
+	psCache.lines = strings.Split(output, "\n")
+	psCache.timestamp = time.Now()
 
-// updateFileModTimes updates the cached modification times
-func updateFileModTimes() {
-	fileCache.mutex.Lock()
-	defer fileCache.mutex.Unlock()
-
-	// Update system crontab
-	if info, err := os.Stat("/etc/crontab"); err == nil {
-		fileCache.fileModTimes["/etc/crontab"] = info.ModTime()
-	}
-
-	// Update cron.d files
-	if entries, err := os.ReadDir("/etc/cron.d"); err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				filePath := filepath.Join("/etc/cron.d", entry.Name())
-				if info, err := entry.Info(); err == nil {
-					fileCache.fileModTimes[filePath] = info.ModTime()
-				}
-			}
-		}
-	}
+	// Return a copy to avoid external modifications
+	cachedLines := make([]string, len(psCache.lines))
+	copy(cachedLines, psCache.lines)
+	return cachedLines
 }
 
 // Simple cache to prevent re-parsing unchanged crontab files
@@ -986,28 +975,7 @@ func handleJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetJobs(w http.ResponseWriter, r *http.Request) {
-	// Check cache first - use cached data if files haven't changed and cache is recent
-	fileCache.mutex.RLock()
-	cacheAge := time.Since(fileCache.timestamp)
-	hasCachedData := len(fileCache.jobs) > 0
-	fileCache.mutex.RUnlock()
-
-	// Use cache if it's less than 10 seconds old and files haven't changed
-	if hasCachedData && cacheAge < 10*time.Second && !checkCrontabFilesChanged() {
-		fileCache.mutex.RLock()
-		cachedJobs := fileCache.jobs
-		fileCache.mutex.RUnlock()
-
-		responseData, err := json.Marshal(cachedJobs)
-		if err != nil {
-			http.Error(w, "Failed to marshal cached response", http.StatusInternalServerError)
-			return
-		}
-		w.Write(responseData)
-		return
-	}
-
-	// Cache miss or files changed - parse crontabs
+	// Parse crontabs
 	crontabs, err := lib.GetAllCrontabs()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1097,7 +1065,7 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 				Initialized:        false,
 				Code:               line.Code,
 				Key:                jobKey,
-				Instances:          []JobInstance{}, // Keep empty to avoid other leaks
+				Instances:          []JobInstance{}, // Will be populated below if conditions are met
 				Suspended:          &line.IsComment,
 				IsMetaCronJob:      line.IsMetaCronJob(),
 				Ignored:            line.Ignored,
@@ -1118,21 +1086,43 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Populate instances for jobs using command history, but limit to first 50 jobs to prevent performance issues
+	if len(jobs) > 0 {
+		maxJobsForInstances := 50
+		if len(jobs) < maxJobsForInstances {
+			maxJobsForInstances = len(jobs)
+		}
+
+		jobsWithInstances := 0
+
+		for i := 0; i < maxJobsForInstances; i++ {
+			job := &jobs[i]
+			// Skip if job is suspended/commented out or ignored
+			if (job.Suspended != nil && *job.Suspended) || job.Ignored {
+				continue
+			}
+
+			if job.Command != "" {
+				// Get full command history for this job (current + historical commands)
+				commands := commandHistory.GetCommands(job.Key, job.Command)
+
+				// Find instances using the full command history
+				matchingInstances := findInstances(commands)
+
+				if len(matchingInstances) > 0 {
+					job.Instances = matchingInstances
+					jobsWithInstances++
+				}
+			}
+		}
+	}
+
 	// Save any modified crontabs
 	for _, crontab := range crontabsToSave {
 		if err := crontab.Save(crontab.Write()); err != nil {
 			log(fmt.Sprintf("Warning: Failed to save crontab %s after syncing monitor names: %v", crontab.Filename, err))
 		}
 	}
-
-	// Update cache
-	fileCache.mutex.Lock()
-	fileCache.jobs = jobs
-	fileCache.timestamp = time.Now()
-	fileCache.mutex.Unlock()
-
-	// Update file modification times
-	updateFileModTimes()
 
 	responseData, err := json.Marshal(jobs)
 	if err != nil {
@@ -1231,20 +1221,13 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// findInstances finds running instances of commands using cached ps output
 func findInstances(commandStrings []string) []JobInstance {
-	// TEMPORARILY DISABLED: Early return to prevent CPU saturation
-	// TODO: Re-enable with proper caching and rate limiting
-	return []JobInstance{}
-
-	cmd := exec.Command("ps", "-eo", "pgid,lstart,args")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-
-	if err := cmd.Run(); err != nil {
+	if len(commandStrings) == 0 {
 		return []JobInstance{}
 	}
 
-	lines := strings.Split(out.String(), "\n")
+	lines := getCachedProcessList()
 	instances := make([]JobInstance, 0)
 	seenPGIDs := make(map[string]bool) // To avoid duplicate entries
 
@@ -1253,6 +1236,7 @@ func findInstances(commandStrings []string) []JobInstance {
 		if len(fields) < 8 {
 			continue
 		}
+
 		pgid := fields[0] // Process group ID
 		// The start time is fields[1:6] (day month date time year)
 		started := strings.Join(fields[1:6], " ")
@@ -1267,7 +1251,7 @@ func findInstances(commandStrings []string) []JobInstance {
 		for _, cmdStr := range commandStrings {
 			if strings.Contains(args, cmdStr) && !seenPGIDs[pgid] {
 				instances = append(instances, JobInstance{
-					PID:     pgid, // Now storing process group ID instead of PID
+					PID:     pgid,
 					Started: started,
 				})
 				seenPGIDs[pgid] = true
@@ -1368,6 +1352,12 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 		cmd.Stdout = tempFile
 		cmd.Stderr = tempFile
 
+		// Create a new process group for each "run now" command
+		// This ensures each invocation gets its own PGID for proper tracking
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Setpgid: true,
+		}
+
 		err := cmd.Start()
 		if err != nil {
 			errorData, _ := json.Marshal(map[string]string{"error": fmt.Sprintf("Error starting command: %v", err)})
@@ -1380,6 +1370,11 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 		pidData, _ := json.Marshal(map[string]int{"pid": cmd.Process.Pid})
 		fmt.Fprintf(w, "data: %s\n\n", pidData)
 		w.(http.Flusher).Flush()
+
+		// Invalidate server-side caches so new instances show up immediately
+		invalidateCrontabCache()
+		// Also invalidate process cache since a new process was started
+		invalidateProcessCache()
 
 		err = cmd.Wait()
 		duration := time.Since(startTime)
@@ -1499,35 +1494,90 @@ func handleKillInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var errors []KillError
+	var killed []int
 
 	for _, pid := range request.PIDs {
 		// Use kill with -9 to send SIGKILL to the process
 		cmd := exec.Command("kill", "-9", fmt.Sprintf("%d", pid))
-		if err := cmd.Run(); err != nil {
-			// Check if the process has already exited
-			if strings.Contains(err.Error(), "No such process") {
+		output, err := cmd.CombinedOutput()
+
+		if err != nil {
+			outputStr := strings.ToLower(string(output))
+			errorStr := strings.ToLower(err.Error())
+
+			// Check if the process doesn't exist (count as success)
+			if strings.Contains(outputStr, "no such process") ||
+				strings.Contains(errorStr, "no such process") ||
+				strings.Contains(outputStr, "no process found") ||
+				strings.Contains(errorStr, "no process found") {
+				// Process already gone - count as successful
+				killed = append(killed, pid)
 				continue
 			}
-			// If it's a permission error, add it to our error list
-			if strings.Contains(err.Error(), "Operation not permitted") {
+
+			// Check for permission errors
+			if strings.Contains(outputStr, "operation not permitted") ||
+				strings.Contains(errorStr, "operation not permitted") ||
+				strings.Contains(outputStr, "permission denied") ||
+				strings.Contains(errorStr, "permission denied") {
 				errors = append(errors, KillError{
 					PID:   pid,
 					Error: "Insufficient privileges to kill process",
 				})
+			} else {
+				// For other errors, try to provide more context
+				errorMessage := err.Error()
+				if len(output) > 0 {
+					errorMessage = fmt.Sprintf("%s: %s", errorMessage, strings.TrimSpace(string(output)))
+				}
+
+				// Check if this might be a "process not found" case with exit status 1
+				if strings.Contains(errorMessage, "exit status 1") {
+					// Double-check by trying to see if process exists with ps
+					checkCmd := exec.Command("ps", "-p", fmt.Sprintf("%d", pid))
+					if checkErr := checkCmd.Run(); checkErr != nil {
+						// ps failed to find the process, so it doesn't exist
+						killed = append(killed, pid)
+						continue
+					}
+				}
+
+				errors = append(errors, KillError{
+					PID:   pid,
+					Error: errorMessage,
+				})
 			}
+		} else {
+			// Successfully killed
+			killed = append(killed, pid)
 		}
 	}
 
+	// Always set content type and return JSON response
+	w.Header().Set("Content-Type", "application/json")
+
+	// Invalidate caches if any processes were killed (even partial success)
+	if len(killed) > 0 {
+		invalidateCrontabCache()
+		// Also invalidate process cache since the process list has changed
+		invalidateProcessCache()
+	}
+
 	if len(errors) > 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
+		w.WriteHeader(http.StatusPartialContent) // 206 for partial success
 		json.NewEncoder(w).Encode(map[string]interface{}{
+			"killed": killed,
 			"errors": errors,
 		})
 		return
 	}
 
+	// Complete success
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"killed":  killed,
+		"message": fmt.Sprintf("Successfully killed %d process(es)", len(killed)),
+	})
 }
 
 // handleDeleteJob handles DELETE requests to delete a job
@@ -2204,12 +2254,15 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 
 // Helper function to invalidate crontab cache
 func invalidateCrontabCache() {
-	fileCache.mutex.Lock()
-	fileCache.jobs = nil
-	fileCache.timestamp = time.Time{}
-	// Clear file modification times to force re-checking
-	fileCache.fileModTimes = make(map[string]time.Time)
-	fileCache.mutex.Unlock()
+	// No-op: Crontab file cache has been removed
+}
+
+// Helper function to invalidate process cache
+func invalidateProcessCache() {
+	psCache.mutex.Lock()
+	psCache.lines = nil
+	psCache.timestamp = time.Time{}
+	psCache.mutex.Unlock()
 }
 
 // handleUpdateCheck handles GET requests to check for updates

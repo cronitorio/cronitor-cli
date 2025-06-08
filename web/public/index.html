@@ -11,6 +11,14 @@
     />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    
+    <!-- Prefetch commonly used API endpoints for better performance -->
+    <link rel="prefetch" href="/api/settings" />
+    <link rel="prefetch" href="/api/jobs" />
+    <link rel="prefetch" href="/api/monitors" />
+    <link rel="prefetch" href="/api/users" />
+    <link rel="prefetch" href="/api/crontabs" />
+    
     <title>Crontab Guru</title>
   </head>
   <body>

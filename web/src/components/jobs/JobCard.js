@@ -270,8 +270,11 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
       setIsKillingAll(true);
     }
     try {
+      // Immediately invalidate SWR cache to show updated process list
+      mutate();      
       await killJobProcess(pids);
       if (onJobChange) onJobChange();
+      showToast(`Successfully killed ${pids.length} process${pids.length > 1 ? 'es' : ''}`, 'success');
     } catch (error) {
       showToast('Failed to kill processes: ' + error.message);
     } finally {
@@ -289,6 +292,10 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
   };
 
   const handleRunNow = async () => {
+    // Trigger immediate mutate when button is clicked
+    mutate();
+    if (onJobChange) onJobChange();
+    
     try {
       const response = await csrfFetch('/api/jobs/run', {
         method: 'POST',
@@ -301,11 +308,14 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         throw new Error('Failed to run job');
       }
       showToast('Job started successfully', 'success');
+      // Mutate again after successful API call to ensure data consistency
       mutate();
       if (onJobChange) onJobChange();
     } catch (error) {
       console.error('Error running job:', error);
       showToast('Failed to run job: ' + error.message, 'error');
+      // Mutate once more on error to refresh state
+      mutate();
     }
   };
 

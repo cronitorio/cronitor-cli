@@ -3,11 +3,15 @@ import useSWR from 'swr';
 import { JobCard } from './jobs/JobCard';
 import { Toast } from './Toast';
 import { NewCrontabOverlay } from './jobs/NewCrontabOverlay';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useLocation } from 'react-router-dom';
 import { FilterBar, FILTER_OPTIONS } from './jobs/FilterBar';
 import { csrfFetcher, csrfFetch } from '../utils/api';
 
 export default function Jobs() {
+  const location = useLocation();
+  const isJobsView = location.pathname === '/' || location.pathname === '/jobs';
+  
+  // Primary data for Jobs view - fast refresh
   const { data: jobs, error, mutate } = useSWR('/api/jobs', csrfFetcher, {
     refreshInterval: 5000,
     revalidateOnFocus: true
@@ -16,23 +20,27 @@ export default function Jobs() {
     refreshInterval: 5000,
     revalidateOnFocus: true
   });
+  
+  // Settings data - minimal refresh
   const { data: settings } = useSWR('/api/settings', csrfFetcher, {
     revalidateOnFocus: true,
     refreshInterval: 0
   });
   
-  // Add SWR fetching for users and crontabs to share across all JobCard components
+  // User data - minimal refresh (rarely changes)
   const { data: users } = useSWR('/api/users', csrfFetcher, {
     refreshInterval: 0, // No auto-refresh - users rarely change
     revalidateOnFocus: true, // Revalidate when window gets focus
     revalidateOnReconnect: false,
     dedupingInterval: 300000 // 5 minutes deduplication
   });
+  
+  // Crontabs data - slower refresh since it's secondary on Jobs view
   const { data: crontabs } = useSWR('/api/crontabs', csrfFetcher, {
-    refreshInterval: 5000, // Auto-refresh every 5 seconds
-    revalidateOnFocus: true, // Revalidate when window gets focus
+    refreshInterval: isJobsView ? 30000 : 5000, // 30s on Jobs view, 5s elsewhere
+    revalidateOnFocus: true,
     revalidateOnReconnect: false,
-    dedupingInterval: 5000 // 5 seconds deduplication to match refresh
+    dedupingInterval: isJobsView ? 30000 : 5000 // Match refresh interval
   });
 
   const [searchParams, setSearchParams] = useSearchParams();
