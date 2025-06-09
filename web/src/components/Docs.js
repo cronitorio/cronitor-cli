@@ -84,7 +84,7 @@ export default function Docs() {
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Crontab Guru Dashboard</h3>
           <p className="text-gray-700 dark:text-gray-300">
-            Crontab Guru is a web-based dashboard that provides an intuitive interface for managing cron jobs and crontab files. 
+            Crontab Guru is a web-based dashboard for managing cron jobs and crontab files. 
             This dashboard is part of the CronitorCLI suite and offers real-time monitoring and management capabilities.
           </p>
           
@@ -199,8 +199,7 @@ export default function Docs() {
 0 2 * * *           → "At 02:00"
 30 14 * * 1-5       → "At 14:30 on every day-of-week from Monday through Friday"
 0 */6 * * *         → "At minute 0 past every 6th hour"
-15 10 * * SUN       → "At 10:15 on Sunday"
-0 9-17 * * MON-FRI  → "At minute 0 past every hour from 9 through 17 on every day-of-week from Monday through Friday"`}
+15 10 * * SUN       → "At 10:15 on Sunday"`}
           </CodeBlock>
 
           <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Timezone Handling</h4>
@@ -403,7 +402,7 @@ cronitor update
           </p>
           <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
             <li><strong>Port conflicts:</strong> Change default port with <code>--port</code> flag</li>
-            <li><strong>Authentication errors:</strong> Reconfigure credentials with <code>cronitor configure</code></li>
+            <li><strong>Authentication errors:</strong> Reconfigure credentials with <code>`cronitor configure`</code></li>
             <li><strong>Permission issues:</strong> Check file system permissions for config directory</li>
             <li><strong>Network problems:</strong> Verify firewall settings and local network access</li>
           </ul>
@@ -431,6 +430,28 @@ ssh -L 9000:localhost:9000 user@remote-cron-server
 
 # Then access via http://localhost:9000`}
           </CodeBlock>
+
+          <p className="text-gray-700 dark:text-gray-300">
+            Do this automaticallyby updating your SSH config to create a tunnel every time you connect:
+            </p>
+          <CodeBlock>
+{`# Add this to your ~/.ssh/config
+Host remote-cron-server
+  LocalForward 9000 localhost:9000`}
+          </CodeBlock>
+
+          <p className="text-gray-700 dark:text-gray-300">
+            You can also do this with stunnel:
+            </p>
+          <CodeBlock>
+{`# Add this to your ~/.stunnel/stunnel.conf
+client = yes
+accept = 9000
+connect = remote-cron-server:9000`}
+            </CodeBlock>   
+            <p className="text-gray-700 dark:text-gray-300">
+              Then run <code>stunnel ~/.stunnel/stunnel.conf</code> to start the tunnel.
+            </p>       
           
           <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Safe Mode Explanation</h4>
           <p className="text-gray-700 dark:text-gray-300">

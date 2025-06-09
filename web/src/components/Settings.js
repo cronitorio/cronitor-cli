@@ -160,7 +160,7 @@ export default function Settings() {
 
         {renderInput(
           "CRONITOR_PING_API_KEY",
-          "Ping API Key",
+          "Telemetry API Key",
           "text",
           formData.CRONITOR_PING_API_KEY,
           handleChange,
