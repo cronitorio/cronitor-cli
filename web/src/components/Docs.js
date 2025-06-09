@@ -84,8 +84,7 @@ export default function Docs() {
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Crontab Guru Dashboard</h3>
           <p className="text-gray-700 dark:text-gray-300">
-            Crontab Guru is a web-based dashboard for managing cron jobs and crontab files. 
-            This dashboard is part of the CronitorCLI suite and offers real-time monitoring and management capabilities.
+            Crontab Guru is a web-based dashboard for managing cron jobs and crontab files. Your jobs are still run by cron, but you are free from the savagery of editing crontab files in vim.
           </p>
           
           <Screenshot 
@@ -115,9 +114,9 @@ export default function Docs() {
 
           <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Job Status Indicators</h4>
           <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
-            <li><span className="text-green-600 dark:text-green-400 font-medium">Active:</span> Job is running according to schedule</li>
-            <li><span className="text-yellow-600 dark:text-yellow-400 font-medium">Suspended:</span> Job execution is temporarily paused</li>
-            <li><span className="text-red-600 dark:text-red-400 font-medium">Idle:</span> The job is not currently running</li>
+            <li><span className="text-green-600 dark:text-green-400 font-medium">Scheduled:</span> Job will run according to schedule</li>
+            <li><span className="text-yellow-600 dark:text-yellow-400 font-medium">Suspended:</span> This job is commented out in your crontab</li>
+            <li><span className="text-gray-600 dark:text-gray-400 font-medium">Idle:</span> The job is not currently running</li>
             <li><span className="text-blue-600 dark:text-blue-400 font-medium">Running:</span> One or many instances of this job are currently running.</li>
           </ul>
 

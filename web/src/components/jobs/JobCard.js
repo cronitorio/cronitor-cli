@@ -14,7 +14,7 @@ import { LearnMoreModal } from './LearnMoreModal';
 import { useJobOperations } from '../../hooks/useJobOperations';
 import { csrfFetch } from '../../utils/api';
 
-export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSave, onDiscard, onFormChange, onLocationChange, showToast, isMacOS, onJobChange, crontabMutate, selectedCrontab, setSelectedCrontab, readOnly = false, settings, monitorsLoading = false, users = [], crontabs = [] }) {
+export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNew = false, onSave, onDiscard, onFormChange, onLocationChange, showToast, isMacOS, onJobChange, crontabMutate, selectedCrontab, setSelectedCrontab, readOnly = false, settings, monitorsLoading = false, users = [], crontabs = [] }) {
   const [isEditing, setIsEditing] = React.useState(isNew);
   const [isEditingCommand, setIsEditingCommand] = React.useState(isNew);
   const [isEditingSchedule, setIsEditingSchedule] = React.useState(isNew);
@@ -154,12 +154,12 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
         }
         
         // Also refresh crontab data since job changes modify the crontab
-        if (crontabMutate) {
+        if (mutateCrontabs) {
           setTimeout(async () => {
-            await crontabMutate();
+            await mutateCrontabs();
             // Update the selected crontab if we have it
             if (selectedCrontab && setSelectedCrontab) {
-              const updatedCrontabs = await crontabMutate();
+              const updatedCrontabs = await mutateCrontabs();
               if (updatedCrontabs) {
                 const updatedCrontab = updatedCrontabs.find(c => c.filename === selectedCrontab.filename);
                 if (updatedCrontab) {
@@ -364,11 +364,11 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
       }
       
       // Also refresh crontab data since hiding modifies the crontab
-      if (crontabMutate) {
+      if (mutateCrontabs) {
         setTimeout(async () => {
-          await crontabMutate();
+          await mutateCrontabs();
           if (selectedCrontab && setSelectedCrontab) {
-            const updatedCrontabs = await crontabMutate();
+            const updatedCrontabs = await mutateCrontabs();
             if (updatedCrontabs) {
               const updatedCrontab = updatedCrontabs.find(c => c.filename === selectedCrontab.filename);
               if (updatedCrontab) {
@@ -475,12 +475,12 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
       }
       
       // Also refresh crontab data since suspension modifies the crontab
-      if (crontabMutate) {
+      if (mutateCrontabs) {
         setTimeout(async () => {
-          await crontabMutate();
+          await mutateCrontabs();
           // Update the selected crontab if we have it
           if (selectedCrontab && setSelectedCrontab) {
-            const updatedCrontabs = await crontabMutate();
+            const updatedCrontabs = await mutateCrontabs();
             if (updatedCrontabs) {
               const updatedCrontab = updatedCrontabs.find(c => c.filename === selectedCrontab.filename);
               if (updatedCrontab) {
@@ -832,6 +832,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
               if (deleteConfirmation.toLowerCase() !== 'delete') return;
               try {
                 await deleteJob(initialJob.key);
+                mutateCrontabs(); // Also refresh crontabs cache since deleting a job modifies the crontab
                 setShowDeleteConfirmation(false);
                 setDeleteConfirmation('');
                 showToast('Job deleted successfully', 'success');

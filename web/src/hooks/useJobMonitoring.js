@@ -49,7 +49,7 @@ export function useJobMonitoring(job, onUpdate, monitorsLoading = false) {
       return {
         color: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
         text: 'Waiting',
-        title: 'Monitoring will begin after the next scheduled run.'
+        title: 'Monitoring will begin after the next successful job completion.'
       };
     }
     

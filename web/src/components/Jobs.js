@@ -36,7 +36,7 @@ export default function Jobs() {
   });
   
   // Crontabs data - slower refresh since it's secondary on Jobs view
-  const { data: crontabs } = useSWR('/api/crontabs', csrfFetcher, {
+  const { data: crontabs, mutate: mutateCrontabs } = useSWR('/api/crontabs', csrfFetcher, {
     refreshInterval: isJobsView ? 30000 : 5000, // 30s on Jobs view, 5s elsewhere
     revalidateOnFocus: true,
     revalidateOnReconnect: false,
@@ -376,6 +376,7 @@ export default function Jobs() {
         is_draft: true
       });
       mutate();
+      mutateCrontabs(); // Also refresh crontabs cache since jobs are part of crontabs
       showToast('Job created successfully', 'success');
     } catch (error) {
       console.error('Error creating job:', error);
@@ -413,6 +414,7 @@ export default function Jobs() {
             <JobCard 
               job={newJobForm} 
               mutate={mutate} 
+              mutateCrontabs={mutateCrontabs}
               allJobs={jobsWithMonitors} 
               isNew={true}
               onSave={handleSaveNewJob}
@@ -466,6 +468,7 @@ export default function Jobs() {
               key={index} 
               job={job} 
               mutate={mutate} 
+              mutateCrontabs={mutateCrontabs}
               allJobs={jobsWithMonitors} 
               showToast={showToast}
               isMacOS={settings?.os === 'darwin'}

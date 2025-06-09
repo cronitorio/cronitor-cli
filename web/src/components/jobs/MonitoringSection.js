@@ -8,6 +8,28 @@ export function MonitoringSection({ job, onUpdate, onShowLearnMore, settings, mo
 
   if (!statusInfo) return null;
 
+  // Determine orb color based on status
+  const getOrbColor = () => {
+    if (statusInfo.text === 'Healthy') {
+      return 'bg-green-500';
+    } else if (statusInfo.text === 'Failing') {
+      return 'bg-red-500';
+    } else {
+      return 'bg-gray-400';
+    }
+  };
+
+  // Determine toggle color - red if monitored and failing, otherwise default
+  const getToggleColor = () => {
+    if (job.monitored && statusInfo.text === 'Failing') {
+      return 'bg-red-500';
+    } else if (job.monitored) {
+      return 'bg-green-500';
+    } else {
+      return 'bg-gray-200 dark:bg-gray-600';
+    }
+  };
+
   const StatusTag = ({ children, ...props }) => {
     if (job.code) {
       return (
@@ -35,8 +57,10 @@ export function MonitoringSection({ job, onUpdate, onShowLearnMore, settings, mo
   };
 
   const handleToggleClick = () => {
-    // Check if trying to enable monitoring without API key
-    if (!job.monitored && (!settings?.api_key || settings.api_key === '')) {
+    // Check if trying to enable monitoring without a valid API key
+    const hasValidApiKey = settings?.CRONITOR_API_KEY && settings.CRONITOR_API_KEY.trim() !== '';
+    
+    if (!job.monitored && !hasValidApiKey) {
       // Show the learn more modal instead
       if (typeof onShowLearnMore === 'function') {
         onShowLearnMore();
@@ -63,9 +87,7 @@ export function MonitoringSection({ job, onUpdate, onShowLearnMore, settings, mo
           <button
             onClick={handleToggleClick}
             disabled={isLoading}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 mr-4 ${
-              job.monitored ? 'bg-green-500' : 'bg-gray-200 dark:bg-gray-600'
-            }`}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 mr-4 ${getToggleColor()}`}
             title={job.monitored ? 'Monitoring enabled' : 'Monitoring disabled'}
           >
             <span
@@ -80,16 +102,17 @@ export function MonitoringSection({ job, onUpdate, onShowLearnMore, settings, mo
                 <>
                   {job.paused || job.disabled ? (
                     <StatusTag
-                      className="inline-flex items-center px-2.5 py-0.5 text-sm font-medium bg-gray-100 text-red-600 dark:bg-gray-700 dark:text-red-400 rounded-l-full border-r border-white dark:border-gray-600"
+                      className="inline-flex items-center pl-2 pr-1.5 py-0.5 text-sm font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-l-full border-r border-white dark:border-gray-800"
                       title="Alerts: Off"
                     >
-                      <BellSlashIcon className="h-5 w-5" />
+                      <BellSlashIcon className="h-5 w-5 text-gray-600 dark:text-gray-300" />
                     </StatusTag>
                   ) : null}
                   <StatusTag
-                    className={`inline-flex items-center px-2.5 py-0.5 text-sm font-medium ${statusInfo.color} ${(job.paused || job.disabled) ? 'rounded-l-none' : 'rounded-l-full'} rounded-r-full`}
+                    className={`inline-flex items-center px-1.5 py-0.5 text-sm font-medium bg-gray-100 text-gray-900 dark:bg-gray-700 dark:text-gray-100 ${(job.paused || job.disabled) ? 'rounded-l-none' : 'rounded-l-full'} rounded-r-full`}
                     title={statusInfo.title}
                   >
+                    <div className={`w-2.5 h-2.5 rounded-full ${getOrbColor()} mr-2`}></div>
                     <span>{statusInfo.text}</span>
                   </StatusTag>
                 </>

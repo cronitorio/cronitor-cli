@@ -259,7 +259,11 @@ func (c Crontab) Write() string {
 		cl = append(cl, line.Write())
 	}
 
-	return strings.Join(cl, "\n")
+	result := strings.Join(cl, "\n")
+	if result != "" && !strings.HasSuffix(result, "\n") {
+		result += "\n"
+	}
+	return result
 }
 
 func (c Crontab) Save(crontabLines string) error {

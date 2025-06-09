@@ -31,9 +31,9 @@ export function FilterBar({ activeFilters, setActiveFilters, inputValue, onInput
 
     let buttonClasses = "px-3 py-3 text-base rounded-md bg-gray-200 dark:bg-gray-800 flex-shrink-0 flex items-center ";
     if (activeFilters[filter.id]) {
-      buttonClasses += 'text-purple-600 dark:text-purple-400';
+      buttonClasses += 'text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-800';
     } else {
-      buttonClasses += 'text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-400';
+      buttonClasses += 'text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-400 border border-transparent';
     }
 
     return (
@@ -60,7 +60,7 @@ export function FilterBar({ activeFilters, setActiveFilters, inputValue, onInput
         value={inputValue}
         onChange={onInputChange}
         placeholder="Search..."
-        className="px-3 py-3 w-64 ml-2 flex-shrink-0 bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-md text-base placeholder-gray-500 dark:placeholder-gray-500 focus:outline-none"
+        className="px-3 py-3 w-6flex-shrink-0 bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-md text-base placeholder-gray-500 dark:placeholder-gray-500 focus:outline-none"
       />
     </div>
   );

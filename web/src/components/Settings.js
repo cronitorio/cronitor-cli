@@ -148,127 +148,151 @@ export default function Settings() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {renderInput(
-          "CRONITOR_API_KEY",
-          "API Key",
-          "text",
-          formData.CRONITOR_API_KEY,
-          handleChange,
-          envVars["CRONITOR_API_KEY"]
-        )}
+      <form onSubmit={handleSubmit} className="space-y-8">
+        {/* All Commands Section */}
+        <section>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 border-b border-gray-200 dark:border-gray-700 pb-2">
+            All Commands
+          </h2>
+          <div className="space-y-4">
+            {renderInput(
+              "CRONITOR_API_KEY",
+              "API Key",
+              "text",
+              formData.CRONITOR_API_KEY,
+              handleChange,
+              envVars["CRONITOR_API_KEY"]
+            )}
 
-        {renderInput(
-          "CRONITOR_PING_API_KEY",
-          "Telemetry API Key",
-          "text",
-          formData.CRONITOR_PING_API_KEY,
-          handleChange,
-          envVars["CRONITOR_PING_API_KEY"]
-        )}
+            {renderInput(
+              "CRONITOR_PING_API_KEY",
+              "Telemetry API Key",
+              "text",
+              formData.CRONITOR_PING_API_KEY,
+              handleChange,
+              envVars["CRONITOR_PING_API_KEY"]
+            )}
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Exclude Text (comma-separated)
-          </label>
-          <input
-            type="text"
-            value={(formData.CRONITOR_EXCLUDE_TEXT || []).join(', ')}
-            onChange={handleExcludeTextChange}
-            disabled={envVars["CRONITOR_EXCLUDE_TEXT"]}
-            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-4 py-2 ${
-              envVars["CRONITOR_EXCLUDE_TEXT"] ? 'bg-gray-100 dark:bg-gray-800 cursor-not-allowed' : ''
-            }`}
-          />
-          {envVars["CRONITOR_EXCLUDE_TEXT"] && (
-            <div className="mt-1 flex items-center text-sm text-yellow-600 dark:text-yellow-400">
-              <ExclamationTriangleIcon className="h-4 w-4 mr-1" />
-              Currently set as an environment variable
-            </div>
-          )}
-        </div>
+            {renderInput(
+              "CRONITOR_LOG",
+              "Log File",
+              "text",
+              formData.CRONITOR_LOG,
+              handleChange,
+              envVars["CRONITOR_LOG"]
+            )}
 
-        {renderInput(
-          "CRONITOR_HOSTNAME",
-          "Hostname",
-          "text",
-          formData.CRONITOR_HOSTNAME,
-          handleChange,
-          envVars["CRONITOR_HOSTNAME"]
-        )}
-
-        {renderInput(
-          "CRONITOR_LOG",
-          "Log File",
-          "text",
-          formData.CRONITOR_LOG,
-          handleChange,
-          envVars["CRONITOR_LOG"]
-        )}
-
-        {renderInput(
-          "CRONITOR_ENV",
-          "Environment",
-          "text",
-          formData.CRONITOR_ENV,
-          handleChange,
-          envVars["CRONITOR_ENV"]
-        )}
-
-        {renderInput(
-          "CRONITOR_DASH_USER",
-          "LocalDash Username",
-          "text",
-          formData.CRONITOR_DASH_USER,
-          handleChange,
-          envVars["CRONITOR_DASH_USER"]
-        )}
-
-        {renderInput(
-          "CRONITOR_DASH_PASS",
-          "LocalDash Password",
-          showPassword ? "text" : "password",
-          formData.CRONITOR_DASH_PASS,
-          handleChange,
-          envVars["CRONITOR_DASH_PASS"]
-        )}
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Allowed IP Addresses
-          </label>
-          <div className="mt-1">
-            <input
-              type="text"
-              name="CRONITOR_ALLOWED_IPS"
-              value={formData.CRONITOR_ALLOWED_IPS || ''}
-              onChange={handleChange}
-              disabled={envVars["CRONITOR_ALLOWED_IPS"]}
-              placeholder="192.168.1.0/24, 10.0.0.1, 2001:db8::/32"
-              className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-4 py-2 ${
-                envVars["CRONITOR_ALLOWED_IPS"] ? 'bg-gray-100 dark:bg-gray-800 cursor-not-allowed' : ''
-              }`}
-            />
-          </div>
-          <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Comma-separated list of IP addresses and CIDR ranges. Leave empty to allow all IPs.
-            <br />
-            Examples: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">192.168.1.0/24</code>, <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">10.0.0.1</code>, <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">2001:db8::/32</code>
-            {data.client_ip && (
-              <>
-                <br />
-                <span className="font-medium text-blue-600 dark:text-blue-400">Your current IP: </span>
-                <code className="bg-blue-50 dark:bg-blue-900 px-1 rounded text-blue-800 dark:text-blue-200">{data.client_ip}</code>
-              </>
+            {renderInput(
+              "CRONITOR_ENV",
+              "Environment",
+              "text",
+              formData.CRONITOR_ENV,
+              handleChange,
+              envVars["CRONITOR_ENV"]
             )}
           </div>
-          {envVars["CRONITOR_ALLOWED_IPS"] && (
-            <div className="mt-1 flex items-center text-sm text-yellow-600 dark:text-yellow-400">
-              <ExclamationTriangleIcon className="h-4 w-4 mr-1" />
-              Currently set as an environment variable
+        </section>
+
+        {/* Cronitor Sync Section */}
+        <section>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 border-b border-gray-200 dark:border-gray-700 pb-2">
+            Cronitor Sync
+          </h2>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Exclude Text (comma-separated)
+              </label>
+              <input
+                type="text"
+                value={(formData.CRONITOR_EXCLUDE_TEXT || []).join(', ')}
+                onChange={handleExcludeTextChange}
+                disabled={envVars["CRONITOR_EXCLUDE_TEXT"]}
+                className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-4 py-2 ${
+                  envVars["CRONITOR_EXCLUDE_TEXT"] ? 'bg-gray-100 dark:bg-gray-800 cursor-not-allowed' : ''
+                }`}
+              />
+              {envVars["CRONITOR_EXCLUDE_TEXT"] && (
+                <div className="mt-1 flex items-center text-sm text-yellow-600 dark:text-yellow-400">
+                  <ExclamationTriangleIcon className="h-4 w-4 mr-1" />
+                  Currently set as an environment variable
+                </div>
+              )}
             </div>
-          )}
-        </div>
+
+            {renderInput(
+              "CRONITOR_HOSTNAME",
+              "Hostname",
+              "text",
+              formData.CRONITOR_HOSTNAME,
+              handleChange,
+              envVars["CRONITOR_HOSTNAME"]
+            )}
+          </div>
+        </section>
+
+        {/* Dashboard Section */}
+        <section>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 border-b border-gray-200 dark:border-gray-700 pb-2">
+            Dashboard
+          </h2>
+          <div className="space-y-4">
+            {renderInput(
+              "CRONITOR_DASH_USER",
+              "Username",
+              "text",
+              formData.CRONITOR_DASH_USER,
+              handleChange,
+              envVars["CRONITOR_DASH_USER"]
+            )}
+
+            {renderInput(
+              "CRONITOR_DASH_PASS",
+              "Password",
+              showPassword ? "text" : "password",
+              formData.CRONITOR_DASH_PASS,
+              handleChange,
+              envVars["CRONITOR_DASH_PASS"]
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Allowed IP Addresses
+              </label>
+              <div className="mt-1">
+                <input
+                  type="text"
+                  name="CRONITOR_ALLOWED_IPS"
+                  value={formData.CRONITOR_ALLOWED_IPS || ''}
+                  onChange={handleChange}
+                  disabled={envVars["CRONITOR_ALLOWED_IPS"]}
+                  placeholder="192.168.1.0/24, 10.0.0.1, 2001:db8::/32"
+                  className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-4 py-2 ${
+                    envVars["CRONITOR_ALLOWED_IPS"] ? 'bg-gray-100 dark:bg-gray-800 cursor-not-allowed' : ''
+                  }`}
+                />
+              </div>
+              <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Comma-separated list of IP addresses and CIDR ranges. Leave empty to allow all IPs.
+                <br />
+                Examples: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">192.168.1.0/24</code>, <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">10.0.0.1</code>, <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">2001:db8::/32</code>
+                {data.client_ip && (
+                  <>
+                    <br />
+                    <span className="font-medium text-blue-600 dark:text-blue-400">Your current IP: </span>
+                    <code className="bg-blue-50 dark:bg-blue-900 px-1 rounded text-blue-800 dark:text-blue-200">{data.client_ip}</code>
+                  </>
+                )}
+              </div>
+              {envVars["CRONITOR_ALLOWED_IPS"] && (
+                <div className="mt-1 flex items-center text-sm text-yellow-600 dark:text-yellow-400">
+                  <ExclamationTriangleIcon className="h-4 w-4 mr-1" />
+                  Currently set as an environment variable
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
 
         {saveError && (
           <div className="text-red-600 dark:text-red-400 text-sm">{saveError}</div>
