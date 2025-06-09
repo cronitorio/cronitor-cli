@@ -1496,8 +1496,20 @@ func handleKillInstances(w http.ResponseWriter, r *http.Request) {
 	var errors []KillError
 	var killed []int
 
+	// Create process validator for comprehensive PID validation
+	processValidator := lib.NewProcessValidator()
+
 	for _, pid := range request.PIDs {
-		// Use kill with -9 to send SIGKILL to the process
+		// Perform comprehensive PID validation including ownership checks
+		if err := processValidator.ValidatePIDWithOwnership(pid); err != nil {
+			errors = append(errors, KillError{
+				PID:   pid,
+				Error: err.Error(),
+			})
+			continue
+		}
+
+		// PID validation passed, proceed with killing the process
 		cmd := exec.Command("kill", "-9", fmt.Sprintf("%d", pid))
 		output, err := cmd.CombinedOutput()
 

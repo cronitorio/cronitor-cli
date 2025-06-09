@@ -152,27 +152,9 @@ export default function Settings() {
         {/* All Commands Section */}
         <section>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 border-b border-gray-200 dark:border-gray-700 pb-2">
-            All Commands
+            General
           </h2>
           <div className="space-y-4">
-            {renderInput(
-              "CRONITOR_API_KEY",
-              "API Key",
-              "text",
-              formData.CRONITOR_API_KEY,
-              handleChange,
-              envVars["CRONITOR_API_KEY"]
-            )}
-
-            {renderInput(
-              "CRONITOR_PING_API_KEY",
-              "Telemetry API Key",
-              "text",
-              formData.CRONITOR_PING_API_KEY,
-              handleChange,
-              envVars["CRONITOR_PING_API_KEY"]
-            )}
-
             {renderInput(
               "CRONITOR_LOG",
               "Log File",
@@ -199,6 +181,24 @@ export default function Settings() {
             Cronitor Sync
           </h2>
           <div className="space-y-4">
+          {renderInput(
+              "CRONITOR_API_KEY",
+              "API Key",
+              "text",
+              formData.CRONITOR_API_KEY,
+              handleChange,
+              envVars["CRONITOR_API_KEY"]
+            )}
+
+            {renderInput(
+              "CRONITOR_PING_API_KEY",
+              "Telemetry API Key",
+              "text",
+              formData.CRONITOR_PING_API_KEY,
+              handleChange,
+              envVars["CRONITOR_PING_API_KEY"]
+            )}
+
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Exclude Text (comma-separated)

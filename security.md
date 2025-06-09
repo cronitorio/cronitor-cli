@@ -49,21 +49,6 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
     • ✅ Support both IPv4 and IPv6 addresses, with proper handling of IPv4-mapped IPv6 addresses
     • ✅ Add this field to the Settings page
 
-### 2. Command Execution Security
-#### Current State
-- No logging of command execution
-
-#### Proposed Improvements
-- Implement comprehensive command execution logging
-  - Problem: No audit trail of command execution
-  - Implementation: Log all command executions with user, command, arguments, and outcome - log to syslog unless a path is provided in settings
-  - Details:
-    • Create structured log entries with timestamp, user ID, command, arguments, exit code, and execution duration
-    • Use log/syslog package to send logs to system syslog daemon with LOG_AUTH facility
-    • Implement CRONITOR_LOG_FILE environment variable to override syslog and write to specific file
-    • Include process PID, working directory, and environment variables (sanitized) in log entries
-    • Implement log rotation and retention policies when writing to files (max 100MB, keep 10 files)
-
 
 ### 3. Process Management Security
 #### Current State
@@ -73,15 +58,15 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
 - No process ownership verification
 
 #### Proposed Improvements
-- Add PID validation
+- ✅ Add PID validation
   - Problem: No validation of process IDs before killing
   - Implementation: Validate PID format and existence before attempting to kill
   - Details:
-    • Check PID is a positive integer using strconv.Atoi() and range validation (1-4194304 on Linux)
-    • Verify process exists by checking /proc/{pid}/stat file or using os.FindProcess()
-    • Implement process state validation to ensure process is not a kernel thread
-    • Add safety checks to prevent killing PID 1 (init) or other critical system processes
-    • Return descriptive error messages for invalid PIDs or non-existent processes
+    • ✅ Check PID is a positive integer using strconv.Atoi() and range validation (1-4194304 on Linux)
+    • ✅ Verify process exists by checking /proc/{pid}/stat file or using os.FindProcess()
+    • ✅ Implement process state validation to ensure process is not a kernel thread
+    • ✅ Add safety checks to prevent killing PID 1 (init) or other critical system processes
+    • ✅ Return descriptive error messages for invalid PIDs or non-existent processes
 
 - Implement process ownership checks
   - Problem: Can kill processes started by any parent
@@ -91,16 +76,6 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
     • Maintain whitelist of allowed process parents: cron, crond, launchd user IDs, cronitor
     • Check process executable path using /proc/{pid}/exe to verify it's cronitor binary
     • Implement process tree validation to ensure child processes belong to cron jobs or to cronitor itself. 
-
-- Add comprehensive process management logging
-  - Problem: No audit trail of process management operations
-  - Implementation: Log all process management operations with user, action, and outcome - log to syslog unless a path is provided in settings
-  - Details:
-    • Log process kill attempts with PID, process name, owner, and result status
-    • Include process command line and parent PID in log entries using /proc/{pid}/cmdline
-    • Use structured logging format with consistent fields for parsing and analysis
-    • Send logs to syslog with LOG_CRIT facility for failed operations, LOG_INFO for successful ones
-    • Implement configurable log levels and filtering options via CRONITOR_LOG_LEVEL
 
 ### 4. File Operations Security
 #### Current State
@@ -149,25 +124,6 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
 - No request rate limiting
 
 #### Proposed Improvements
-- Add TLS/HTTPS support with modern cipher suites
-  - Problem: No encryption for network traffic
-  - Implementation: Configure TLS with modern cipher suites and proper certificate handling
-  - Details:
-    • Configure TLS 1.2+ only with secure cipher suites excluding weak algorithms (RC4, DES, MD5)
-    • Implement certificate validation with OCSP stapling and proper chain verification
-    • Add support for HSTS headers with max-age of 1 year and includeSubDomains
-    • Use crypto/tls.Config with MinVersion: tls.VersionTLS12 and CurvePreferences
-    • Implement automatic certificate renewal using ACME/Let's Encrypt when available
-
-- Implement IP-based access restrictions
-  - Problem: No IP-based access control
-  - Implementation: Add configurable IP whitelist/blacklist with CIDR support
-  - Details:
-    • Parse CRONITOR_ALLOWED_IPS environment variables
-    • Use net.IPNet.Contains() for efficient IP range checking in middleware
-    • Support IPv4, IPv6, and mixed environments with proper precedence rules
-    • Implement X-Forwarded-For header parsing for proxy/load balancer scenarios
-    • Add /health endpoint that bypasses IP restrictions for monitoring systems
 
 - Configure proper CORS policies
   - Problem: No CORS configuration
@@ -198,41 +154,3 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
     • Add support for X-Forwarded-Host header for multi-tenant deployments
     • Configure proper redirect URLs and cookie domains for proxy scenarios
     • Validate and sanitize all forwarded headers to prevent header injection attacks
-
-### 6. Logging & Monitoring
-#### Current State
-- Limited logging of security events
-- No audit trail for sensitive operations
-- No monitoring for suspicious activities
-
-#### Proposed Improvements
-- Implement comprehensive security event logging
-  - Problem: Insufficient security event logging
-  - Implementation: Add structured logging for all security events - log to syslog unless a path is provided in settings
-  - Details:
-    • Define security events: authentication attempts, authorization failures, suspicious activity
-    • Use structured JSON logging with consistent fields: timestamp, user, action, resource, outcome
-    • Send to syslog with appropriate facilities (LOG_AUTH, LOG_AUTHPRIV, LOG_SECURITY)
-    • Implement CRONITOR_SECURITY_LOG_FILE environment variable for file-based logging
-    • Add log level filtering and configurable verbosity via CRONITOR_LOG_LEVEL
-
-- Add audit trail for sensitive operations
-  - Problem: No audit trail for sensitive operations
-  - Implementation: Log all sensitive operations with user, action, and outcome
-  - Details:
-    • Define sensitive operations: process kills, file modifications, configuration changes
-    • Create immutable audit log entries with cryptographic signatures using HMAC-SHA256
-    • Include before/after state for configuration changes and file modifications
-    • Implement audit log rotation with integrity verification and tamper detection
-    • Add CRONITOR_AUDIT_RETENTION environment variable for retention period (default 90 days)
-
-- Add support for external logging systems
-  - Problem: No integration with external logging
-  - Implementation: Add support for syslog and other external logging systems
-  - Details:
-    • Implement syslog client supporting RFC 5424 format with structured data
-    • Add support for remote syslog servers via TCP/UDP with TLS encryption
-    • Integrate with popular log aggregation systems (ELK stack, Splunk, Fluentd)
-    • Support multiple log outputs simultaneously (local file + remote syslog)
-    • Add CRONITOR_LOG_ENDPOINTS environment variable for configuring multiple destinations
-
