@@ -274,6 +274,92 @@ func createCORSMiddleware(corsManager *CORSManager) func(http.Handler) http.Hand
 // Global CORS manager instance
 var corsManager = NewCORSManager()
 
+// Request size limiting management
+type RequestSizeLimiter struct {
+	maxBodySize   int64 // Default maximum body size (1MB)
+	jsonLimit     int64 // JSON content type limit (100KB)
+	formLimit     int64 // Form data limit (10KB)
+	maxHeaderSize int64 // Maximum total header size (8KB)
+}
+
+// NewRequestSizeLimiter creates a new request size limiter instance
+func NewRequestSizeLimiter() *RequestSizeLimiter {
+	return &RequestSizeLimiter{
+		maxBodySize:   1024 * 1024, // 1MB default
+		jsonLimit:     100 * 1024,  // 100KB for JSON
+		formLimit:     10 * 1024,   // 10KB for form data
+		maxHeaderSize: 8 * 1024,    // 8KB for headers
+	}
+}
+
+// getContentTypeLimit returns the appropriate size limit based on content type
+func (rsl *RequestSizeLimiter) getContentTypeLimit(contentType string) int64 {
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
+
+	// Remove charset and boundary information
+	if idx := strings.Index(contentType, ";"); idx != -1 {
+		contentType = strings.TrimSpace(contentType[:idx])
+	}
+
+	switch contentType {
+	case "application/json":
+		return rsl.jsonLimit
+	case "application/x-www-form-urlencoded":
+		return rsl.formLimit
+	case "multipart/form-data":
+		return rsl.formLimit
+	default:
+		return rsl.maxBodySize
+	}
+}
+
+// createRequestSizeLimitMiddleware creates middleware that enforces request size limits
+func createRequestSizeLimitMiddleware(limiter *RequestSizeLimiter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// First, check header size limits
+			totalHeaderSize := int64(0)
+			for name, values := range r.Header {
+				totalHeaderSize += int64(len(name))
+				for _, value := range values {
+					totalHeaderSize += int64(len(value))
+				}
+			}
+
+			if totalHeaderSize > limiter.maxHeaderSize {
+				http.Error(w, fmt.Sprintf("Request headers too large (%d bytes, maximum %d bytes)",
+					totalHeaderSize, limiter.maxHeaderSize), http.StatusRequestHeaderFieldsTooLarge)
+				return
+			}
+
+			// For requests with body, apply size limits
+			if r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" {
+				contentType := r.Header.Get("Content-Type")
+				limit := limiter.getContentTypeLimit(contentType)
+
+				// Check Content-Length header if present
+				if contentLengthStr := r.Header.Get("Content-Length"); contentLengthStr != "" {
+					if contentLength, err := strconv.ParseInt(contentLengthStr, 10, 64); err == nil {
+						if contentLength > limit {
+							http.Error(w, fmt.Sprintf("Request body too large (%d bytes, maximum %d bytes for %s)",
+								contentLength, limit, contentType), http.StatusRequestEntityTooLarge)
+							return
+						}
+					}
+				}
+
+				// Wrap the request body with MaxBytesReader to enforce the limit
+				r.Body = http.MaxBytesReader(w, r.Body, limit)
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// Global request size limiter instance
+var requestSizeLimiter = NewRequestSizeLimiter()
+
 // CSRF token management
 type CSRFManager struct {
 	tokens map[string]time.Time // token -> expiry time
@@ -530,6 +616,7 @@ The dashboard provides a web interface for managing your cron jobs and crontab f
 		}
 
 		// Create middleware
+		requestSizeLimitMiddleware := createRequestSizeLimitMiddleware(requestSizeLimiter)
 		ipFilterMiddleware := createIPFilterMiddleware(ipFilter)
 		corsMiddleware := createCORSMiddleware(corsManager)
 
@@ -683,37 +770,37 @@ The dashboard provides a web interface for managing your cron jobs and crontab f
 			http.ServeContent(w, r, "index.html", time.Now(), index.(io.ReadSeeker))
 		})
 
-		// Apply IP filter, CORS, auth and CSRF middleware to all routes
-		http.Handle("/", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(handler)))))
+		// Apply request size limits, IP filter, CORS, auth and CSRF middleware to all routes
+		http.Handle("/", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(handler))))))
 
 		// Add settings API endpoints
-		http.Handle("/api/settings", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleSettings))))))
+		http.Handle("/api/settings", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleSettings)))))))
 
 		// Add jobs endpoint
-		http.Handle("/api/jobs", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleJobs))))))
+		http.Handle("/api/jobs", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleJobs)))))))
 
 		// Add crontabs endpoint
-		http.Handle("/api/crontabs", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontabs))))))
-		http.Handle("/api/crontabs/", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontab))))))
+		http.Handle("/api/crontabs", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontabs)))))))
+		http.Handle("/api/crontabs/", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontab)))))))
 
 		// Add users endpoint
-		http.Handle("/api/users", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUsers))))))
+		http.Handle("/api/users", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUsers)))))))
 
 		// Add kill jobs endpoint
-		http.Handle("/api/jobs/kill", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleKillInstances))))))
+		http.Handle("/api/jobs/kill", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleKillInstances)))))))
 
 		// Add run job endpoint
-		http.Handle("/api/jobs/run", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleRunJob))))))
+		http.Handle("/api/jobs/run", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleRunJob)))))))
 
 		// Add monitors endpoint
-		http.Handle("/api/monitors", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleGetMonitors))))))
+		http.Handle("/api/monitors", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleGetMonitors)))))))
 
 		// Add signup endpoint
-		http.Handle("/api/signup", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleSignup))))))
+		http.Handle("/api/signup", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleSignup)))))))
 
 		// Add update endpoints
-		http.Handle("/api/update/check", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdateCheck))))))
-		http.Handle("/api/update/perform", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdatePerform))))))
+		http.Handle("/api/update/check", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdateCheck)))))))
+		http.Handle("/api/update/perform", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdatePerform)))))))
 
 		// Create HTTP server with proper configuration
 		server := &http.Server{
