@@ -162,6 +162,118 @@ func createIPFilterMiddleware(ipFilter *IPFilter) func(http.Handler) http.Handle
 // Global IP filter instance
 var ipFilter = NewIPFilter()
 
+// CORS (Cross-Origin Resource Sharing) management
+type CORSManager struct {
+	allowedOrigins map[string]bool
+	mutex          sync.RWMutex
+}
+
+// NewCORSManager creates a new CORS manager instance
+func NewCORSManager() *CORSManager {
+	cm := &CORSManager{
+		allowedOrigins: make(map[string]bool),
+	}
+	return cm
+}
+
+// LoadAllowedOrigins parses the CRONITOR_CORS_ALLOWED_ORIGINS environment variable
+func (cm *CORSManager) LoadAllowedOrigins() error {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	allowedOriginsEnv := viper.GetString("CRONITOR_CORS_ALLOWED_ORIGINS")
+
+	if allowedOriginsEnv == "" {
+		// Default: only same-origin requests allowed (empty map means strict same-origin policy)
+		cm.allowedOrigins = make(map[string]bool)
+		return nil
+	}
+
+	origins := make(map[string]bool)
+	originList := strings.Split(allowedOriginsEnv, ",")
+
+	for _, origin := range originList {
+		origin = strings.TrimSpace(origin)
+		if origin == "" {
+			continue
+		}
+
+		// Validate origin format
+		if origin != "*" && !strings.HasPrefix(origin, "http://") && !strings.HasPrefix(origin, "https://") {
+			return fmt.Errorf("invalid origin format: %s (must be http:// or https:// or '*')", origin)
+		}
+
+		origins[origin] = true
+	}
+
+	cm.allowedOrigins = origins
+	if len(origins) > 0 {
+		log(fmt.Sprintf("CORS enabled with %d allowed origins", len(origins)))
+	}
+	return nil
+}
+
+// IsOriginAllowed checks if an origin is allowed for CORS requests
+func (cm *CORSManager) IsOriginAllowed(origin string) bool {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	// If no origins are configured, use strict same-origin policy (no CORS)
+	if len(cm.allowedOrigins) == 0 {
+		return false
+	}
+
+	// Check for wildcard (allow all origins - not recommended for production)
+	if cm.allowedOrigins["*"] {
+		return true
+	}
+
+	// Check for exact origin match
+	return cm.allowedOrigins[origin]
+}
+
+// createCORSMiddleware creates middleware that handles CORS policies
+func createCORSMiddleware(corsManager *CORSManager) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+
+			// Handle preflight requests (OPTIONS method)
+			if r.Method == "OPTIONS" {
+				// Set secure CORS headers for preflight
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
+				w.Header().Set("Access-Control-Allow-Credentials", "false") // Secure default
+				w.Header().Set("Access-Control-Max-Age", "3600")            // Cache preflight for 1 hour
+
+				// Only set Access-Control-Allow-Origin if origin is allowed
+				if origin != "" && corsManager.IsOriginAllowed(origin) {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+				}
+
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			// For non-preflight requests, set CORS headers if origin is allowed
+			if origin != "" && corsManager.IsOriginAllowed(origin) {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "false") // Secure default
+			}
+
+			// Add security headers
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("X-XSS-Protection", "1; mode=block")
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// Global CORS manager instance
+var corsManager = NewCORSManager()
+
 // CSRF token management
 type CSRFManager struct {
 	tokens map[string]time.Time // token -> expiry time
@@ -412,8 +524,14 @@ The dashboard provides a web interface for managing your cron jobs and crontab f
 			fatal(fmt.Sprintf("Failed to load IP filtering configuration: %v", err), 1)
 		}
 
-		// Create IP filter middleware
+		// Load CORS configuration
+		if err := corsManager.LoadAllowedOrigins(); err != nil {
+			fatal(fmt.Sprintf("Failed to load CORS configuration: %v", err), 1)
+		}
+
+		// Create middleware
 		ipFilterMiddleware := createIPFilterMiddleware(ipFilter)
+		corsMiddleware := createCORSMiddleware(corsManager)
 
 		// CSRF middleware
 		csrfMiddleware := func(next http.Handler) http.Handler {
@@ -565,37 +683,37 @@ The dashboard provides a web interface for managing your cron jobs and crontab f
 			http.ServeContent(w, r, "index.html", time.Now(), index.(io.ReadSeeker))
 		})
 
-		// Apply IP filter, auth and CSRF middleware to all routes
-		http.Handle("/", ipFilterMiddleware(authMiddleware(csrfMiddleware(handler))))
+		// Apply IP filter, CORS, auth and CSRF middleware to all routes
+		http.Handle("/", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(handler)))))
 
 		// Add settings API endpoints
-		http.Handle("/api/settings", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleSettings)))))
+		http.Handle("/api/settings", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleSettings))))))
 
 		// Add jobs endpoint
-		http.Handle("/api/jobs", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleJobs)))))
+		http.Handle("/api/jobs", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleJobs))))))
 
 		// Add crontabs endpoint
-		http.Handle("/api/crontabs", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontabs)))))
-		http.Handle("/api/crontabs/", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontab)))))
+		http.Handle("/api/crontabs", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontabs))))))
+		http.Handle("/api/crontabs/", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontab))))))
 
 		// Add users endpoint
-		http.Handle("/api/users", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUsers)))))
+		http.Handle("/api/users", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUsers))))))
 
 		// Add kill jobs endpoint
-		http.Handle("/api/jobs/kill", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleKillInstances)))))
+		http.Handle("/api/jobs/kill", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleKillInstances))))))
 
 		// Add run job endpoint
-		http.Handle("/api/jobs/run", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleRunJob)))))
+		http.Handle("/api/jobs/run", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleRunJob))))))
 
 		// Add monitors endpoint
-		http.Handle("/api/monitors", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleGetMonitors)))))
+		http.Handle("/api/monitors", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleGetMonitors))))))
 
 		// Add signup endpoint
-		http.Handle("/api/signup", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleSignup)))))
+		http.Handle("/api/signup", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleSignup))))))
 
 		// Add update endpoints
-		http.Handle("/api/update/check", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdateCheck)))))
-		http.Handle("/api/update/perform", ipFilterMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdatePerform)))))
+		http.Handle("/api/update/check", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdateCheck))))))
+		http.Handle("/api/update/perform", ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdatePerform))))))
 
 		// Create HTTP server with proper configuration
 		server := &http.Server{
@@ -690,17 +808,18 @@ func init() {
 
 type SettingsResponse struct {
 	ConfigFile
-	EnvVars        map[string]bool `json:"env_vars"`
-	ConfigFilePath string          `json:"config_file_path"`
-	Version        string          `json:"version"`
-	Hostname       string          `json:"hostname"`
-	Timezone       string          `json:"timezone"`
-	Timezones      []string        `json:"timezones"`
-	OS             string          `json:"os"`
-	SafeMode       bool            `json:"safe_mode"`
-	UpdateStatus   *UpdateStatus   `json:"update_status,omitempty"`
-	AllowedIPs     string          `json:"allowed_ips"`
-	ClientIP       string          `json:"client_ip"`
+	EnvVars            map[string]bool `json:"env_vars"`
+	ConfigFilePath     string          `json:"config_file_path"`
+	Version            string          `json:"version"`
+	Hostname           string          `json:"hostname"`
+	Timezone           string          `json:"timezone"`
+	Timezones          []string        `json:"timezones"`
+	OS                 string          `json:"os"`
+	SafeMode           bool            `json:"safe_mode"`
+	UpdateStatus       *UpdateStatus   `json:"update_status,omitempty"`
+	AllowedIPs         string          `json:"allowed_ips"`
+	CorsAllowedOrigins string          `json:"cors_allowed_origins"`
+	ClientIP           string          `json:"client_ip"`
 }
 
 // handleSettings handles GET and POST requests for settings
@@ -814,21 +933,23 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 			Timezone:       effectiveTimezoneLocationName().Name,
 			Timezones:      timezones,
 			EnvVars: map[string]bool{
-				"CRONITOR_API_KEY":      os.Getenv(varApiKey) != "",
-				"CRONITOR_PING_API_KEY": os.Getenv(varPingApiKey) != "",
-				"CRONITOR_EXCLUDE_TEXT": os.Getenv(varExcludeText) != "",
-				"CRONITOR_HOSTNAME":     os.Getenv(varHostname) != "",
-				"CRONITOR_LOG":          os.Getenv(varLog) != "",
-				"CRONITOR_ENV":          os.Getenv(varEnv) != "",
-				"CRONITOR_DASH_USER":    os.Getenv(varDashUsername) != "",
-				"CRONITOR_DASH_PASS":    os.Getenv(varDashPassword) != "",
-				"CRONITOR_ALLOWED_IPS":  os.Getenv(varAllowedIPs) != "",
+				"CRONITOR_API_KEY":              os.Getenv(varApiKey) != "",
+				"CRONITOR_PING_API_KEY":         os.Getenv(varPingApiKey) != "",
+				"CRONITOR_EXCLUDE_TEXT":         os.Getenv(varExcludeText) != "",
+				"CRONITOR_HOSTNAME":             os.Getenv(varHostname) != "",
+				"CRONITOR_LOG":                  os.Getenv(varLog) != "",
+				"CRONITOR_ENV":                  os.Getenv(varEnv) != "",
+				"CRONITOR_DASH_USER":            os.Getenv(varDashUsername) != "",
+				"CRONITOR_DASH_PASS":            os.Getenv(varDashPassword) != "",
+				"CRONITOR_ALLOWED_IPS":          os.Getenv(varAllowedIPs) != "",
+				"CRONITOR_CORS_ALLOWED_ORIGINS": os.Getenv("CRONITOR_CORS_ALLOWED_ORIGINS") != "",
 			},
-			OS:           runtime.GOOS,
-			SafeMode:     isSafeModeEnabled,
-			UpdateStatus: updateStatus,
-			AllowedIPs:   os.Getenv(varAllowedIPs),
-			ClientIP:     getClientIP(r),
+			OS:                 runtime.GOOS,
+			SafeMode:           isSafeModeEnabled,
+			UpdateStatus:       updateStatus,
+			AllowedIPs:         os.Getenv(varAllowedIPs),
+			CorsAllowedOrigins: os.Getenv("CRONITOR_CORS_ALLOWED_ORIGINS"),
+			ClientIP:           getClientIP(r),
 		}
 
 		// Override config values with environment variables if they exist
@@ -890,6 +1011,16 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 			// ALWAYS reload IP filter configuration when AllowedIPs changes through settings
 			if err := ipFilter.LoadAllowedIPs(); err != nil {
 				http.Error(w, fmt.Sprintf("Invalid IP configuration: %v", err), http.StatusBadRequest)
+				return
+			}
+		}
+
+		// Handle CORS allowed origins - always update if not overridden by environment variable
+		if os.Getenv("CRONITOR_CORS_ALLOWED_ORIGINS") == "" {
+			viper.Set("CRONITOR_CORS_ALLOWED_ORIGINS", configData.CorsAllowedOrigins)
+			// ALWAYS reload CORS configuration when CorsAllowedOrigins changes through settings
+			if err := corsManager.LoadAllowedOrigins(); err != nil {
+				http.Error(w, fmt.Sprintf("Invalid CORS configuration: %v", err), http.StatusBadRequest)
 				return
 			}
 		}
@@ -1327,7 +1458,6 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	// Create a channel to signal when the command is done
 	done := make(chan struct{})
@@ -2322,7 +2452,6 @@ func handleUpdatePerform(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	// Function to send progress updates
 	sendProgress := func(message string) {

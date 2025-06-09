@@ -11,15 +11,16 @@ import (
 )
 
 type ConfigFile struct {
-	ApiKey         string   `json:"CRONITOR_API_KEY"`
-	PingApiAuthKey string   `json:"CRONITOR_PING_API_KEY"`
-	ExcludeText    []string `json:"CRONITOR_EXCLUDE_TEXT,omitempty"`
-	Hostname       string   `json:"CRONITOR_HOSTNAME"`
-	Log            string   `json:"CRONITOR_LOG"`
-	Env            string   `json:"CRONITOR_ENV"`
-	DashUsername   string   `json:"CRONITOR_DASH_USER"`
-	DashPassword   string   `json:"CRONITOR_DASH_PASS"`
-	AllowedIPs     string   `json:"CRONITOR_ALLOWED_IPS"`
+	ApiKey             string   `json:"CRONITOR_API_KEY"`
+	PingApiAuthKey     string   `json:"CRONITOR_PING_API_KEY"`
+	ExcludeText        []string `json:"CRONITOR_EXCLUDE_TEXT,omitempty"`
+	Hostname           string   `json:"CRONITOR_HOSTNAME"`
+	Log                string   `json:"CRONITOR_LOG"`
+	Env                string   `json:"CRONITOR_ENV"`
+	DashUsername       string   `json:"CRONITOR_DASH_USER"`
+	DashPassword       string   `json:"CRONITOR_DASH_PASS"`
+	AllowedIPs         string   `json:"CRONITOR_ALLOWED_IPS"`
+	CorsAllowedOrigins string   `json:"CRONITOR_CORS_ALLOWED_ORIGINS"`
 }
 
 // configureCmd represents the configure command
@@ -62,6 +63,7 @@ Example setting common exclude text for use with 'cronitor discover':
 		configData.DashUsername = viper.GetString(varDashUsername)
 		configData.DashPassword = viper.GetString(varDashPassword)
 		configData.AllowedIPs = viper.GetString(varAllowedIPs)
+		configData.CorsAllowedOrigins = viper.GetString("CRONITOR_CORS_ALLOWED_ORIGINS")
 
 		fmt.Println("\nConfiguration File:")
 		fmt.Println(configFilePath())

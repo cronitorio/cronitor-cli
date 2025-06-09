@@ -68,54 +68,6 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
     • ✅ Add safety checks to prevent killing PID 1 (init) or other critical system processes
     • ✅ Return descriptive error messages for invalid PIDs or non-existent processes
 
-- Implement process ownership checks
-  - Problem: Can kill processes started by any parent
-  - Implementation: Verify that the process parent is either cron, crond, launchd (as appropriate) or this same binary or another instance of this "cronitor" binary. When finding associated processes, only return those with this criteria, and check it again during kill process handling.
-  - Details:
-    • Read process parent from /proc/{pid} or use os/user package
-    • Maintain whitelist of allowed process parents: cron, crond, launchd user IDs, cronitor
-    • Check process executable path using /proc/{pid}/exe to verify it's cronitor binary
-    • Implement process tree validation to ensure child processes belong to cron jobs or to cronitor itself. 
-
-### 4. File Operations Security
-#### Current State
-- No validation of file paths
-- No permission checks for file operations
-- No logging of file operations
-- Potential path traversal vulnerabilities
-
-#### Proposed Improvements
-- Implement file path validation
-  - Problem: No validation of file paths before operations
-  - Implementation: Validate and sanitize all file paths, prevent directory traversal. this binary should only be able to write to /etc/cronitor, /etc/cron.d/, /etc/crontab, /tmp
-  - Details:
-    • Define whitelist of allowed directories: /etc/cronitor, /etc/cron.d/, /etc/crontab, /tmp
-    • Use filepath.Clean() and filepath.Abs() to resolve and normalize all paths
-    • Check resolved paths start with allowed prefixes using strings.HasPrefix()
-    • Reject paths containing "..", symbolic links, or null bytes
-    • Implement path validation middleware that runs before any file operation
-
-- Add comprehensive file operation logging
-  - Problem: No audit trail of file operations
-  - Implementation: Log all file operations with user, action, and file path - log to syslog unless a path is provided in settings
-  - Details:
-    • Log file operations with timestamp, user, action (read/write/delete), path, and size
-    • Include file permissions, ownership, and modification time in log entries
-    • Use structured logging with consistent field names for automated analysis
-    • Send logs to syslog with LOG_AUTHPRIV facility for security-sensitive operations
-    • Add file content hashing (SHA256) for integrity verification in logs
-
-- Implement path traversal protection
-  - Problem: Vulnerable to directory traversal attacks
-  - Implementation: Sanitize paths and use absolute path resolution
-  - Details:
-    • Use filepath.Join() exclusively for path construction to prevent manual concatenation
-    • Implement chroot-style path resolution that treats allowed directories as filesystem roots
-    • Reject any path operation that would access files outside allowed directories
-    • Add comprehensive test suite for edge cases like Unicode normalization attacks
-    • Implement filesystem permission checks using os.Stat() before file operations
-
-
 ### 5. Network Security
 #### Current State
 - No TLS/HTTPS enforcement
@@ -125,15 +77,15 @@ The Cronitor dashboard provides a web interface for managing cron jobs and monit
 
 #### Proposed Improvements
 
-- Configure proper CORS policies
+- ✅ Configure proper CORS policies
   - Problem: No CORS configuration
   - Implementation: Add strict CORS policies with configurable allowed origins
   - Details:
-    • Implement CORS middleware using gorilla/handlers or custom implementation
-    • Set strict default policy: only same-origin requests allowed
-    • Add CRONITOR_CORS_ALLOWED_ORIGINS environment variable for configuration
-    • Configure secure headers: Access-Control-Allow-Credentials: false by default
-    • Implement preflight request handling with proper method and header validation
+    • ✅ Implement CORS middleware using gorilla/handlers or custom implementation
+    • ✅ Set strict default policy: only same-origin requests allowed
+    • ✅ Add CRONITOR_CORS_ALLOWED_ORIGINS environment variable for configuration
+    • ✅ Configure secure headers: Access-Control-Allow-Credentials: false by default
+    • ✅ Implement preflight request handling with proper method and header validation
 
 - Implement request size limits
   - Problem: No limit on request size
