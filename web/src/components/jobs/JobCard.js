@@ -514,7 +514,20 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
   };
 
   return (
-    <div className={`bg-white dark:bg-gray-800 shadow rounded-lg p-4 relative ${initialJob.suspended ? 'bg-gray-100 dark:bg-gray-700' : ''}`}>
+    <div className={`bg-white dark:bg-gray-800 shadow rounded-lg p-4 relative group ${initialJob.suspended ? 'bg-gray-100 dark:bg-gray-700' : ''}`}>
+      {/* Hide button - positioned outside card on hover */}
+      {!readOnly && !isNew && (
+        <button
+          onClick={() => setShowHideOverlay(true)}
+          className="absolute -right-24 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity duration-200 px-3 py-3 text-base rounded-md bg-gray-100 dark:bg-gray-900 flex items-center gap-1 text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-400"
+        >
+          Hide
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
+          </svg>
+        </button>
+      )}
+      
       <StatusBadges
         job={initialJob}
         instances={initialJob.instances || []}
@@ -761,7 +774,7 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                   />
                 </td>
                 <td className="py-2 text-sm text-gray-900 dark:text-gray-100" style={{ width: '37.5%' }}>
-                  {isNew && selectedLocation && !isUserCrontab ? (
+                  {isNew && selectedLocation && !isUserCrontab && (
                     <select
                       value={selectedUser}
                       onChange={handleUserChange}
@@ -772,17 +785,6 @@ export function JobCard({ job: initialJob, mutate, allJobs, isNew = false, onSav
                         <option key={user} value={user}>{user}</option>
                       ))}
                     </select>
-                  ) : (
-                    !readOnly && !isNew && (
-                      <div className="flex justify-end">
-                        <button
-                          onClick={() => setShowHideOverlay(true)}
-                          className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-500 dark:hover:text-gray-300"
-                        >
-                          Hide
-                        </button>
-                      </div>
-                    )
                   )}
                 </td>
               </tr>

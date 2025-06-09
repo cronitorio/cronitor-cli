@@ -2,11 +2,11 @@ import React from 'react';
 
 // Filter options for the job filters
 export const FILTER_OPTIONS = [
-  { id: 'active', label: 'Active', roundedStyle: 'rounded-l-md' },
-  { id: 'suspended', label: 'Suspended', roundedStyle: 'rounded-r-md' },
+  { id: 'active', label: 'Active' },
+  { id: 'suspended', label: 'Suspended' },
   { id: 'running', label: 'Running' },
-  { id: 'monitored', label: 'Monitored', roundedStyle: 'rounded-l-md' },
-  { id: 'unmonitored', label: 'Unmonitored', roundedStyle: 'rounded-r-md' }
+  { id: 'monitored', label: 'Monitored' },
+  { id: 'unmonitored', label: 'Unmonitored' }
 ];
 
 export function FilterBar({ activeFilters, setActiveFilters, inputValue, onInputChange }) {
@@ -35,18 +35,12 @@ export function FilterBar({ activeFilters, setActiveFilters, inputValue, onInput
     } else {
       buttonClasses += 'text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-400';
     }
-    
-    // Apply specific rounding if defined in FILTER_OPTIONS
-    if (filter.roundedStyle) {
-      buttonClasses = buttonClasses.replace('rounded-md', filter.roundedStyle);
-    }
 
     return (
       <button
         key={filter.id}
         onClick={() => handleFilterToggle(filter.id)}
         className={buttonClasses}
-        style={ (filterId === 'suspended' || filterId === 'unmonitored') ? { marginLeft: '-1px', borderLeft: '1px solid rgba(128,128,128,0.2)' } : {} }
       >
         {filter.label}
       </button>
@@ -54,21 +48,12 @@ export function FilterBar({ activeFilters, setActiveFilters, inputValue, onInput
   };
 
   return (
-    <div className="flex items-center gap-3 flex-nowrap min-w-0 justify-end"> {/* Main gap between groups/elements */}
-      {/* Group 1: Active/Suspended */}
-      <div className="flex items-center">
-        {renderFilterButton('active')}
-        {renderFilterButton('suspended')}
-      </div>
-
-      {/* Group 2: Running (Standalone) */}
+    <div className="flex items-center gap-3 flex-nowrap min-w-0 justify-end">
+      {renderFilterButton('active')}
+      {renderFilterButton('suspended')}
       {renderFilterButton('running')}
-
-      {/* Group 3: Monitored/Unmonitored */}
-      <div className="flex items-center">
-        {renderFilterButton('monitored')}
-        {renderFilterButton('unmonitored')}
-      </div>
+      {renderFilterButton('monitored')}
+      {renderFilterButton('unmonitored')}
       
       <input
         type="text"

@@ -117,11 +117,18 @@ function Sidebar({ isDark, toggleTheme }) {
       <div className="flex min-h-0 flex-1 flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         <div className="flex flex-1 flex-col overflow-y-auto pt-5 pb-4">
           <div className="flex flex-shrink-0 items-center px-4">
-            <img 
-              src={cronitorLogo} 
-              alt="LocalDash Logo" 
-              className="h-8 w-8 object-contain"
-            />
+            <a
+              href="https://cronitor.io?utm_source=cli&utm_campaign=dash"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:opacity-80 transition-opacity"
+            >
+              <img 
+                src={cronitorLogo} 
+                alt="LocalDash Logo" 
+                className="h-8 w-8 object-contain"
+              />
+            </a>
             <span className="ml-3 text-xl font-bold text-gray-900 dark:text-white">Crontab Guru</span>
           </div>
           <nav className="mt-5 flex-1 space-y-1 bg-white dark:bg-gray-800 px-2">
