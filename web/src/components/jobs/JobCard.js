@@ -302,7 +302,11 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ command: initialJob.command })
+        body: JSON.stringify({ 
+          command: initialJob.command,
+          crontab_filename: initialJob.crontab_filename,
+          key: initialJob.key
+        })
       });
       if (!response.ok) {
         throw new Error('Failed to run job');

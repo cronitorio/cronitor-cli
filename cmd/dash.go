@@ -1489,7 +1489,9 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request struct {
-		Command string `json:"command"`
+		Command         string `json:"command"`
+		CrontabFilename string `json:"crontab_filename"`
+		Key             string `json:"key"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -1502,34 +1504,44 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// In safe mode, only allow commands that exist in crontabs
-	if isSafeModeEnabled {
-		crontabs, err := lib.GetAllCrontabs()
-		if err != nil {
-			http.Error(w, "Failed to validate command", http.StatusInternalServerError)
-			return
-		}
+	shell := "/bin/sh" // Default shell
 
-		commandAllowed := false
-		for _, crontab := range crontabs {
-			if len(crontab.Lines) == 0 && crontab.Exists() {
-				crontab.Parse(true)
+	// If crontab filename and key are provided, use them to find the specific job
+	if request.CrontabFilename != "" && request.Key != "" {
+		crontab, err := lib.GetCrontab(request.CrontabFilename)
+		if err != nil {
+			http.Error(w, "Crontab not found", http.StatusForbidden)
+			return
+		} else {
+			// Use the shell from this crontab
+			if crontab.Shell != "" {
+				shell = crontab.Shell
 			}
+
+			// Find the specific job by key
+			var foundLine *lib.Line
 			for _, line := range crontab.Lines {
-				if line.IsJob && line.CommandToRun == request.Command {
-					commandAllowed = true
+				if line.IsJob && line.Key(crontab.CanonicalName()) == request.Key {
+					foundLine = line
 					break
 				}
 			}
-			if commandAllowed {
-				break
+
+			if foundLine != nil {
+				// Validate that the command matches what's in the crontab
+				if foundLine.CommandToRun != request.Command && isSafeModeEnabled {
+					http.Error(w, "Command does not match the job in the crontab", http.StatusForbidden)
+					return
+				}
+			} else if isSafeModeEnabled {
+				http.Error(w, "Job not found in crontab", http.StatusForbidden)
+				return
 			}
 		}
-
-		if !commandAllowed {
-			http.Error(w, "Command execution is restricted to existing crontab commands in safe mode", http.StatusForbidden)
-			return
-		}
+	} else if isSafeModeEnabled {
+		// In safe mode, crontab filename and key are required
+		http.Error(w, "Crontab filename and key are required in safe mode", http.StatusForbidden)
+		return
 	}
 
 	// Create a temporary file for the output
@@ -1564,7 +1576,7 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 		defer close(done)
 
 		startTime := time.Now()
-		cmd := exec.CommandContext(ctx, "sh", "-c", request.Command)
+		cmd := exec.CommandContext(ctx, shell, "-c", request.Command)
 		cmd.Env = makeCronLikeEnv()
 		cmd.Stdout = tempFile
 		cmd.Stderr = tempFile
@@ -1594,30 +1606,76 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 		err = cmd.Wait()
 		duration := time.Since(startTime)
 		exitCode := 0
-		if err != nil {
+
+		// Ensure temp file is synced before reading final output
+		tempFile.Sync()
+
+		// Determine exit status and reason
+		var statusMsg string
+		if ctx.Err() == context.DeadlineExceeded {
+			statusMsg = fmt.Sprintf("Timed out after %.2f seconds", duration.Seconds())
+		} else if err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				exitCode = exitErr.ExitCode()
+				// Check for kill signals and common termination codes
+				if exitCode == -1 || exitCode == 130 || exitCode == 137 || exitCode == 143 || exitCode == 9 {
+					// Common kill/interrupt exit codes:
+					// 130 = Ctrl+C (SIGINT), 137 = SIGKILL, 143 = SIGTERM, 9 = SIGKILL, -1 = killed
+					statusMsg = fmt.Sprintf("Killed after %.2f seconds [Exit code %d]", duration.Seconds(), exitCode)
+				} else {
+					statusMsg = fmt.Sprintf("Done in %.2f seconds [Exit code %d]", duration.Seconds(), exitCode)
+				}
+			} else {
+				// Check if the error indicates the process was killed
+				errStr := err.Error()
+				if strings.Contains(errStr, "killed") || strings.Contains(errStr, "signal") {
+					statusMsg = fmt.Sprintf("Killed after %.2f seconds: %v", duration.Seconds(), err)
+				} else {
+					statusMsg = fmt.Sprintf("Failed after %.2f seconds: %v", duration.Seconds(), err)
+				}
 			}
+		} else {
+			statusMsg = fmt.Sprintf("Done in %.2f seconds [Exit code %d]", duration.Seconds(), exitCode)
 		}
 
-		// Send completion message
+		// Give a brief moment for output to be flushed to the temp file
+		time.Sleep(200 * time.Millisecond)
+
+		// Send completion message - retry a few times if needed
 		completionData, _ := json.Marshal(map[string]string{
-			"completion": fmt.Sprintf("Done in %.2f seconds [Exit code %d]", duration.Seconds(), exitCode),
+			"completion": statusMsg,
 		})
-		fmt.Fprintf(w, "data: %s\n\n", completionData)
-		w.(http.Flusher).Flush()
+
+		// Try to send completion message multiple times to ensure delivery
+		for attempts := 0; attempts < 3; attempts++ {
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", completionData); err != nil {
+				log(fmt.Sprintf("Failed to send completion message (attempt %d): %v", attempts+1, err))
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			break
+		}
 	}()
 
 	// Stream the log file contents with memory limits
 	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond) // Reduced frequency
+		ticker := time.NewTicker(100 * time.Millisecond) // More frequent polling for better responsiveness
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-done:
-				// Read any final output
-				streamRemainingOutput(tempFile, &lastPos, &totalSent, maxOutputSize, maxChunkSize, w)
+				// Give extra time for output to be written to file after command completion
+				time.Sleep(300 * time.Millisecond)
+				// Read any final output multiple times to ensure we get everything
+				for i := 0; i < 3; i++ {
+					streamRemainingOutput(tempFile, &lastPos, &totalSent, maxOutputSize, maxChunkSize, w)
+					time.Sleep(50 * time.Millisecond)
+				}
 				return
 			case <-ctx.Done():
 				return

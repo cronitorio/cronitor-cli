@@ -30,6 +30,7 @@ type Crontab struct {
 	Filename                string                `json:"filename"`
 	Lines                   []*Line               `json:"-"`
 	TimezoneLocationName    *TimezoneLocationName `json:"timezone,omitempty"`
+	Shell                   string                `json:"-"`
 	UsesSixFieldExpressions bool                  `json:"-"`
 }
 
@@ -169,9 +170,11 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 		splitLine := strings.Fields(fullLine)
 		splitLineLen := len(splitLine)
 		if splitLineLen == 1 && strings.Contains(splitLine[0], "=") {
-			// Handling for environment variables... we're looking for timezone declarations
+			// Handling for environment variables... we're looking for timezone declarations and shell specifications
 			if splitExport := strings.Split(splitLine[0], "="); splitExport[0] == "TZ" || splitExport[0] == "CRON_TZ" {
 				c.TimezoneLocationName = &TimezoneLocationName{splitExport[1]}
+			} else if splitExport[0] == "SHELL" {
+				c.Shell = splitExport[1]
 			}
 		} else if splitLineLen > 0 && strings.HasPrefix(splitLine[0], "@") {
 			// Handling for special cron @keyword
@@ -394,11 +397,13 @@ func (c Crontab) MarshalJSON() ([]byte, error) {
 		Alias
 		DisplayName string  `json:"display_name"`
 		Timezone    string  `json:"timezone,omitempty"`
+		Shell       string  `json:"shell,omitempty"`
 		Lines       []*Line `json:"lines"`
 	}{
 		Alias:       Alias(c),
 		DisplayName: c.DisplayName(),
 		Timezone:    timezone,
+		Shell:       c.Shell,
 		Lines:       c.Lines,
 	})
 }
@@ -822,6 +827,7 @@ func CrontabFactory(username, filename string) *Crontab {
 		User:          username,
 		IsUserCrontab: strings.HasPrefix(filename, "user:"),
 		Filename:      filename,
+		Shell:         "/bin/sh", // Default shell if none is specified
 	}
 }
 
@@ -900,6 +906,7 @@ func (c *Crontab) lightweightCopy() Crontab {
 		Filename:                c.Filename,
 		Lines:                   nil, // Explicitly nil to break circular reference
 		TimezoneLocationName:    c.TimezoneLocationName,
+		Shell:                   c.Shell,
 		UsesSixFieldExpressions: c.UsesSixFieldExpressions,
 	}
 }

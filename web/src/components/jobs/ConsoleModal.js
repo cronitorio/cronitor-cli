@@ -76,7 +76,11 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange, onComm
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ command })
+        body: JSON.stringify({ 
+          command,
+          crontab_filename: job.crontab_filename,
+          key: job.key
+        })
       });
 
       if (!response.ok) {
@@ -132,13 +136,13 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange, onComm
         body: JSON.stringify({ pids: [currentPid] }),
       });
       
-      // Close the event source
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
-      setIsRunning(false);
+      // Don't close the event source immediately - let the backend send the completion message
+      // The connection will close naturally when the backend detects the process was killed
+      addOutput('\n[Process kill signal sent...]\n');
     } catch (error) {
       console.error('Failed to kill process:', error);
+      addOutput(`\nError killing process: ${error.message}\n`);
+      setIsRunning(false);
     }
   };
 

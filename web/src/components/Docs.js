@@ -84,7 +84,7 @@ export default function Docs() {
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Crontab Guru Dashboard</h3>
           <p className="text-gray-700 dark:text-gray-300">
-            Crontab Guru is a web-based dashboard for managing cron jobs and crontab files. Your jobs are still run by cron, but you are free from the savagery of editing crontab files in vim.
+            Crontab Guru is a self hosted web-based dashboard for managing cron jobs and crontab files. Your jobs are still run by cron, but you are free from the savagery of editing crontab files in vim. From the team that brought you <a href="https://cronitor.io" className="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">Cronitor</a> and <a href="https://crontab.guru" className="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">Crontab.guru</a>.
           </p>
           
           <Screenshot 
@@ -476,7 +476,6 @@ cronitor dash --safe-mode`}
 cronitor configure --allow-ips 192.168.1.0/24,10.0.0.1
 
 # Allow access from local network only
-cronitor dash --allow-ips 127.0.0.1,::1,192.168.0.0/16
 cronitor configure--allow-ips 127.0.0.1,::1,192.168.0.0/16`}
           </CodeBlock>
           <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
@@ -486,14 +485,14 @@ cronitor configure--allow-ips 127.0.0.1,::1,192.168.0.0/16`}
             <li>Blocked requests are logged for security auditing</li>
           </ul>
 
-          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Best Security Practices</h4>
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Security Best Practices</h4>
           <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
+            <li>Use a secure tunnel or VPN for remote access</li>
             <li>Use strong authentication credentials</li>
             <li>Regularly update passwords</li>
-            <li>Limit network access to trusted hosts</li>
             <li>Monitor access logs for suspicious activity</li>
-            <li>Run with minimal required privileges</li>
             <li>Keep CronitorCLI updated to latest version</li>
+            <li>Use IP Whitelisting to limit access to trusted locations</li>
           </ul>
         </div>
       </CollapsibleSection>
