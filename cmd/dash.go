@@ -1571,9 +1571,7 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 
 		// Create a new process group for each "run now" command
 		// This ensures each invocation gets its own PGID for proper tracking
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Setpgid: true,
-		}
+		cmd.SysProcAttr = getPlatformSysProcAttrForDash()
 
 		err := cmd.Start()
 		if err != nil {

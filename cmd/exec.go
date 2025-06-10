@@ -284,9 +284,7 @@ func makeSubcommandExec(subcommand string) *exec.Cmd {
 		execCmd = exec.Command("sh", "-c", subcommand)
 	}
 
-	execCmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true, // Put child in its own process group
-	}
+	execCmd.SysProcAttr = getPlatformSysProcAttr()
 
 	return execCmd
 }

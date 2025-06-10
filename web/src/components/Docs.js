@@ -452,7 +452,7 @@ connect = remote-cron-server:9000`}
               Then run <code>stunnel ~/.stunnel/stunnel.conf</code> to start the tunnel.
             </p>       
           
-          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Safe Mode Explanation</h4>
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Safe Mode</h4>
           <p className="text-gray-700 dark:text-gray-300">
             Safe mode provides additional security by restricting some sensitive operations:
           </p>
@@ -465,6 +465,25 @@ cronitor dash --safe-mode`}
             <li>Disables web-based job console</li>
             <li>Disables adding new jobs from the dashboard</li>
             <li>Crontabs are shown in read-only mode</li>
+          </ul>
+
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">IP Whitelisting</h4>
+          <p className="text-gray-700 dark:text-gray-300">
+            For additional security, you can configure IP whitelisting to restrict dashboard access to specific IP addresses or ranges:
+          </p>
+          <CodeBlock>
+{`# Allow access only from specific IPs
+cronitor configure --allow-ips 192.168.1.0/24,10.0.0.1
+
+# Allow access from local network only
+cronitor dash --allow-ips 127.0.0.1,::1,192.168.0.0/16
+cronitor configure--allow-ips 127.0.0.1,::1,192.168.0.0/16`}
+          </CodeBlock>
+          <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
+            <li>Supports both IPv4 and IPv6 addresses</li>
+            <li>CIDR notation for network ranges</li>
+            <li>Multiple IPs can be specified with comma separation</li>
+            <li>Blocked requests are logged for security auditing</li>
           </ul>
 
           <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Best Security Practices</h4>

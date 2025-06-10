@@ -1,8 +1,30 @@
 import { useState, useEffect } from 'react';
 import useSWR from 'swr';
-import { ExclamationTriangleIcon, EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
+import { ExclamationTriangleIcon, EyeIcon, EyeSlashIcon, QuestionMarkCircleIcon } from '@heroicons/react/24/outline';
 import { useLocation } from 'react-router-dom';
 import { csrfFetcher, csrfFetch } from '../utils/api';
+
+// Custom tooltip component
+const Tooltip = ({ children, text }) => {
+  const [show, setShow] = useState(false);
+
+  return (
+    <div className="relative inline-block">
+      <div
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+      >
+        {children}
+      </div>
+      {show && (
+        <div className="absolute z-50 px-3 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg shadow-lg dark:bg-gray-700 bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64">
+          <div dangerouslySetInnerHTML={{ __html: text }} />
+          <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export default function Settings() {
   const location = useLocation();
@@ -104,9 +126,29 @@ export default function Settings() {
   if (error) return <div className="text-red-600 dark:text-red-400">Failed to load settings</div>;
   if (!data) return <div className="text-gray-900 dark:text-gray-100">Loading...</div>;
 
+  const fieldDescriptions = {
+    "CRONITOR_LOG": "Where to write a comprehensive log file for auditing and troubleshooting.<br/><br/>Overridden by CRONITOR_LOG environment variable.",
+    "CRONITOR_ENV": "Environment identifier (e.g. staging, production) added to monitor data.<br/><br/>Overridden by CRONITOR_ENV environment variable.",
+    "CRONITOR_API_KEY": "Your Cronitor API key for syncing monitors and job data.<br/><br/>Overridden by CRONITOR_API_KEY environment variable.",
+    "CRONITOR_PING_API_KEY": "API key for sending telemetry pings (optional, uses API key if not set).<br/><br/>Overridden by CRONITOR_PING_API_KEY environment variable.",
+    "CRONITOR_EXCLUDE_TEXT": "Text to exclude when generating monitor names from commands.<br/><br/>Overridden by CRONITOR_EXCLUDE_TEXT environment variable.",
+    "CRONITOR_HOSTNAME": "Set a hostname for generating monitor names.<br/><br/>Overridden by CRONITOR_HOSTNAME environment variable.",
+    "CRONITOR_DASH_USER": "Username for accessing the dashboard.<br/><br/>Overridden by CRONITOR_DASH_USER environment variable.",
+    "CRONITOR_DASH_PASS": "Password for accessing the dashboard.<br/><br/>Overridden by CRONITOR_DASH_PASS environment variable.",
+    "CRONITOR_ALLOWED_IPS": "Restrict dashboard access to specific IP addresses or ranges.<br/><br/>Overridden by CRONITOR_ALLOWED_IPS environment variable.",
+    "CRONITOR_CORS_ALLOWED_ORIGINS": "Allow cross-origin requests from specific domains for API access.<br/><br/>Overridden by CRONITOR_CORS_ALLOWED_ORIGINS environment variable."
+  };
+
   const renderInput = (name, label, type = "text", value, onChange, disabled = false) => (
     <div>
-      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">{label}</label>
+      <label className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
+        {label}
+        <Tooltip text={fieldDescriptions[name]}>
+          <QuestionMarkCircleIcon 
+            className="ml-2 h-4 w-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" 
+          />
+        </Tooltip>
+      </label>
       <div className="relative mt-1">
         <input
           type={type}
@@ -203,8 +245,13 @@ export default function Settings() {
             )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              <label className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
                 Exclude Text (comma-separated)
+                <Tooltip text={fieldDescriptions["CRONITOR_EXCLUDE_TEXT"]}>
+                  <QuestionMarkCircleIcon 
+                    className="ml-2 h-4 w-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" 
+                  />
+                </Tooltip>
               </label>
               <input
                 type="text"
@@ -259,8 +306,13 @@ export default function Settings() {
             )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              <label className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
                 Allowed IP Addresses
+                <Tooltip text={fieldDescriptions["CRONITOR_ALLOWED_IPS"]}>
+                  <QuestionMarkCircleIcon 
+                    className="ml-2 h-4 w-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" 
+                  />
+                </Tooltip>
               </label>
               <div className="mt-1">
                 <input
@@ -295,8 +347,13 @@ export default function Settings() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              <label className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
                 CORS Allowed Origins
+                <Tooltip text={fieldDescriptions["CRONITOR_CORS_ALLOWED_ORIGINS"]}>
+                  <QuestionMarkCircleIcon 
+                    className="ml-2 h-4 w-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" 
+                  />
+                </Tooltip>
               </label>
               <div className="mt-1">
                 <input
