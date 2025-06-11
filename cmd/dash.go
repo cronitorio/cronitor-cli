@@ -597,6 +597,100 @@ var dashCmd = &cobra.Command{
 	Long: `Start the Crontab Guru web dashboard.
 The dashboard provides a web interface for managing your cron jobs and crontab files.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		// Check for dashboard credentials before starting the server
+		username := viper.GetString(varDashUsername)
+		password := viper.GetString(varDashPassword)
+
+		if username == "" || password == "" {
+			fmt.Println("Dashboard credentials are not configured.")
+			fmt.Println("Please set a username and password for dashboard access.")
+			fmt.Println("These credentials will be saved to your configuration file and can be updated later from the Settings screen.")
+			fmt.Println()
+
+			// Prompt for username
+			fmt.Print("Enter dashboard username: ")
+			reader := bufio.NewReader(os.Stdin)
+			usernameInput, err := reader.ReadString('\n')
+			if err != nil {
+				fatal(fmt.Sprintf("Failed to read username: %v", err), 1)
+			}
+			usernameInput = strings.TrimSpace(usernameInput)
+			if usernameInput == "" {
+				fatal("Username cannot be empty", 1)
+			}
+
+			// Prompt for password
+			fmt.Print("Enter dashboard password: ")
+			passwordInput, err := reader.ReadString('\n')
+			if err != nil {
+				fatal(fmt.Sprintf("Failed to read password: %v", err), 1)
+			}
+			passwordInput = strings.TrimSpace(passwordInput)
+			if passwordInput == "" {
+				fatal("Password cannot be empty", 1)
+			}
+
+			// Read the current config file
+			configPath := configFilePath()
+			var configData ConfigFile
+			if data, err := ioutil.ReadFile(configPath); err == nil {
+				// File exists, parse it
+				if err := json.Unmarshal(data, &configData); err != nil {
+					// If parsing fails, start with empty config
+					configData = ConfigFile{}
+				}
+			}
+
+			// Update credentials in config data
+			configData.DashUsername = usernameInput
+			configData.DashPassword = passwordInput
+
+			// Preserve other existing config values
+			if configData.ApiKey == "" {
+				configData.ApiKey = viper.GetString(varApiKey)
+			}
+			if configData.PingApiAuthKey == "" {
+				configData.PingApiAuthKey = viper.GetString(varPingApiKey)
+			}
+			if len(configData.ExcludeText) == 0 {
+				configData.ExcludeText = viper.GetStringSlice(varExcludeText)
+			}
+			if configData.Hostname == "" {
+				configData.Hostname = viper.GetString(varHostname)
+			}
+			if configData.Log == "" {
+				configData.Log = viper.GetString(varLog)
+			}
+			if configData.Env == "" {
+				configData.Env = viper.GetString(varEnv)
+			}
+			if configData.AllowedIPs == "" {
+				configData.AllowedIPs = viper.GetString(varAllowedIPs)
+			}
+			if configData.CorsAllowedOrigins == "" {
+				configData.CorsAllowedOrigins = viper.GetString("CRONITOR_CORS_ALLOWED_ORIGINS")
+			}
+
+			// Marshal the config data
+			b, err := json.MarshalIndent(configData, "", "    ")
+			if err != nil {
+				fatal(fmt.Sprintf("Failed to marshal config data: %v", err), 1)
+			}
+
+			// Write to config file
+			if err := os.MkdirAll(defaultConfigFileDirectory(), os.ModePerm); err != nil {
+				fatal(fmt.Sprintf("Failed to create config directory: %v", err), 1)
+			}
+
+			if err := ioutil.WriteFile(configPath, b, 0644); err != nil {
+				fatal(fmt.Sprintf("Failed to write config file: %v", err), 1)
+			}
+
+			fmt.Printf("\nCredentials saved to: %s\n", configPath)
+			fmt.Println("Please run 'cronitor dash' again to start the dashboard.")
+			os.Exit(0)
+		}
+
 		port, _ := cmd.Flags().GetInt("port")
 		if port == 0 {
 			port = 9000
@@ -676,11 +770,6 @@ The dashboard provides a web interface for managing your cron jobs and crontab f
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				username := viper.GetString(varDashUsername)
 				password := viper.GetString(varDashPassword)
-
-				if username == "" || password == "" {
-					http.Error(w, "Dashboard credentials not configured", http.StatusInternalServerError)
-					return
-				}
 
 				// Get client IP for rate limiting
 				clientIP := getClientIP(r)
