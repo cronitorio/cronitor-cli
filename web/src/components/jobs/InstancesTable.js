@@ -83,7 +83,7 @@ export function InstancesTable({
       <div className="mt-2 text-right">
         <button
           onClick={onRunNow}
-          className="text-xs bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 px-3 py-1 rounded mr-2"
+          className="text-xs bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 px-3 py-1 rounded mr-1"
         >
           Run Now
         </button>
@@ -91,7 +91,7 @@ export function InstancesTable({
           <button
             onClick={onKillAll}
             disabled={isKillingAll}
-            className={`text-xs bg-red-600 hover:bg-red-700 text-white dark:bg-red-500 dark:hover:bg-red-600 px-3 py-1 rounded ${
+            className={`text-xs bg-red-600 hover:bg-red-700 text-white dark:bg-red-500 dark:hover:bg-red-600 px-3 py-1 ml-2 rounded ${
               isKillingAll ? 'opacity-30 cursor-not-allowed' : ''
             }`}
           >

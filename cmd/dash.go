@@ -2357,7 +2357,14 @@ func handlePutCrontabs(w http.ResponseWriter, r *http.Request) {
 	// Invalidate cache since we modified a crontab
 	invalidateCrontabCache()
 
+	// Parse the updated crontab to ensure lines are loaded
+	if len(crontab.Lines) == 0 && crontab.Exists() {
+		crontab.Parse(true)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(crontab)
 }
 
 // handleCrontab handles requests for individual crontabs
