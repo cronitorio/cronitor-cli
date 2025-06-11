@@ -3,6 +3,7 @@ package lib
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -28,7 +29,7 @@ type ProcessValidator struct {
 // NewProcessValidator creates a new process validator instance
 func NewProcessValidator() *ProcessValidator {
 	pv := &ProcessValidator{
-		allowedParentNames: []string{"cron", "crond", "launchd", "systemd", "cronitor"},
+		allowedParentNames: []string{"cron", "crond", "launchd", "systemd", "cronitor", "cronitor-cli"},
 	}
 
 	// Get current executable path for cronitor binary verification
@@ -103,7 +104,7 @@ func (pv *ProcessValidator) ValidatePIDWithOwnership(pid int) error {
 	if err := pv.validateProcessOwnership(pid); err != nil {
 		return PIDValidationError{
 			PID:     pid,
-			Message: err.Error(),
+			Message: fmt.Sprintf("ownership validation failed: %s", err.Error()),
 		}
 	}
 
@@ -124,11 +125,23 @@ func (pv *ProcessValidator) validateProcessOwnership(pid int) error {
 
 // validateUnixProcessOwnership validates process ownership on Unix-like systems
 func (pv *ProcessValidator) validateUnixProcessOwnership(pid int) error {
-	// Check process tree to find allowed parent
+	// Get process information
+	processInfo, err := pv.GetProcessInfo(pid)
+	if err != nil {
+		return fmt.Errorf("failed to get process info: %v", err)
+	}
+
+	// Check if we own the process (can kill processes we own)
+	currentUID := os.Getuid()
+	if processInfo.UID == currentUID {
+		return nil // We own the process, so we can kill it
+	}
+
+	// If we don't own it, check if it has an allowed parent in the process tree
 	if allowed, err := pv.hasAllowedParentInTree(pid); err != nil {
 		return fmt.Errorf("failed to validate process tree: %v", err)
 	} else if !allowed {
-		return fmt.Errorf("process does not have an allowed parent (cron, crond, launchd, cronitor)")
+		return fmt.Errorf("process does not belong to current user and does not have an allowed parent (cron, crond, launchd, cronitor, cronitor-cli)")
 	}
 
 	return nil
@@ -256,22 +269,58 @@ func (pv *ProcessValidator) getLinuxProcessInfo(pid int) (*ProcessInfo, error) {
 
 // getDarwinProcessInfo retrieves process information on macOS
 func (pv *ProcessValidator) getDarwinProcessInfo(pid int) (*ProcessInfo, error) {
-	// On macOS, we can use syscalls to get process info
-	// For now, use a simplified approach with ps command
-	process, err := os.FindProcess(pid)
+	// Use ps command to get process info on macOS
+	cmd := exec.Command("ps", "-p", fmt.Sprintf("%d", pid), "-o", "ppid=,comm=,uid=")
+	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("process not found: %v", err)
+		return nil, fmt.Errorf("process not found or not accessible: %v", err)
 	}
 
-	// This is a simplified implementation - in practice, you'd use more specific macOS APIs
-	// For now, return basic info
-	_ = process // Suppress unused variable warning
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) == 0 {
+		return nil, fmt.Errorf("no process information found")
+	}
+
+	// Parse the ps output
+	fields := strings.Fields(lines[0])
+	if len(fields) < 3 {
+		return nil, fmt.Errorf("invalid ps output format")
+	}
+
+	ppid, err := strconv.Atoi(strings.TrimSpace(fields[0]))
+	if err != nil {
+		return nil, fmt.Errorf("invalid PPID: %v", err)
+	}
+
+	command := strings.TrimSpace(fields[1])
+
+	uid, err := strconv.Atoi(strings.TrimSpace(fields[2]))
+	if err != nil {
+		// UID parsing failed, default to 0
+		uid = 0
+	}
+
+	// Try to get the full executable path
+	exePath := command
+	if pathCmd := exec.Command("ps", "-p", fmt.Sprintf("%d", pid), "-o", "command="); pathCmd != nil {
+		if pathOutput, pathErr := pathCmd.Output(); pathErr == nil {
+			fullCommand := strings.TrimSpace(string(pathOutput))
+			if fullCommand != "" {
+				// Extract the executable path (first part before any arguments)
+				parts := strings.Fields(fullCommand)
+				if len(parts) > 0 {
+					exePath = parts[0]
+				}
+			}
+		}
+	}
+
 	return &ProcessInfo{
 		PID:     pid,
-		PPID:    1, // Default to init, would need proper implementation
-		Command: "unknown",
-		ExePath: "unknown",
-		UID:     0,
+		PPID:    ppid,
+		Command: command,
+		ExePath: exePath,
+		UID:     uid,
 	}, nil
 }
 
@@ -358,23 +407,17 @@ func (pv *ProcessValidator) isCriticalSystemProcess(pid int) bool {
 // verifyProcessExists checks if a process with the given PID exists
 func (pv *ProcessValidator) verifyProcessExists(pid int) error {
 	switch runtime.GOOS {
-	case "linux", "darwin":
-		// Check /proc/{pid}/stat file on Linux or use os.FindProcess on macOS
-		if runtime.GOOS == "linux" {
-			statFile := fmt.Sprintf("/proc/%d/stat", pid)
-			if _, err := os.Stat(statFile); os.IsNotExist(err) {
-				return fmt.Errorf("process does not exist")
-			}
-		} else {
-			// On macOS, use os.FindProcess and then check if process is actually running
-			process, err := os.FindProcess(pid)
-			if err != nil {
-				return fmt.Errorf("process does not exist: %v", err)
-			}
-			// Send signal 0 to check if process exists without affecting it
-			if err := process.Signal(os.Signal(nil)); err != nil {
-				return fmt.Errorf("process does not exist or is not accessible")
-			}
+	case "linux":
+		// Check /proc/{pid}/stat file on Linux
+		statFile := fmt.Sprintf("/proc/%d/stat", pid)
+		if _, err := os.Stat(statFile); os.IsNotExist(err) {
+			return fmt.Errorf("process does not exist")
+		}
+	case "darwin":
+		// On macOS, use ps command to check if process exists
+		cmd := exec.Command("ps", "-p", fmt.Sprintf("%d", pid))
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("process does not exist")
 		}
 	case "windows":
 		// On Windows, use os.FindProcess
@@ -386,9 +429,10 @@ func (pv *ProcessValidator) verifyProcessExists(pid int) error {
 		// without additional system calls
 		_ = process
 	default:
-		// For other systems, use os.FindProcess
-		if _, err := os.FindProcess(pid); err != nil {
-			return fmt.Errorf("process does not exist: %v", err)
+		// For other systems, use ps command as fallback
+		cmd := exec.Command("ps", "-p", fmt.Sprintf("%d", pid))
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("process does not exist")
 		}
 	}
 

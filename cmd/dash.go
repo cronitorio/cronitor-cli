@@ -1200,21 +1200,10 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get monitors to sync names
-	var monitors []lib.Monitor
-	if api := getCronitorApi(); api != nil {
-		if monitorData, err := api.GetMonitors(); err == nil {
-			monitors = monitorData
-		}
-	}
-
 	var jobs []Job
-	var crontabsToSave []*lib.Crontab
 
 	// Process each crontab
 	for _, crontab := range crontabs {
-		crontabModified := false
-
 		for i := range crontab.Lines {
 			line := crontab.Lines[i]
 			if !line.IsJob {
@@ -1236,21 +1225,7 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 				runAsUser = crontab.User
 			}
 
-			// Check if this job has a monitor and if the name needs updating
 			jobKey := line.Key(crontab.CanonicalName())
-			if len(line.Code) > 0 && monitors != nil {
-				for _, monitor := range monitors {
-					// Match by code or key
-					if (monitor.Attributes.Code == line.Code) || monitor.Key == jobKey {
-						// If monitor name differs from crontab line name, update the crontab
-						if monitor.Name != "" && monitor.Name != line.Name {
-							line.Name = monitor.Name
-							crontabModified = true
-						}
-						break
-					}
-				}
-			}
 
 			// Basic exclusions for cleaner names
 			excludeFromName := []string{
@@ -1298,10 +1273,6 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// If this crontab was modified, mark it for saving
-		if crontabModified {
-			crontabsToSave = append(crontabsToSave, crontab)
-		}
 	}
 
 	// Populate instances for jobs using command history, but limit to first 50 jobs to prevent performance issues
@@ -1335,13 +1306,6 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Save any modified crontabs
-	for _, crontab := range crontabsToSave {
-		if err := crontab.Save(crontab.Write()); err != nil {
-			log(fmt.Sprintf("Warning: Failed to save crontab %s after syncing monitor names: %v", crontab.Filename, err))
-		}
-	}
-
 	responseData, err := json.Marshal(jobs)
 	if err != nil {
 		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
@@ -1363,6 +1327,62 @@ func handleGetMonitors(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Sync monitor names with crontab job names
+	go func() {
+		// Get all crontabs for name syncing
+		crontabs, err := lib.GetAllCrontabs()
+		if err != nil {
+			log(fmt.Sprintf("Warning: Failed to get crontabs for name syncing: %v", err))
+			return
+		}
+
+		var crontabsToSave []*lib.Crontab
+
+		// Process each crontab to sync monitor names
+		for _, crontab := range crontabs {
+			crontabModified := false
+
+			for i := range crontab.Lines {
+				line := crontab.Lines[i]
+				if !line.IsJob || line.Ignored {
+					continue
+				}
+
+				// Check if this job has a monitor and if the name needs updating
+				jobKey := line.Key(crontab.CanonicalName())
+				if len(line.Code) > 0 {
+					for _, monitor := range monitors {
+						// Match by code or key
+						if (monitor.Attributes.Code == line.Code) || monitor.Key == jobKey {
+							// If monitor name differs from crontab line name, update the crontab
+							if monitor.Name != "" && monitor.Name != line.Name {
+								line.Name = monitor.Name
+								crontabModified = true
+							}
+							break
+						}
+					}
+				}
+			}
+
+			// If this crontab was modified, mark it for saving
+			if crontabModified {
+				crontabsToSave = append(crontabsToSave, crontab)
+			}
+		}
+
+		// Save any modified crontabs
+		for _, crontab := range crontabsToSave {
+			if err := crontab.Save(crontab.Write()); err != nil {
+				log(fmt.Sprintf("Warning: Failed to save crontab %s after syncing monitor names: %v", crontab.Filename, err))
+			}
+		}
+
+		if len(crontabsToSave) > 0 {
+			log(fmt.Sprintf("Synced monitor names for %d crontab(s)", len(crontabsToSave)))
+		}
+	}()
 
 	responseData, err := json.Marshal(monitors)
 	if err != nil {

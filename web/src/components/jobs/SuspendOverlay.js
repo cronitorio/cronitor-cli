@@ -25,7 +25,7 @@ export function SuspendOverlay({
   };
   
   return (
-    <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center z-10" style={{ top: '-8px' }}>
+    <div className="absolute -inset-2 bg-black bg-opacity-50 rounded-lg flex items-center justify-center z-10">
       <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl max-w-xl w-full mx-4 relative">
         <CloseButton onClick={onClose} />
         <h3 
