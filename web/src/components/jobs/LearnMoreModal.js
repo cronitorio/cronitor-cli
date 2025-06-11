@@ -1,8 +1,38 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { SignupForm } from './SignupForm';
 import cronitorScreenshot from '../../assets/cronitor-screenshot.png';
 
 export function LearnMoreModal({ isOpen, onClose, onSignupSuccess, showToast, settings }) {
+  // Send ping when modal is opened for the first time (controlled by 7-day cookie)
+  useEffect(() => {
+    if (isOpen) {
+      const cookieName = 'cronitor_learn_more_ping';
+      const pingUrl = 'https://cronitor.link/p/85dfb5365b3446c280fa6448cda91a94/guru-learn-more';
+      
+      // Check if cookie exists
+      const cookies = document.cookie.split(';');
+      const hasPingCookie = cookies.some(cookie => 
+        cookie.trim().startsWith(`${cookieName}=`)
+      );
+      
+      if (!hasPingCookie) {
+        // Send GET ping
+        fetch(pingUrl, {
+          method: 'GET',
+          mode: 'no-cors' // Use no-cors to avoid CORS issues for tracking pixel
+        }).catch(error => {
+          // Silently fail - this is just analytics/tracking
+          console.debug('Learn more ping failed:', error);
+        });
+        
+        // Set 7-day cookie
+        const expirationDate = new Date();
+        expirationDate.setDate(expirationDate.getDate() + 7);
+        document.cookie = `${cookieName}=sent; expires=${expirationDate.toUTCString()}; path=/; SameSite=Lax`;
+      }
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   // Check if user already has an API key
