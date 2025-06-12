@@ -37,7 +37,6 @@ jobs:
         shell: bash
         run: |
           cd web
-          mkdir -p static
           npm run build
 
       - name: Setup BATS
@@ -84,7 +83,6 @@ jobs:
       - name: Build web assets
         run: |
           cd web
-          mkdir -p static
           npm run build
 
       - name: Setup BATS
