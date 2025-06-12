@@ -65,12 +65,12 @@ teardown() {
 }
 
 @test "Configure writes Ping API Key correctly to config file" {
-  ../cronitor $CRONITOR_ARGS configure --ping-api-key "$MSG" >/dev/null
+  ../cronitor $CRONITOR_ARGS --ping-api-key "$MSG" configure >/dev/null
   grep "CRONITOR_PING_API_KEY" $CLI_CONFIGFILE | grep -q "$MSG"
 }
 
 @test "Configure writes log path correctly to config file" {
-  ../cronitor $CRONITOR_ARGS configure --log $CLI_LOGFILE_ALTERNATE  2>/dev/null
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE_ALTERNATE configure  2>/dev/null
   grep "CRONITOR_LOG" $CLI_CONFIGFILE | grep -q $CLI_LOGFILE_ALTERNATE
 }
 
