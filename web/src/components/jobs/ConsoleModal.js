@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React from 'react';
 import { CloseButton } from '../CloseButton';
 import { csrfFetch } from '../../utils/api';
 

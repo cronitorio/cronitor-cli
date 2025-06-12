@@ -1,19 +1,5 @@
 import { useCallback } from 'react';
 import { mutate } from 'swr';
-import { csrfFetch } from '../utils/api';
-
-const prefetch = async (url) => {
-  try {
-    const res = await csrfFetch(url);
-    if (!res.ok) {
-      console.warn(`Prefetch failed for ${url}: ${res.status}`);
-      return;
-    }
-    await res.json(); // Parse but don't return - just for caching
-  } catch (error) {
-    console.warn(`Prefetch error for ${url}:`, error);
-  }
-};
 
 const fetcher = async url => {
   try {

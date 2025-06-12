@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React from 'react';
 import { JobHeader } from './JobHeader';
 import { StatusBadges } from './StatusBadges';
 import { ScheduleSection } from './ScheduleSection';

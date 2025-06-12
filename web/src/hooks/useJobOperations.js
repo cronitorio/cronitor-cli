@@ -1,6 +1,5 @@
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import useSWR from 'swr';
-import { mutate } from 'swr';
 import { csrfFetcher, csrfFetch } from '../utils/api';
 
 const fetcher = csrfFetcher;

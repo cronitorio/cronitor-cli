@@ -29,26 +29,6 @@ const MONTHS = {
   dec: "12",
 };
 
-const SPECIAL_STRING_SUBSTITUTIONS = {
-  "@yearly": ["0", "0", "1", "1", "*"],
-  "@annually": ["0", "0", "1", "1", "*"],
-  "@monthly": ["0", "0", "1", "*", "*"],
-  "@weekly": ["0", "0", "*", "*", "0"],
-  "@daily": ["0", "0", "*", "*", "*"],
-  "@midnight": ["0", "0", "*", "*", "*"],
-  "@hourly": ["0", "*", "*", "*", "*"],
-};
-
-function substituteMonths(part) {
-  return replaceFromHash(part, MONTHS);
-}
-
-function substituteSpecialStrings(scheduleExpression) {
-  const substitution = SPECIAL_STRING_SUBSTITUTIONS[scheduleExpression];
-  return substitution !== undefined ? substitution : [scheduleExpression];
-}
-
-
 //
 // Create Description
 //
