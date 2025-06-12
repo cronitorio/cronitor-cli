@@ -27,5 +27,9 @@ setup_suite() {
             export HOSTNAME="https://cronitor.link"
     fi
 
-    ../cronitor configure -k "$CLI_ACTUAL_API_KEY" >/dev/null 2>/dev/null
+    echo "Attempting to configure cronitor with API key..."
+    echo "API key length: ${#CLI_ACTUAL_API_KEY}"
+    echo "Binary exists: $(test -f ../cronitor && echo 'yes' || echo 'no')"
+    echo "Binary permissions: $(ls -la ../cronitor 2>/dev/null || echo 'not found')"
+    ../cronitor configure -k "$CLI_ACTUAL_API_KEY"
 }

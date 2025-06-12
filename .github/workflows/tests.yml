@@ -49,6 +49,14 @@ jobs:
         shell: bash
         run: go build -o cronitor main.go
 
+      - name: Verify binary and debug setup
+        shell: bash
+        run: |
+          ls -la cronitor
+          echo "API Key length: ${#CRONITOR_API_KEY}"
+          echo "Testing cronitor configure..."
+          ./cronitor configure --help || echo "Configure help failed"
+          
       - name: Run tests
         working-directory: tests
         shell: bash
@@ -95,6 +103,13 @@ jobs:
       - name: Build binary
         run: go build -o cronitor main.go
 
+      - name: Verify binary and debug setup
+        run: |
+          ls -la cronitor
+          echo "API Key length: ${#CRONITOR_API_KEY}"
+          echo "Testing cronitor configure..."
+          ./cronitor configure --help || echo "Configure help failed"
+          
       - name: Run tests
         working-directory: tests
         env:
