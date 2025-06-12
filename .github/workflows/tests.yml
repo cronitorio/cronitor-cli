@@ -56,6 +56,8 @@ jobs:
           echo "API Key length: ${#CRONITOR_API_KEY}"
           echo "Testing cronitor configure..."
           ./cronitor configure --help || echo "Configure help failed"
+          echo "Testing configure with API key..."
+          ./cronitor configure --api-key "test123" || echo "Configure test failed"
           
       - name: Run tests
         working-directory: tests
@@ -109,6 +111,8 @@ jobs:
           echo "API Key length: ${#CRONITOR_API_KEY}"
           echo "Testing cronitor configure..."
           ./cronitor configure --help || echo "Configure help failed"
+          echo "Testing configure with API key..."
+          ./cronitor configure --api-key "test123" || echo "Configure test failed"
           
       - name: Run tests
         working-directory: tests
