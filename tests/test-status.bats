@@ -21,5 +21,5 @@ setup() {
 }
 
 @test "Status integration test with bad monitor code" {
-  ../cronitor $CRONITOR_ARGS status asdfgh --log $CLI_LOGFILE 2>&1 | grep -q "404"
+  ../cronitor $CRONITOR_ARGS status asdfgh --log $CLI_LOGFILE 2>&1 | grep -q "could not be found"
 }
