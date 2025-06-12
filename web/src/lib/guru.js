@@ -2,32 +2,6 @@ import normalize from './normalize';
 import prenormalize from './prenormalize';
 import nextDate from './nextDate';
 import dateFormatter from './dateFormatter';
-//
-// Normalize the input
-//
-function replaceFromHash(string, hash) {
-  const saveReplace = (text, searchText, replacement) => {
-    const regex = new RegExp(`(^|[ ,-/])${searchText}($|[ ,-/])`, "gi");
-    const fullReplacement = `$1${replacement}$2`;
-    return text.replace(regex, fullReplacement).replace(regex, fullReplacement);
-  };
-  return Object.keys(hash).reduce((text, key) => saveReplace(text, key, hash[key]), string);
-}
-
-const MONTHS = {
-  jan: "1",
-  feb: "2",
-  mar: "3",
-  apr: "4",
-  may: "5",
-  jun: "6",
-  jul: "7",
-  aug: "8",
-  sep: "9",
-  oct: "10",
-  nov: "11",
-  dec: "12",
-};
 
 //
 // Create Description
