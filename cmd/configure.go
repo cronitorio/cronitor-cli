@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -139,23 +140,25 @@ Example setting common exclude text for use with 'cronitor discover':
 			os.Exit(1)
 		}
 
-		os.MkdirAll(defaultConfigFileDirectory(), os.ModePerm)
-		if ioutil.WriteFile(configFilePath(), b, 0644) != nil {
+		configPath := configFilePath()
+		configDir := filepath.Dir(configPath)
+
+		// Check if directory exists
+		if _, err := os.Stat(configDir); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr,
+				"\nERROR: The configuration directory %s does not exist.\n\n",
+				configDir)
+			os.Exit(126)
+		}
+
+		if err := ioutil.WriteFile(configPath, b, 0644); err != nil {
 			fmt.Fprintf(os.Stderr,
 				"\nERROR: The configuration file %s could not be written; check permissions and try again. "+
-					"\n       By default, configuration files are system-wide for ease of use in cron jobs and scripts. Specify an alternate config file using the --config argument or CRONITOR_CONFIG environment variable.\n\n", configFilePath())
+					"\n       By default, configuration files are system-wide for ease of use in cron jobs and scripts. Specify an alternate config file using the --config argument or CRONITOR_CONFIG environment variable.\n\n",
+				configPath)
 			os.Exit(126)
 		}
 	},
-}
-
-func configFilePath() string {
-	viperConfig := viper.ConfigFileUsed()
-	if len(viperConfig) > 0 {
-		return viperConfig
-	}
-
-	return fmt.Sprintf("%s/cronitor.json", defaultConfigFileDirectory())
 }
 
 func init() {
@@ -164,7 +167,6 @@ func init() {
 	configureCmd.Flags().String("dash-username", "", "Username for the dashboard authentication")
 	configureCmd.Flags().String("dash-password", "", "Password for the dashboard authentication")
 	configureCmd.Flags().String("allowed-ips", "", "Comma-separated list of allowed IP addresses/CIDR ranges (e.g. 192.168.1.0/24,10.0.0.1)")
-	configureCmd.Flags().String("api-key", "", "Your Cronitor API key")
 	configureCmd.Flags().String("ping-api-key", "", "Your Cronitor Ping API key")
 	configureCmd.Flags().String("hostname", "", "Hostname to use for monitor identification")
 	configureCmd.Flags().String("log", "", "Path to debug log file")
@@ -174,7 +176,6 @@ func init() {
 	viper.BindPFlag(varDashUsername, configureCmd.Flags().Lookup("dash-username"))
 	viper.BindPFlag(varDashPassword, configureCmd.Flags().Lookup("dash-password"))
 	viper.BindPFlag(varAllowedIPs, configureCmd.Flags().Lookup("allowed-ips"))
-	viper.BindPFlag(varApiKey, configureCmd.Flags().Lookup("api-key"))
 	viper.BindPFlag(varPingApiKey, configureCmd.Flags().Lookup("ping-api-key"))
 	viper.BindPFlag(varHostname, configureCmd.Flags().Lookup("hostname"))
 	viper.BindPFlag(varLog, configureCmd.Flags().Lookup("log"))

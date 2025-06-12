@@ -85,6 +85,7 @@ func init() {
 	RootCmd.PersistentFlags().BoolVar(&dev, "use-dev", dev, "Dev mode")
 	RootCmd.PersistentFlags().MarkHidden("use-dev")
 
+	// Bind flags to viper
 	viper.BindPFlag(varApiKey, RootCmd.PersistentFlags().Lookup("api-key"))
 	viper.BindPFlag(varEnv, RootCmd.PersistentFlags().Lookup("env"))
 	viper.BindPFlag(varHostname, RootCmd.PersistentFlags().Lookup("hostname"))
@@ -97,7 +98,6 @@ func init() {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
-
 	viper.AutomaticEnv() // read in environment variables that match
 	configFile := viper.GetString(varConfig)
 
@@ -436,4 +436,14 @@ func getCronitorApi() *lib.CronitorApi {
 		UserAgent:      userAgent,
 		Logger:         log,
 	}
+}
+
+func configFilePath() string {
+	// First check if there's a config file path from viper (which includes env vars and flags)
+	if configPath := viper.GetString(varConfig); len(configPath) > 0 {
+		return configPath
+	}
+
+	// Fall back to default location if no custom path specified
+	return fmt.Sprintf("%s/cronitor.json", defaultConfigFileDirectory())
 }
