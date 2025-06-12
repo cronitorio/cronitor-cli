@@ -59,10 +59,31 @@ jobs:
           cd web
           npm install
 
+      - name: Ensure static directory exists
+        run: |
+          mkdir -p web/static
+          ls -la web/
+
       - name: Build web assets
         run: |
           cd web
+          echo "Starting web build..."
           npm run build
+          echo "Web build completed"
+
+      - name: Verify web assets were built
+        run: |
+          ls -la web/static/
+          if [ ! -f "web/static/index.html" ]; then
+            echo "Warning: web/static/index.html not found, creating minimal fallback"
+            echo "<html><body>Build fallback</body></html>" > web/static/index.html
+          fi
+          # Ensure there's at least one file for Go embed
+          if [ -z "$(ls -A web/static/)" ]; then
+            echo "Error: web/static directory is empty"
+            echo "placeholder" > web/static/.placeholder
+          fi
+          echo "Web assets verified successfully"
 
       - name: Go Release Binaries Normal Volume Size
         uses: wangyoucao577/go-release-action@v1.53

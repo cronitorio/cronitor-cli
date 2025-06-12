@@ -22,6 +22,24 @@ jobs:
           echo ::add-path::C:\msys64\usr\bin
           dir C:\msys64\usr\bin
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install web dependencies
+        shell: bash
+        run: |
+          cd web
+          npm install
+
+      - name: Build web assets
+        shell: bash
+        run: |
+          cd web
+          mkdir -p static
+          npm run build
+
       - name: Setup BATS
         uses: mig4/setup-bats@v1
         with:
@@ -52,6 +70,22 @@ jobs:
         uses: actions/checkout@v2
 
       - uses: actions/setup-go@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install web dependencies
+        run: |
+          cd web
+          npm install
+
+      - name: Build web assets
+        run: |
+          cd web
+          mkdir -p static
+          npm run build
 
       - name: Setup BATS
         uses: mig4/setup-bats@v1
