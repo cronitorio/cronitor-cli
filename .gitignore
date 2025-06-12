@@ -70,7 +70,13 @@ cronitor
 *.key
 ctab
 cronitor-cli
+cronitor.exe
 
 local.md
 TODO.md
 *.exe
+
+# LocalDash
+node_modules/
+web/static/
+cronitor-linux

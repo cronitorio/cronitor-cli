@@ -49,8 +49,12 @@ Example when using authenticated ping requests:
 	Run: func(cmd *cobra.Command, args []string) {
 		var wg sync.WaitGroup
 
+		uniqueIdentifier := args[0]
+
 		wg.Add(1)
-		go sendPing(getEndpointFromFlag(), args[0], msg, series, makeStamp(), nil, nil, nil, &wg)
+		var schedule = ""
+
+		go sendPing(getEndpointFromFlag(), uniqueIdentifier, msg, series, makeStamp(), nil, nil, nil, schedule, &wg)
 		wg.Wait()
 	},
 }

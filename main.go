@@ -1,13 +1,14 @@
 package main
 
 import (
-	"github.com/cronitorio/cronitor-cli/cmd"
+	"embed"
 	"os"
+
+	"github.com/cronitorio/cronitor-cli/cmd"
 )
 
-func init() {
-
-}
+//go:embed web/static
+var WebAssets embed.FS
 
 func main() {
 	// Ensure that flags on `exec` commands are not parsed by Cobra
@@ -36,5 +37,6 @@ func main() {
 		os.Args[commandIndex] = "--"
 	}
 
+	cmd.SetWebAssets(WebAssets)
 	cmd.Execute()
 }

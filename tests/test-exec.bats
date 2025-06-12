@@ -1,13 +1,15 @@
 #!/usr/bin/env bats
 
 setup() {
-  SCRIPT_DIR="$(dirname $BATS_TEST_FILENAME)"
+  SCRIPT_DIR="$BATS_TEST_DIRNAME"
   cd $SCRIPT_DIR
 
-  PROJECT_DIR="$(dirname $SCRIPT_DIR)"
+  export PROJECT_DIR="$(dirname $SCRIPT_DIR)"
 
-  source $SCRIPT_DIR/setup.sh
+  load test_helper
+}
 
+teardown() {
   rm -f $CLI_LOGFILE
 }
 
@@ -16,6 +18,7 @@ setup() {
 #################
 
 @test "Exec uses bash when available" {
+  skip_if_windows
   [[ "$(../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/test-bash.sh)"  == "i am an array" ]]
 }
 
@@ -30,9 +33,16 @@ setup() {
   grep -q "arg with space" $CLI_LOGFILE
 }
 
-@test "Exec runs command with really complex args" {
+@test "Exec runs command with really complex args (Linux)" {
+  skip_if_windows
   ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 "cd /tmp && pwd" > /dev/null
   grep -q "/tmp" $CLI_LOGFILE
+}
+
+@test "Exec runs command with really complex args (Windows)" {
+  skip_if_linux
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 "(echo hi) -and (echo 'double hi')" # > /dev/null
+  grep -q "hi" $CLI_LOGFILE
 }
 
 
@@ -47,6 +57,7 @@ setup() {
 }
 
 @test "Exec sends status code on complete ping" {
+  skip_if_windows
   run ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/fail.sh > /dev/null
   grep -q "&status_code=123" $CLI_LOGFILE
 }
@@ -83,15 +94,25 @@ setup() {
 }
 
 @test "Exec passes stdout through to caller" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/success.sh xyz | grep -q xyz
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 bash $PROJECT_DIR/bin/success.sh xyz | grep -q xyz
 }
 
 @test "Exec passes stdout through to caller with newline chars intact" {
+  skip_if_windows
   output="$(../cronitor exec d3x0c1 $PROJECT_DIR/bin/success.sh xyz)"
   output_lines=`echo "${output}" | wc -l | cut -d'/' -f1 | awk '{$1=$1};1'`
-  run ! [ ${output_lines} -eq "1" ]
+  [[ ${output_lines} -ne "1" ]]
 }
 
-@test "Exec passes exitcode through to caller" {
-  run -123 ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/fail.sh > /dev/null
+@test "Exec passes exitcode through to caller (Linux)" {
+  skip_if_windows
+  run -123 bash -c '../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 bash $PROJECT_DIR/bin/fail.sh > /dev/null'
+}
+
+@test "Exec passes exitcode through to caller (Windows)" {
+   skip_if_linux
+   skip "Currently exit codes on Windows are not passed through"
+   run -123 ../cronitor $CRONITOR_ARGS exec d3x0c1 powershell -Command $PROJECT_DIR/bin/fail.ps1
+   # run -123 ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 powershell -Command $PROJECT_DIR/bin/fail.ps1
+   # run -123 powershell -Command $PROJECT_DIR/bin/fail.ps1
 }

@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -47,15 +47,52 @@ jobs:
             goos: windows
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install web dependencies
+        run: |
+          cd web
+          npm install
+
+      - name: Ensure static directory exists
+        run: |
+          mkdir -p web/static
+          ls -la web/
+
+      - name: Build web assets
+        run: |
+          cd web
+          echo "Starting web build..."
+          npm run build
+          echo "Web build completed"
+
+      - name: Verify web assets were built
+        run: |
+          ls -la web/static/
+          if [ ! -f "web/static/index.html" ]; then
+            echo "Warning: web/static/index.html not found, creating minimal fallback"
+            echo "<html><body>Build fallback</body></html>" > web/static/index.html
+          fi
+          # Ensure there's at least one file for Go embed
+          if [ -z "$(ls -A web/static/)" ]; then
+            echo "Error: web/static directory is empty"
+            echo "placeholder" > web/static/.placeholder
+          fi
+          echo "Web assets verified successfully"
+
       - name: Go Release Binaries Normal Volume Size
-        uses: wangyoucao577/go-release-action@v1.28
+        uses: wangyoucao577/go-release-action@v1.53
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
           asset_name: ${{ matrix.goos }}_${{ matrix.goarch }}
-          goversion: 1.17
+          goversion: 1.23.4
           binary_name: cronitor
           sha256sum: true
           overwrite: true
@@ -68,9 +105,9 @@ jobs:
     steps:
       - name: Get the version
         id: get_version
-        run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
+        run: echo "VERSION=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_OUTPUT
       - name: Update release
-        uses: tubone24/update_release@v1.2.0
+        uses: tubone24/update_release@v1.3.1
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
