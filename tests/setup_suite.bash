@@ -25,7 +25,5 @@ setup_suite() {
             export HOSTNAME="https://cronitor.link"
     fi
 
-    # Create temp directory for initial config
-    mkdir -p "$BATS_TMPDIR"
-    CRONITOR_CONFIG="$BATS_TMPDIR/initial-config.json" ../cronitor configure --api-key "$CLI_ACTUAL_API_KEY" >/dev/null 2>/dev/null
+    ../cronitor configure --api-key "$CLI_ACTUAL_API_KEY" >/dev/null 2>/dev/null
 }

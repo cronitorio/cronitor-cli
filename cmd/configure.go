@@ -143,10 +143,10 @@ Example setting common exclude text for use with 'cronitor discover':
 		configPath := configFilePath()
 		configDir := filepath.Dir(configPath)
 
-		// Check if directory exists
-		if _, err := os.Stat(configDir); os.IsNotExist(err) {
+		// Create the directory for the config file
+		if err := os.MkdirAll(configDir, os.ModePerm); err != nil {
 			fmt.Fprintf(os.Stderr,
-				"\nERROR: The configuration directory %s does not exist.\n\n",
+				"\nERROR: The configuration directory %s could not be created; check permissions and try again.\n\n",
 				configDir)
 			os.Exit(126)
 		}
@@ -168,7 +168,6 @@ func init() {
 	configureCmd.Flags().String("dash-password", "", "Password for the dashboard authentication")
 	configureCmd.Flags().String("allowed-ips", "", "Comma-separated list of allowed IP addresses/CIDR ranges (e.g. 192.168.1.0/24,10.0.0.1)")
 	configureCmd.Flags().String("ping-api-key", "", "Your Cronitor Ping API key")
-	configureCmd.Flags().String("hostname", "", "Hostname to use for monitor identification")
 	configureCmd.Flags().String("log", "", "Path to debug log file")
 	configureCmd.Flags().String("env", "", "Environment name (e.g. staging, production)")
 
@@ -177,7 +176,6 @@ func init() {
 	viper.BindPFlag(varDashPassword, configureCmd.Flags().Lookup("dash-password"))
 	viper.BindPFlag(varAllowedIPs, configureCmd.Flags().Lookup("allowed-ips"))
 	viper.BindPFlag(varPingApiKey, configureCmd.Flags().Lookup("ping-api-key"))
-	viper.BindPFlag(varHostname, configureCmd.Flags().Lookup("hostname"))
 	viper.BindPFlag(varLog, configureCmd.Flags().Lookup("log"))
 	viper.BindPFlag(varEnv, configureCmd.Flags().Lookup("env"))
 }
