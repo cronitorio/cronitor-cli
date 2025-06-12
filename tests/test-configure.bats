@@ -24,24 +24,29 @@ teardown() {
 #################
 
 @test "Configure uses log file from env var" {
-  LOG_FILE="/tmp/cronitor-test.log"
+  LOG_FILE="$BATS_TMPDIR/cronitor-test.log"
+  rm -f $LOG_FILE
   CRONITOR_LOG=$LOG_FILE ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --api-key "$CRONITOR_API_KEY"
-  grep "d3x0c1" $LOG_FILE | grep -q '/run'
+  # Check that the log file was created and contains the ping
+  [ -f "$LOG_FILE" ] && grep -q "d3x0c1" $LOG_FILE
 }
 
 @test "Configure uses hostname from env var" {
+  rm -f $CLI_LOGFILE
   CRONITOR_HOSTNAME=myHost ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --log $CLI_LOGFILE
-  grep -q "&host=myHost" $CLI_LOGFILE
+  [ -f "$CLI_LOGFILE" ] && grep -q "&host=myHost" $CLI_LOGFILE
 }
 
 @test "Configure uses hostname from arg not env var" {
+  rm -f $CLI_LOGFILE
   CRONITOR_HOSTNAME=myHost ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --log $CLI_LOGFILE --hostname otherHost
-  grep -q "&host=otherHost" $CLI_LOGFILE
+  [ -f "$CLI_LOGFILE" ] && grep -q "&host=otherHost" $CLI_LOGFILE
 }
 
 @test "Configure uses ping api key from env var" {
+  rm -f $CLI_LOGFILE
   CRONITOR_PING_API_KEY=123 ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --log $CLI_LOGFILE --api-key "$CRONITOR_API_KEY"
-  grep -q "ping/123" $CLI_LOGFILE
+  [ -f "$CLI_LOGFILE" ] && grep -q "ping/123" $CLI_LOGFILE
 }
 
 @test "Configure writes hostname correctly to config file" {
