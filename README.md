@@ -44,6 +44,12 @@ Flags:
   -p, --ping-api-key string   Ping API Key
   -v, --verbose               Verbose output
       --no-stdout             Disable sending job output logs to Cronitor
+      --env                   Specify the environment to send Telemetry events to
 
 Use "cronitor [command] --help" for more information about a command.
 ```
+
+### Uninstall CronitorCLI
+First, you will need to update any crontab files that were edited to include Cronitor to remove the reference to `cronitor exec MONITOR_KEY` that were added when you created monitors.
+
+Then, remove the cronitor executable from wherever it was installed. If you followed our default instructions it can be removed with `rm /usr/bin/cronitor`
