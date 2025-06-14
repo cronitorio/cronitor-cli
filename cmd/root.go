@@ -38,6 +38,7 @@ var hostname string
 var pingApiKey string
 var verbose bool
 var noStdoutPassthru bool
+var users string
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
@@ -66,6 +67,7 @@ var varConfig = "CRONITOR_CONFIG"
 var varDashUsername = "CRONITOR_DASH_USER"
 var varDashPassword = "CRONITOR_DASH_PASS"
 var varAllowedIPs = "CRONITOR_ALLOWED_IPS"
+var varUsers = "CRONITOR_USERS"
 
 func init() {
 	userAgent = fmt.Sprintf("CronitorCLI/%s", Version)
@@ -81,6 +83,7 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&hostname, "hostname", "n", hostname, "A unique identifier for this host (default: system hostname)")
 	RootCmd.PersistentFlags().StringVarP(&debugLog, "log", "l", debugLog, "Write debug logs to supplied file")
 	RootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", verbose, "Verbose output")
+	RootCmd.PersistentFlags().StringVarP(&users, "users", "u", users, "Comma-separated list of users whose crontabs to include (default: current user only)")
 
 	RootCmd.PersistentFlags().BoolVar(&dev, "use-dev", dev, "Dev mode")
 	RootCmd.PersistentFlags().MarkHidden("use-dev")
@@ -94,6 +97,7 @@ func init() {
 	viper.BindPFlag(varConfig, RootCmd.PersistentFlags().Lookup("config"))
 	viper.BindPFlag(varDashUsername, RootCmd.PersistentFlags().Lookup("dash-username"))
 	viper.BindPFlag(varDashPassword, RootCmd.PersistentFlags().Lookup("dash-password"))
+	viper.BindPFlag(varUsers, RootCmd.PersistentFlags().Lookup("users"))
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -446,4 +450,24 @@ func configFilePath() string {
 
 	// Fall back to default location if no custom path specified
 	return fmt.Sprintf("%s/cronitor.json", defaultConfigFileDirectory())
+}
+
+// parseUsers parses the CRONITOR_USERS config value into a slice of usernames
+func parseUsers() []string {
+	usersConfig := viper.GetString(varUsers)
+	if usersConfig == "" {
+		return []string{} // Return empty slice for default behavior
+	}
+
+	// Split by comma and clean up each username
+	users := strings.Split(usersConfig, ",")
+	var cleanUsers []string
+	for _, user := range users {
+		user = strings.TrimSpace(user)
+		if user != "" {
+			cleanUsers = append(cleanUsers, user)
+		}
+	}
+
+	return cleanUsers
 }

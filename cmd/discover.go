@@ -188,11 +188,20 @@ Example where you perform a dry-run without any crontab modifications:
 				}
 			}
 		} else {
-			// Without a supplied argument look at the user crontab, the system crontab and the system drop-in directory
+			// Without a supplied argument look at user crontabs, the system crontab and the system drop-in directory
 			processingMultipleCrontabs = true
 
-			if processCrontab(lib.CrontabFactory(username, fmt.Sprintf("user:%s", username))) {
-				importedCrontabs++
+			// Process crontabs for all configured users
+			users := parseUsers()
+			if len(users) == 0 {
+				// Default to current user if no users configured
+				users = []string{username}
+			}
+
+			for _, user := range users {
+				if processCrontab(lib.CrontabFactory(user, fmt.Sprintf("user:%s", user))) {
+					importedCrontabs++
+				}
 			}
 
 			if systemCrontab := lib.CrontabFactory(username, lib.SYSTEM_CRONTAB); systemCrontab.Exists() {

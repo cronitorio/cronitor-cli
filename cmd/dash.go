@@ -1119,6 +1119,7 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 				"CRONITOR_DASH_PASS":            os.Getenv(varDashPassword) != "",
 				"CRONITOR_ALLOWED_IPS":          os.Getenv(varAllowedIPs) != "",
 				"CRONITOR_CORS_ALLOWED_ORIGINS": os.Getenv("CRONITOR_CORS_ALLOWED_ORIGINS") != "",
+				"CRONITOR_USERS":                os.Getenv(varUsers) != "",
 			},
 			OS:                 runtime.GOOS,
 			SafeMode:           isSafeModeEnabled,
@@ -1179,6 +1180,9 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if !viper.IsSet(varDashPassword) {
 			viper.Set(varDashPassword, configData.DashPassword)
+		}
+		if !viper.IsSet(varUsers) {
+			viper.Set(varUsers, configData.Users)
 		}
 
 		// Handle AllowedIPs specially - always update if not overridden by environment variable
@@ -1283,7 +1287,7 @@ func handleJobs(w http.ResponseWriter, r *http.Request) {
 
 func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 	// Parse crontabs
-	crontabs, err := lib.GetAllCrontabs()
+	crontabs, err := lib.GetAllCrontabs(parseUsers())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1420,7 +1424,7 @@ func handleGetMonitors(w http.ResponseWriter, r *http.Request) {
 	// Sync monitor names with crontab job names
 	go func() {
 		// Get all crontabs for name syncing
-		crontabs, err := lib.GetAllCrontabs()
+		crontabs, err := lib.GetAllCrontabs(parseUsers())
 		if err != nil {
 			log(fmt.Sprintf("Warning: Failed to get crontabs for name syncing: %v", err))
 			return
@@ -2153,7 +2157,7 @@ func handleGetCrontabs(w http.ResponseWriter, r *http.Request) {
 
 	// Read all crontabs
 	var crontabs []*lib.Crontab
-	crontabs, err := lib.GetAllCrontabs()
+	crontabs, err := lib.GetAllCrontabs(parseUsers())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

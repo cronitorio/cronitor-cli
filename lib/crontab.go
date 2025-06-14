@@ -271,7 +271,7 @@ func (c Crontab) Write() string {
 
 func (c Crontab) Save(crontabLines string) error {
 	if c.IsUserCrontab {
-		cmd := exec.Command("crontab", "-")
+		cmd := c.buildCrontabCommand("-")
 
 		// crontab will use whatever $EDITOR is set. Temporarily just cat it out.
 		cmd.Env = []string{"EDITOR=/bin/cat"}
@@ -335,7 +335,7 @@ func (c Crontab) IsRoot() bool {
 func (c Crontab) Exists() bool {
 
 	if c.IsUserCrontab {
-		cmd := exec.Command("crontab", "-l")
+		cmd := c.buildCrontabCommand("-l")
 		if _, err := cmd.CombinedOutput(); err != nil {
 			return false
 		}
@@ -357,7 +357,7 @@ func (c Crontab) load() ([]string, int, error) {
 			return nil, 126, errors.New("on Windows, a crontab path argument is required")
 		}
 
-		cmd := exec.Command("crontab", "-l")
+		cmd := c.buildCrontabCommand("-l")
 		if b, err := cmd.CombinedOutput(); err == nil {
 			crontabBytes = b
 		} else {
@@ -856,25 +856,33 @@ func ReadCrontabFromFile(username, filename string, crontabs []*Crontab) []*Cron
 }
 
 // GetAllCrontabs returns a slice of all available Crontab objects.
-func GetAllCrontabs() ([]*Crontab, error) {
+func GetAllCrontabs(users []string) ([]*Crontab, error) {
 	var crontabs []*Crontab
-	var username string
 
-	// Get current username for user crontabs
+	// Get current user for system crontab operations
+	var currentUser string
 	if u, err := user.Current(); err == nil {
-		username = u.Username
+		currentUser = u.Username
 	}
 
-	// Read user crontab
-	crontabs = ReadCrontabFromFile(username, CurrentUserCrontab(), crontabs)
-
-	// Read system crontab if it exists
-	if systemCrontab := CrontabFactory(username, SYSTEM_CRONTAB); systemCrontab.Exists() {
-		crontabs = ReadCrontabFromFile(username, SYSTEM_CRONTAB, crontabs)
+	// If no users specified, default to current user
+	if len(users) == 0 {
+		users = []string{currentUser}
 	}
 
-	// Read crontabs from drop-in directory
-	crontabs = ReadCrontabsInDirectory(username, DROP_IN_DIRECTORY, crontabs)
+	// Read user crontabs for all specified users
+	for _, username := range users {
+		userCrontabPath := fmt.Sprintf("user:%s", username)
+		crontabs = ReadCrontabFromFile(username, userCrontabPath, crontabs)
+	}
+
+	// Read system crontab if it exists (always use current user)
+	if systemCrontab := CrontabFactory(currentUser, SYSTEM_CRONTAB); systemCrontab.Exists() {
+		crontabs = ReadCrontabFromFile(currentUser, SYSTEM_CRONTAB, crontabs)
+	}
+
+	// Read crontabs from drop-in directory (always use current user)
+	crontabs = ReadCrontabsInDirectory(currentUser, DROP_IN_DIRECTORY, crontabs)
 
 	return crontabs, nil
 }
@@ -909,4 +917,19 @@ func (c *Crontab) lightweightCopy() Crontab {
 		Shell:                   c.Shell,
 		UsesSixFieldExpressions: c.UsesSixFieldExpressions,
 	}
+}
+
+// buildCrontabCommand builds a crontab command with appropriate user flag if needed
+func (c Crontab) buildCrontabCommand(args ...string) *exec.Cmd {
+	if c.User != "" {
+		// Check if we need to add -u flag (when accessing another user's crontab)
+		if currentUser, err := user.Current(); err == nil && currentUser.Username != c.User {
+			// Insert -u flag and username before other arguments
+			cmdArgs := []string{"-u", c.User}
+			cmdArgs = append(cmdArgs, args...)
+			return exec.Command("crontab", cmdArgs...)
+		}
+	}
+	// Default case: run crontab command without -u flag (for current user)
+	return exec.Command("crontab", args...)
 }

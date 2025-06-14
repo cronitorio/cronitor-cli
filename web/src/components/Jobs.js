@@ -3,7 +3,7 @@ import useSWR from 'swr';
 import { JobCard } from './jobs/JobCard';
 import { Toast } from './Toast';
 import { NewCrontabOverlay } from './jobs/NewCrontabOverlay';
-import { useSearchParams, useLocation } from 'react-router-dom';
+import { useSearchParams, useLocation, Link } from 'react-router-dom';
 import { FilterBar, FILTER_OPTIONS } from './jobs/FilterBar';
 import { csrfFetcher, csrfFetch } from '../utils/api';
 
@@ -226,7 +226,7 @@ export default function Jobs() {
 
   // Merge monitor data with jobs
   const jobsWithMonitors = React.useMemo(() => {
-    if (!jobs || !monitors) return jobs;
+    if (!jobs || !monitors) return jobs || [];
     
     return jobs.map(job => {
       // If job has a code (should be monitored) but no monitor found, treat as unmonitored
@@ -262,7 +262,7 @@ export default function Jobs() {
 
   // Filter jobs based on active filters and search term
   const filteredJobs = React.useMemo(() => {
-    if (!jobsWithMonitors) return [];
+    if (!jobsWithMonitors || jobsWithMonitors.length === 0) return [];
     
     return jobsWithMonitors.filter(job => {
       // Exclude meta cron jobs (system plumbing jobs like run-parts) from Jobs view
@@ -348,7 +348,7 @@ export default function Jobs() {
       </div>
     </div>
   );
-  if (!jobsWithMonitors) return <div className="text-gray-600 dark:text-gray-300">Loading...</div>;
+  if (jobs === undefined) return <div className="text-gray-600 dark:text-gray-300">Loading...</div>;
 
   const handleSaveNewJob = async () => {
     try {
@@ -480,17 +480,49 @@ export default function Jobs() {
             />
           ))
         ) : (
-          <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-8 text-center">
-            <p className="text-gray-600 dark:text-gray-300">
-              {jobsWithMonitors.length > 0 
-                ? 'No jobs match your current filters' 
-                : 'No jobs found. Click "Add Job" to create one.'}
-            </p>
+          <div>
+            {jobsWithMonitors.length > 0 ? (
+              <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-8 text-center">
+                <p className="text-gray-600 dark:text-gray-300">
+                  No jobs match your current filters
+                </p>
+              </div>
+            ) : (
+              <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="ml-3 flex-1">
+                    <h3 className="text-sm font-medium text-yellow-800 dark:text-yellow-200">No cron jobs found</h3>
+                    <div className="mt-2 text-sm text-yellow-700 dark:text-yellow-300">
+                      <p>This could mean:</p>
+                      <ul className="list-disc list-inside mt-1 space-y-1">
+                        <li>You don't have any cron jobs</li>
+                        <li>You are not scanning the cron users on this host</li>
+                        <li>This dashboard does not have permissions to manage crontabs for the cron users on this host</li>
+                      </ul>
+                      <p className="mt-3">
+                        You can adjust which user crontabs are scanned from the{' '}
+                        <Link 
+                          to="/settings" 
+                          className="font-medium text-yellow-800 dark:text-yellow-200 hover:text-yellow-900 dark:hover:text-yellow-100 underline"
+                        >
+                          Settings page
+                        </Link>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
         {(() => {
           // Only count non-meta jobs as potentially visible
-          const nonMetaJobs = jobsWithMonitors.filter(job => !job.is_meta_cron_job);
+          const nonMetaJobs = (jobsWithMonitors || []).filter(job => !job.is_meta_cron_job);
           
           // Apply only user filters to non-meta jobs (not the automatic meta filter)
           const nonMetaJobsAfterUserFilters = nonMetaJobs.filter(job => {

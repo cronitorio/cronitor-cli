@@ -47,6 +47,7 @@ export default function Settings() {
     CRONITOR_DASH_PASS: '',
     CRONITOR_ALLOWED_IPS: '',
     CRONITOR_CORS_ALLOWED_ORIGINS: '',
+    CRONITOR_USERS: '',
   });
 
   const [envVars, setEnvVars] = useState({
@@ -60,6 +61,7 @@ export default function Settings() {
     CRONITOR_DASH_PASS: false,
     CRONITOR_ALLOWED_IPS: false,
     CRONITOR_CORS_ALLOWED_ORIGINS: false,
+    CRONITOR_USERS: false,
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -136,7 +138,8 @@ export default function Settings() {
     "CRONITOR_DASH_USER": "Username for accessing the dashboard.<br/><br/>Overridden by CRONITOR_DASH_USER environment variable.",
     "CRONITOR_DASH_PASS": "Password for accessing the dashboard.<br/><br/>Overridden by CRONITOR_DASH_PASS environment variable.",
     "CRONITOR_ALLOWED_IPS": "Restrict dashboard access to specific IP addresses or ranges.<br/><br/>Overridden by CRONITOR_ALLOWED_IPS environment variable.",
-    "CRONITOR_CORS_ALLOWED_ORIGINS": "Allow cross-origin requests from specific domains for API access.<br/><br/>Overridden by CRONITOR_CORS_ALLOWED_ORIGINS environment variable."
+    "CRONITOR_CORS_ALLOWED_ORIGINS": "Allow cross-origin requests from specific domains for API access.<br/><br/>Overridden by CRONITOR_CORS_ALLOWED_ORIGINS environment variable.",
+    "CRONITOR_USERS": "Comma-separated list of users whose crontabs to include when scanning (default: current user only).<br/><br/>Overridden by CRONITOR_USERS environment variable."
   };
 
   const renderInput = (name, label, type = "text", value, onChange, disabled = false) => (
@@ -217,6 +220,40 @@ export default function Settings() {
               handleChange,
               envVars["CRONITOR_ENV"]
             )}
+
+            <div>
+              <label className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
+                Users
+                <Tooltip text={fieldDescriptions["CRONITOR_USERS"]}>
+                  <QuestionMarkCircleIcon 
+                    className="ml-2 h-4 w-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" 
+                  />
+                </Tooltip>
+              </label>
+              <div className="mt-1">
+                <input
+                  type="text"
+                  name="CRONITOR_USERS"
+                  value={formData.CRONITOR_USERS || ''}
+                  onChange={handleChange}
+                  disabled={envVars["CRONITOR_USERS"]}
+                  placeholder="root, admin, user1"
+                  className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-4 py-2 ${
+                    envVars["CRONITOR_USERS"] ? 'bg-gray-100 dark:bg-gray-800 cursor-not-allowed' : ''
+                  }`}
+                />
+              </div>
+              <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Comma-separated list of users whose crontabs to include when scanning for jobs. Leave empty to use current user only.
+                Example: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">root</code>, <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">admin</code>, <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">user1</code>
+              </div>
+              {envVars["CRONITOR_USERS"] && (
+                <div className="mt-1 flex items-center text-sm text-yellow-600 dark:text-yellow-400">
+                  <ExclamationTriangleIcon className="h-4 w-4 mr-1" />
+                  Currently set as an environment variable
+                </div>
+              )}
+            </div>
           </div>
         </section>
 

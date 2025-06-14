@@ -22,6 +22,7 @@ type ConfigFile struct {
 	DashPassword       string   `json:"CRONITOR_DASH_PASS"`
 	AllowedIPs         string   `json:"CRONITOR_ALLOWED_IPS"`
 	CorsAllowedOrigins string   `json:"CRONITOR_CORS_ALLOWED_ORIGINS"`
+	Users              string   `json:"CRONITOR_USERS"`
 }
 
 // configureCmd represents the configure command
@@ -46,6 +47,7 @@ Environment variables that are read:
   CRONITOR_HOSTNAME
   CRONITOR_LOG
   CRONITOR_PING_API_KEY
+  CRONITOR_USERS
 
 Example setting your API Key:
   $ cronitor configure --api-key 4319e94e890a013dbaca57c2df2ff60c2
@@ -65,6 +67,7 @@ Example setting common exclude text for use with 'cronitor discover':
 		configData.DashPassword = viper.GetString(varDashPassword)
 		configData.AllowedIPs = viper.GetString(varAllowedIPs)
 		configData.CorsAllowedOrigins = viper.GetString("CRONITOR_CORS_ALLOWED_ORIGINS")
+		configData.Users = viper.GetString(varUsers)
 
 		fmt.Println("\nConfiguration File:")
 		fmt.Println(configFilePath())
@@ -127,6 +130,13 @@ Example setting common exclude text for use with 'cronitor discover':
 			fmt.Println(configData.AllowedIPs)
 		}
 
+		fmt.Println("\nUsers:")
+		if configData.Users == "" {
+			fmt.Println("Current user only")
+		} else {
+			fmt.Println(configData.Users)
+		}
+
 		if verbose {
 			fmt.Println("\nEnviornment Variables:")
 			for _, pair := range os.Environ() {
@@ -170,6 +180,7 @@ func init() {
 	configureCmd.Flags().String("ping-api-key", "", "Your Cronitor Ping API key")
 	configureCmd.Flags().String("log", "", "Path to debug log file")
 	configureCmd.Flags().String("env", "", "Environment name (e.g. staging, production)")
+	configureCmd.Flags().String("users", "", "Comma-separated list of users whose crontabs to include")
 
 	viper.BindPFlag(varExcludeText, configureCmd.Flags().Lookup("exclude-from-name"))
 	viper.BindPFlag(varDashUsername, configureCmd.Flags().Lookup("dash-username"))
@@ -178,4 +189,5 @@ func init() {
 	viper.BindPFlag(varPingApiKey, configureCmd.Flags().Lookup("ping-api-key"))
 	viper.BindPFlag(varLog, configureCmd.Flags().Lookup("log"))
 	viper.BindPFlag(varEnv, configureCmd.Flags().Lookup("env"))
+	viper.BindPFlag(varUsers, configureCmd.Flags().Lookup("users"))
 }

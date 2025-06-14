@@ -45,8 +45,17 @@ Example:
 				crontabs = lib.ReadCrontabFromFile(username, args[0], crontabs)
 			}
 		} else {
-			// Without a supplied argument look at the user crontab, system crontab, and the system drop-in directory
-			crontabs = lib.ReadCrontabFromFile(username, fmt.Sprintf("user:%s", username), crontabs)
+			// Without a supplied argument look at user crontabs, system crontab, and the system drop-in directory
+			// Process crontabs for all configured users
+			users := parseUsers()
+			if len(users) == 0 {
+				// Default to current user if no users configured
+				users = []string{username}
+			}
+
+			for _, user := range users {
+				crontabs = lib.ReadCrontabFromFile(user, fmt.Sprintf("user:%s", user), crontabs)
+			}
 			crontabs = lib.ReadCrontabFromFile(username, lib.SYSTEM_CRONTAB, crontabs)
 			crontabs = lib.ReadCrontabsInDirectory(username, lib.DROP_IN_DIRECTORY, crontabs)
 		}
