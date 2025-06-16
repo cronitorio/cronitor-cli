@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/time/rate"
@@ -591,12 +592,56 @@ func openBrowser(url string) {
 	}
 }
 
+// Add new configuration variables
+const (
+	varMCPEnabled  = "CRONITOR_MCP_ENABLED"
+	varMCPMode     = "CRONITOR_MCP_MODE"
+	varMCPInstance = "CRONITOR_MCP_INSTANCE"
+)
+
 var dashCmd = &cobra.Command{
 	Use:   "dash",
 	Short: "Start the web dashboard",
 	Long: `Start the Crontab Guru web dashboard.
-The dashboard provides a web interface for managing your cron jobs and crontab files.`,
+The dashboard provides a web interface for managing your cron jobs and crontab files.
+
+MCP Mode:
+When --mcp-instance flag is used, the dashboard runs in MCP (Model Context Protocol) mode
+for integration with Cursor IDE or other LLM applications. In this mode, it does
+not start a web server but instead communicates via stdio protocol.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		// Get MCP instance name
+		mcpInstance, _ := cmd.Flags().GetString("mcp-instance")
+
+		// Check if MCP mode is enabled
+		mcpEnabled := false
+
+		// If mcp-instance is provided, automatically enable MCP mode
+		if mcpInstance != "" {
+			mcpEnabled = true
+		} else {
+			// Check explicit --mcp flag for backward compatibility
+			mcpEnabled, _ = cmd.Flags().GetBool("mcp")
+			if !mcpEnabled {
+				// Check environment variable
+				mcpEnabled = viper.GetBool(varMCPEnabled)
+			}
+
+			// If MCP is enabled but no instance specified, use default
+			if mcpEnabled && mcpInstance == "" {
+				mcpInstance = viper.GetString(varMCPInstance)
+				if mcpInstance == "" {
+					mcpInstance = "default"
+				}
+			}
+		}
+
+		// If MCP mode is enabled, run MCP server instead of web dashboard
+		if mcpEnabled {
+			runMCPServer(mcpInstance)
+			return
+		}
+
 		// Check for dashboard credentials before starting the server
 		username := viper.GetString(varDashUsername)
 		password := viper.GetString(varDashPassword)
@@ -938,6 +983,34 @@ The dashboard provides a web interface for managing your cron jobs and crontab f
 	},
 }
 
+// runMCPServer starts the MCP server for Cursor integration
+func runMCPServer(instanceName string) {
+	// Create MCP server
+	s := server.NewMCPServer(
+		fmt.Sprintf("Cronitor Dashboard (%s)", instanceName),
+		Version,
+		server.WithToolCapabilities(false),
+	)
+
+	// Create and register the Cronitor MCP handler
+	handler := lib.NewCronitorMCPHandler(instanceName)
+
+	// Register tools
+	if err := handler.RegisterTools(s); err != nil {
+		fatal(fmt.Sprintf("Failed to register MCP tools: %v", err), 1)
+	}
+
+	// Register resources
+	if err := handler.RegisterResources(s); err != nil {
+		fatal(fmt.Sprintf("Failed to register MCP resources: %v", err), 1)
+	}
+
+	// Start the stdio server
+	if err := server.ServeStdio(s); err != nil {
+		fatal(fmt.Sprintf("MCP server error: %v", err), 1)
+	}
+}
+
 // Helper function to slugify a string for filenames
 func slugify(s string) string {
 	// Convert to lowercase
@@ -980,22 +1053,30 @@ func init() {
 	RootCmd.AddCommand(dashCmd)
 	dashCmd.Flags().Int("port", 9000, "Port to run the dashboard on")
 	dashCmd.Flags().Bool("safe-mode", false, "Limit the ability to edit jobs, crontabs, and settings")
+	dashCmd.Flags().Bool("mcp", false, "Enable MCP server mode for Cursor integration (deprecated: use --mcp-instance instead)")
+	dashCmd.Flags().String("mcp-instance", "", "MCP instance name to connect to (automatically enables MCP mode)")
+
+	// Bind MCP flags to viper
+	viper.BindPFlag(varMCPEnabled, dashCmd.Flags().Lookup("mcp"))
+	viper.BindPFlag(varMCPInstance, dashCmd.Flags().Lookup("mcp-instance"))
 }
 
 type SettingsResponse struct {
 	ConfigFile
-	EnvVars            map[string]bool `json:"env_vars"`
-	ConfigFilePath     string          `json:"config_file_path"`
-	Version            string          `json:"version"`
-	Hostname           string          `json:"hostname"`
-	Timezone           string          `json:"timezone"`
-	Timezones          []string        `json:"timezones"`
-	OS                 string          `json:"os"`
-	SafeMode           bool            `json:"safe_mode"`
-	UpdateStatus       *UpdateStatus   `json:"update_status,omitempty"`
-	AllowedIPs         string          `json:"allowed_ips"`
-	CorsAllowedOrigins string          `json:"cors_allowed_origins"`
-	ClientIP           string          `json:"client_ip"`
+	EnvVars            map[string]bool              `json:"env_vars"`
+	ConfigFilePath     string                       `json:"config_file_path"`
+	Version            string                       `json:"version"`
+	Hostname           string                       `json:"hostname"`
+	Timezone           string                       `json:"timezone"`
+	Timezones          []string                     `json:"timezones"`
+	OS                 string                       `json:"os"`
+	SafeMode           bool                         `json:"safe_mode"`
+	UpdateStatus       *UpdateStatus                `json:"update_status,omitempty"`
+	AllowedIPs         string                       `json:"allowed_ips"`
+	CorsAllowedOrigins string                       `json:"cors_allowed_origins"`
+	ClientIP           string                       `json:"client_ip"`
+	MCPEnabled         bool                         `json:"mcp_enabled"`
+	MCPInstances       map[string]MCPInstanceConfig `json:"mcp_instances,omitempty"`
 }
 
 // handleSettings handles GET and POST requests for settings
@@ -1120,6 +1201,7 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 				"CRONITOR_ALLOWED_IPS":          os.Getenv(varAllowedIPs) != "",
 				"CRONITOR_CORS_ALLOWED_ORIGINS": os.Getenv("CRONITOR_CORS_ALLOWED_ORIGINS") != "",
 				"CRONITOR_USERS":                os.Getenv(varUsers) != "",
+				"CRONITOR_MCP_ENABLED":          os.Getenv(varMCPEnabled) != "",
 			},
 			OS:                 runtime.GOOS,
 			SafeMode:           isSafeModeEnabled,
@@ -1127,6 +1209,8 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 			AllowedIPs:         os.Getenv(varAllowedIPs),
 			CorsAllowedOrigins: os.Getenv("CRONITOR_CORS_ALLOWED_ORIGINS"),
 			ClientIP:           getClientIP(r),
+			MCPEnabled:         configData.MCPEnabled,
+			MCPInstances:       configData.MCPInstances,
 		}
 
 		// Override config values with environment variables if they exist
@@ -1203,6 +1287,16 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, fmt.Sprintf("Invalid CORS configuration: %v", err), http.StatusBadRequest)
 				return
 			}
+		}
+
+		// Handle MCP settings
+		if os.Getenv(varMCPEnabled) == "" {
+			viper.Set(varMCPEnabled, configData.MCPEnabled)
+		}
+
+		// Always update MCP instances configuration
+		if configData.MCPInstances != nil {
+			viper.Set("mcp_instances", configData.MCPInstances)
 		}
 
 		// Marshal the config data
@@ -2788,6 +2882,114 @@ func performUpdateWithRestart(status *UpdateStatus, sendProgress func(string)) e
 	// Give the UI a moment to receive the message
 	time.Sleep(1 * time.Second)
 
+	// Check if we're running under systemd
+	if isRunningUnderSystemd() {
+		sendProgress("Detected systemd service, requesting service restart...")
+
+		// When running under systemd, we should let systemd handle the restart
+		// Signal systemd to restart the service
+		if err := requestSystemdRestart(); err != nil {
+			// If systemd restart fails, fall back to manual restart
+			log(fmt.Sprintf("Failed to request systemd restart, falling back to manual restart: %v", err))
+			return performManualRestart(sendProgress)
+		}
+
+		sendProgress("Update complete! Service restarting via systemd...")
+
+		// Give a brief moment for the response to be sent, then exit gracefully
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			os.Exit(0)
+		}()
+
+		return nil
+	}
+
+	// For non-systemd environments, use manual restart
+	return performManualRestart(sendProgress)
+}
+
+// isRunningUnderSystemd checks if the current process is running under systemd
+func isRunningUnderSystemd() bool {
+	// Check if NOTIFY_SOCKET environment variable is set (systemd sets this)
+	if os.Getenv("NOTIFY_SOCKET") != "" {
+		return true
+	}
+
+	// Check if we're running as PID 1's direct child and systemd is PID 1
+	ppid := os.Getppid()
+	if ppid == 1 {
+		// Check if PID 1 is systemd
+		if cmdline, err := os.ReadFile("/proc/1/cmdline"); err == nil {
+			return strings.Contains(string(cmdline), "systemd")
+		}
+	}
+
+	// Check if systemd journal is available
+	if _, err := os.Stat("/run/systemd/journal"); err == nil {
+		// Also check if we have systemd process manager
+		if _, err := os.Stat("/run/systemd/system"); err == nil {
+			return true
+		}
+	}
+
+	return false
+}
+
+// requestSystemdRestart attempts to restart the service via systemd
+func requestSystemdRestart() error {
+	// Try to determine the service name by looking at the process
+	serviceName := getSystemdServiceName()
+	if serviceName == "" {
+		return fmt.Errorf("could not determine systemd service name")
+	}
+
+	// Use systemctl to restart the service
+	cmd := exec.Command("systemctl", "restart", serviceName)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to restart systemd service %s: %v", serviceName, err)
+	}
+
+	return nil
+}
+
+// getSystemdServiceName attempts to determine the systemd service name
+func getSystemdServiceName() string {
+	// Try to get service name from systemd environment
+	if serviceName := os.Getenv("SYSTEMD_SERVICE"); serviceName != "" {
+		return serviceName
+	}
+
+	// Try common service names based on executable name
+	executable, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+
+	baseName := strings.TrimSuffix(filepath.Base(executable), filepath.Ext(executable))
+
+	// Common patterns for systemd service names
+	possibleNames := []string{
+		baseName + ".service",
+		baseName + "-dashboard.service",
+		"crontab-guru-dashboard.service", // User mentioned this specific name
+		"cronitor-cli.service",
+		"cronitor.service",
+	}
+
+	// Check which service exists and is active
+	for _, name := range possibleNames {
+		cmd := exec.Command("systemctl", "is-active", "--quiet", name)
+		if err := cmd.Run(); err == nil {
+			return name
+		}
+	}
+
+	return ""
+}
+
+// performManualRestart performs a manual restart (non-systemd)
+func performManualRestart(sendProgress func(string)) error {
 	// Get current executable path and arguments
 	executable, err := os.Executable()
 	if err != nil {

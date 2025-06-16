@@ -7,7 +7,8 @@ import {
   Cog6ToothIcon,
   ShieldCheckIcon,
   AcademicCapIcon,
-  CommandLineIcon
+  CommandLineIcon,
+  CpuChipIcon
 } from '@heroicons/react/24/outline';
 
 function CollapsibleSection({ title, icon: Icon, children, defaultOpen = false }) {
@@ -374,10 +375,10 @@ export default function Docs() {
         </div>
       </CollapsibleSection>
 
-      {/* CronitorCLI Integration */}
-      <CollapsibleSection title="CronitorCLI Integration" icon={CommandLineIcon}>
+      {/* Cronitor Integration */}
+      <CollapsibleSection title="Cronitor Integration" icon={CommandLineIcon}>
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Command Line Integration</h3>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Cronitor Integration</h3>
           
           <h4 className="text-md font-medium text-gray-900 dark:text-white">Understanding the CLI Connection</h4>
           <p className="text-gray-700 dark:text-gray-300">
@@ -405,6 +406,238 @@ cronitor update
             <li><strong>Permission issues:</strong> Check file system permissions for config directory</li>
             <li><strong>Network problems:</strong> Verify firewall settings and local network access</li>
           </ul>
+        </div>
+      </CollapsibleSection>
+
+      {/* MCP Integration */}
+      <CollapsibleSection title="MCP Integration (AI/LLM)" icon={CpuChipIcon}>
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Model Context Protocol Integration</h3>
+          
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+            <p className="text-blue-800 dark:text-blue-200">
+              <strong>MCP Integration:</strong> Use natural language to manage cron jobs directly from your AI coding assistant (Cursor, Claude Desktop, etc.)
+            </p>
+          </div>
+
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">What is MCP?</h4>
+          <p className="text-gray-700 dark:text-gray-300">
+            The Model Context Protocol (MCP) enables AI assistants to interact with external tools and services. 
+            With Crontab Guru's MCP integration, you can manage cron jobs using natural language commands directly from your IDE.
+          </p>
+
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Starting the MCP Server</h4>
+          <p className="text-gray-700 dark:text-gray-300">
+            The dashboard exposes the API that's used, but you must run a MCP server locally for a specific dashboard instance. In Cursor, this will be run automatically when you use the tool, you just need to ensure the dashboard instances themselves are running. 
+          </p>
+          <CodeBlock>
+{`# Connect to default instance
+cronitor dash --mcp-instance default
+
+# Connect to production instance
+cronitor dash --mcp-instance production
+
+# Connect to staging instance
+cronitor dash --mcp-instance staging`}
+          </CodeBlock>
+
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Configuring MCP Instances</h4>
+          <p className="text-gray-700 dark:text-gray-300">
+            You can configure multiple dashboard instances in your <code>/etc/cronitor/cronitor.json</code> file:
+          </p>
+          <CodeBlock language="json">
+{`{
+  "mcp_instances": {
+    // Note: "default" instance automatically uses your existing dashboard credentials
+    // No need to specify username/password - they're read from CRONITOR_DASH_USER/PASS
+    // If no configuration exists, default connects to localhost:9000
+    
+    "production": {
+      "url": "http://localhost:9090",
+      "username": "prod-admin",
+      "password": "prod-password"
+    },
+    "staging": {
+      "url": "http://localhost:9089",
+      "username": "staging-admin",
+      "password": "staging-password"
+    }
+  }
+}`}
+          </CodeBlock>
+
+          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 mt-4">
+            <p className="text-yellow-800 dark:text-yellow-200">
+              <strong>Important:</strong> When connecting to remote servers, ensure your VPN or SSH tunnel is active first. 
+              The MCP server runs locally and connects to remote dashboards through these secure connections. See more in the Security section below.
+            </p>
+          </div>
+
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Configuring Cursor IDE</h4>
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mt-4">
+            <p className="text-blue-800 dark:text-blue-200">
+              <strong>Note:</strong> You can also configure MCP servers through Cursor's UI by going to Settings → MCP and clicking "Add New MCP Server".
+            </p>
+          </div>
+          <p className="text-gray-700 dark:text-gray-300">
+            Cursor MCP configuration is loaded from <code>~/.cursor/mcp.json</code>:
+          </p>          
+          <CodeBlock language="json">
+{`{
+  "mcpServers": {
+    "cronitor": {
+      "command": "cronitor",
+      "args": ["dash", "--mcp-instance", "default"]
+    },
+    "cronitor-production": {
+      "command": "cronitor",
+      "args": ["dash", "--mcp-instance", "production"]
+    },
+    "cronitor-staging": {
+      "command": "cronitor",
+      "args": ["dash", "--mcp-instance", "staging"]
+    }
+  }
+}`}
+          </CodeBlock>
+          
+
+            
+
+          
+
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">MCP Capabilities</h4>
+          <p className="text-gray-700 dark:text-gray-300">
+            The Cronitor MCP server provides the following capabilities:
+          </p>
+          
+          <div className="overflow-x-auto mt-4">
+            <table className="min-w-full border border-gray-300 dark:border-gray-600">
+              <thead className="bg-gray-50 dark:bg-gray-800">
+                <tr>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-900 dark:text-white border-b border-gray-300 dark:border-gray-600">Capability</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-900 dark:text-white border-b border-gray-300 dark:border-gray-600">Description</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-900 dark:text-white border-b border-gray-300 dark:border-gray-600">Example Prompt</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">List Jobs</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">View all cron jobs or filter by criteria</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 font-mono">"Show me all cron jobs"<br/>"List jobs that run daily"</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">Create Job</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Add new cron jobs with natural language scheduling</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 font-mono">"Create a job to backup database every night at 2 AM"<br/>"Add a job that runs cleanup.sh every 6 hours"</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">Edit Schedule</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Update job schedules using natural language</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 font-mono">"Change the backup job to run every weekday at 3 AM"<br/>"Update cleanup job to run every 15 minutes"</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">Edit Command</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Modify job commands and scripts</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 font-mono">"Change the backup job to use rsync instead"<br/>"Update cleanup job to delete files older than 7 days"</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">Enable Monitoring</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Enable Cronitor monitoring for jobs</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 font-mono">"Enable monitoring for the backup job"<br/>"Monitor all production jobs"</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">Run Now</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Execute jobs immediately for testing</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 font-mono">"Run the backup job now"<br/>"Execute all cleanup jobs immediately"</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">Delete Job</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Remove cron jobs</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 font-mono">"Delete the old backup job"<br/>"Remove all disabled jobs"</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">View Crontabs</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">Access crontab file contents</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 font-mono">"Show me the root crontab"<br/>"Display all crontab files"</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Natural Language Scheduling</h4>
+          <p className="text-gray-700 dark:text-gray-300">
+            The MCP server understands natural language scheduling expressions and converts them to cron syntax:
+          </p>
+          <div className="overflow-x-auto mt-4">
+            <table className="min-w-full border border-gray-300 dark:border-gray-600">
+              <thead className="bg-gray-50 dark:bg-gray-800">
+                <tr>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-900 dark:text-white border-b border-gray-300 dark:border-gray-600">Natural Language</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-900 dark:text-white border-b border-gray-300 dark:border-gray-600">Cron Expression</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">"every 15 minutes"</td>
+                  <td className="px-4 py-3 text-sm font-mono text-gray-600 dark:text-gray-400">*/15 * * * *</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">"daily at 2 AM"</td>
+                  <td className="px-4 py-3 text-sm font-mono text-gray-600 dark:text-gray-400">0 2 * * *</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">"every Monday at 9 AM"</td>
+                  <td className="px-4 py-3 text-sm font-mono text-gray-600 dark:text-gray-400">0 9 * * 1</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">"twice a day"</td>
+                  <td className="px-4 py-3 text-sm font-mono text-gray-600 dark:text-gray-400">0 0,12 * * *</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">"weekdays at 6 PM"</td>
+                  <td className="px-4 py-3 text-sm font-mono text-gray-600 dark:text-gray-400">0 18 * * 1-5</td>
+                </tr>
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">"first day of every month"</td>
+                  <td className="px-4 py-3 text-sm font-mono text-gray-600 dark:text-gray-400">0 0 1 * *</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Example Workflow</h4>
+          <p className="text-gray-700 dark:text-gray-300">
+            Here's a typical workflow using MCP in Cursor:
+          </p>
+          <ol className="list-decimal list-inside space-y-2 text-gray-700 dark:text-gray-300">
+            <li><strong>List existing jobs:</strong> "Show me all cron jobs on the production server"</li>
+            <li><strong>Create a new job:</strong> "Create a job that backs up /var/www to S3 every night at 2 AM"</li>
+            <li><strong>Enable monitoring:</strong> "Enable monitoring for the backup job"</li>
+            <li><strong>Test the job:</strong> "Run the backup job now to test it"</li>
+            <li><strong>Adjust schedule:</strong> "Change the backup job to run at 3 AM instead"</li>
+            <li><strong>Monitor status:</strong> "Show me the status of all monitored jobs"</li>
+          </ol>
+
+          <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Troubleshooting MCP</h4>
+          <p className="text-gray-700 dark:text-gray-300">
+            Common issues and solutions:
+          </p>
+          <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
+            <li><strong>Connection failed:</strong> Ensure the dashboard is running and accessible at the configured URL</li>
+            <li><strong>Authentication error (401):</strong> For "default" instance, ensure CRONITOR_DASH_USER/PASS are set in your config. For other instances, verify credentials in mcp_instances</li>
+            <li><strong>CSRF token validation failed (403):</strong> This is handled automatically by the MCP server. If it persists, try restarting the dashboard</li>
+            <li><strong>Remote server unreachable:</strong> Verify your VPN connection or SSH tunnel is active before starting MCP</li>
+            <li><strong>Commands not working:</strong> Check that the MCP server is running with <code>ps aux | grep "cronitor.*mcp"</code></li>
+            <li><strong>Multiple instances:</strong> Use descriptive names (production, staging) to avoid confusion</li>
+            <li><strong>Tunnel disconnected:</strong> If SSH tunnel drops, restart it and then restart the MCP server in Cursor</li>
+          </ul>
+
+          <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 mt-6">
+            <p className="text-green-800 dark:text-green-200">
+              <strong>Pro Tip:</strong> You can manage multiple servers from a single Cursor instance by configuring multiple MCP servers with different instance names.
+            </p>
+          </div>
         </div>
       </CollapsibleSection>
 

@@ -12,17 +12,25 @@ import (
 )
 
 type ConfigFile struct {
-	ApiKey             string   `json:"CRONITOR_API_KEY"`
-	PingApiAuthKey     string   `json:"CRONITOR_PING_API_KEY"`
-	ExcludeText        []string `json:"CRONITOR_EXCLUDE_TEXT,omitempty"`
-	Hostname           string   `json:"CRONITOR_HOSTNAME"`
-	Log                string   `json:"CRONITOR_LOG"`
-	Env                string   `json:"CRONITOR_ENV"`
-	DashUsername       string   `json:"CRONITOR_DASH_USER"`
-	DashPassword       string   `json:"CRONITOR_DASH_PASS"`
-	AllowedIPs         string   `json:"CRONITOR_ALLOWED_IPS"`
-	CorsAllowedOrigins string   `json:"CRONITOR_CORS_ALLOWED_ORIGINS"`
-	Users              string   `json:"CRONITOR_USERS"`
+	ApiKey             string                       `json:"CRONITOR_API_KEY"`
+	PingApiAuthKey     string                       `json:"CRONITOR_PING_API_KEY"`
+	ExcludeText        []string                     `json:"CRONITOR_EXCLUDE_TEXT,omitempty"`
+	Hostname           string                       `json:"CRONITOR_HOSTNAME"`
+	Log                string                       `json:"CRONITOR_LOG"`
+	Env                string                       `json:"CRONITOR_ENV"`
+	DashUsername       string                       `json:"CRONITOR_DASH_USER"`
+	DashPassword       string                       `json:"CRONITOR_DASH_PASS"`
+	AllowedIPs         string                       `json:"CRONITOR_ALLOWED_IPS"`
+	CorsAllowedOrigins string                       `json:"CRONITOR_CORS_ALLOWED_ORIGINS"`
+	Users              string                       `json:"CRONITOR_USERS"`
+	MCPEnabled         bool                         `json:"CRONITOR_MCP_ENABLED,omitempty"`
+	MCPInstances       map[string]MCPInstanceConfig `json:"mcp_instances,omitempty"`
+}
+
+type MCPInstanceConfig struct {
+	URL      string `json:"url"`
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 // configureCmd represents the configure command
@@ -68,6 +76,30 @@ Example setting common exclude text for use with 'cronitor discover':
 		configData.AllowedIPs = viper.GetString(varAllowedIPs)
 		configData.CorsAllowedOrigins = viper.GetString("CRONITOR_CORS_ALLOWED_ORIGINS")
 		configData.Users = viper.GetString(varUsers)
+		configData.MCPEnabled = viper.GetBool(varMCPEnabled)
+
+		// Load MCP instances if configured
+		if viper.IsSet("mcp_instances") {
+			// Get the raw config and manually convert
+			rawInstances := viper.GetStringMap("mcp_instances")
+			configData.MCPInstances = make(map[string]MCPInstanceConfig)
+
+			for name, rawConfig := range rawInstances {
+				if configMap, ok := rawConfig.(map[string]interface{}); ok {
+					instance := MCPInstanceConfig{}
+					if url, ok := configMap["url"].(string); ok {
+						instance.URL = url
+					}
+					if username, ok := configMap["username"].(string); ok {
+						instance.Username = username
+					}
+					if password, ok := configMap["password"].(string); ok {
+						instance.Password = password
+					}
+					configData.MCPInstances[name] = instance
+				}
+			}
+		}
 
 		fmt.Println("\nConfiguration File:")
 		fmt.Println(configFilePath())
@@ -137,6 +169,16 @@ Example setting common exclude text for use with 'cronitor discover':
 			fmt.Println(configData.Users)
 		}
 
+		fmt.Println("\nMCP Enabled:")
+		fmt.Println(configData.MCPEnabled)
+
+		if len(configData.MCPInstances) > 0 {
+			fmt.Println("\nMCP Instances:")
+			for name, instance := range configData.MCPInstances {
+				fmt.Printf("  %s: %s\n", name, instance.URL)
+			}
+		}
+
 		if verbose {
 			fmt.Println("\nEnviornment Variables:")
 			for _, pair := range os.Environ() {
@@ -181,6 +223,7 @@ func init() {
 	configureCmd.Flags().String("log", "", "Path to debug log file")
 	configureCmd.Flags().String("env", "", "Environment name (e.g. staging, production)")
 	configureCmd.Flags().String("users", "", "Comma-separated list of users whose crontabs to include")
+	configureCmd.Flags().Bool(varMCPEnabled, false, "Enable MCP instances")
 
 	viper.BindPFlag(varExcludeText, configureCmd.Flags().Lookup("exclude-from-name"))
 	viper.BindPFlag(varDashUsername, configureCmd.Flags().Lookup("dash-username"))
@@ -190,4 +233,5 @@ func init() {
 	viper.BindPFlag(varLog, configureCmd.Flags().Lookup("log"))
 	viper.BindPFlag(varEnv, configureCmd.Flags().Lookup("env"))
 	viper.BindPFlag(varUsers, configureCmd.Flags().Lookup("users"))
+	viper.BindPFlag(varMCPEnabled, configureCmd.Flags().Lookup(varMCPEnabled))
 }
