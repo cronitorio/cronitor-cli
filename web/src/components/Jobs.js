@@ -399,7 +399,26 @@ export default function Jobs() {
           </div>
           {!settings?.safe_mode && (
             <button
-              onClick={() => setShowNewJob(true)}
+              onClick={() => {
+                // Reset the forms when opening Add Job
+                setNewJobForm({
+                  name: '',
+                  expression: '',
+                  command: '',
+                  crontab_filename: '',
+                  crontab_display_name: '',
+                  run_as_user: '',
+                  monitored: false,
+                  is_draft: true
+                });
+                setNewCrontabForm({
+                  filename: '',
+                  timezone: settings?.timezone || '',
+                  comments: ''
+                });
+                setShowNewCrontab(false);
+                setShowNewJob(true);
+              }}
               className="px-4 py-2.5 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium flex-shrink-0"
             >
               Add Job
