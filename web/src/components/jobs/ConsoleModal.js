@@ -9,6 +9,7 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange, onComm
   const [command, setCommand] = React.useState(job.command);
   const [hasChanges, setHasChanges] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [withMonitoring, setWithMonitoring] = React.useState(true);
   const outputRef = React.useRef(null);
   const commandInputRef = React.useRef(null);
   const eventSourceRef = React.useRef(null);
@@ -79,7 +80,8 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange, onComm
         body: JSON.stringify({ 
           command,
           crontab_filename: job.crontab_filename,
-          key: job.key
+          key: job.key,
+          with_monitoring: job.monitored ? withMonitoring : false
         })
       });
 
@@ -240,33 +242,52 @@ export function ConsoleModal({ job, onClose, isNew = false, onFormChange, onComm
             {output}
           </div>
           
-          <div className="mt-4 flex justify-end space-x-2">
-            {hasChanges && !isRunning && (
-              <button
-                onClick={handleSave}
-                disabled={isSaving}
-                className={`px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium ${
-                  isSaving ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
-              >
-                {isSaving ? 'Saving...' : 'Save Changes'}
-              </button>
-            )}
-            {isRunning ? (
-              <button
-                onClick={handleKill}
-                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 font-medium"
-              >
-                Kill Now
-              </button>
-            ) : (
-              <button
-                onClick={runCommand}
-                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 font-medium"
-              >
-                Run Command
-              </button>
-            )}
+          <div className="mt-4 flex justify-between items-center">
+            <div className="flex items-center">
+              {job.monitored && (
+                <>
+                  <input
+                    type="checkbox"
+                    id="with-monitoring"
+                    checked={withMonitoring}
+                    onChange={(e) => setWithMonitoring(e.target.checked)}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    disabled={isRunning}
+                  />
+                  <label htmlFor="with-monitoring" className="ml-2 text-base text-gray-700 dark:text-gray-300">
+                    Run with monitoring enabled
+                  </label>
+                </>
+              )}
+            </div>
+            <div className="flex space-x-2">
+              {hasChanges && !isRunning && (
+                <button
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className={`px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium ${
+                    isSaving ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                >
+                  {isSaving ? 'Saving...' : 'Save Changes'}
+                </button>
+              )}
+              {isRunning ? (
+                <button
+                  onClick={handleKill}
+                  className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 font-medium"
+                >
+                  Kill Now
+                </button>
+              ) : (
+                <button
+                  onClick={runCommand}
+                  className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 font-medium"
+                >
+                  Run Command
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

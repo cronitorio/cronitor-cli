@@ -63,6 +63,7 @@ export default function Jobs() {
   const [isToastVisible, setIsToastVisible] = React.useState(false);
   const [toastMessage, setToastMessage] = React.useState('');
   const [toastType, setToastType] = React.useState('error');
+  const [toastAction, setToastAction] = React.useState(null);
   const [isReloading, setIsReloading] = React.useState(false);
   
   const [inputValue, setInputValue] = React.useState(searchParams.get('search') || '');
@@ -142,11 +143,15 @@ export default function Jobs() {
     }
   }, [settings]);
 
-  const showToast = (message, type = 'error') => {
+  const showToast = (message, type = 'error', action = null) => {
     setToastMessage(message);
     setToastType(type);
+    setToastAction(action);
     setIsToastVisible(true);
-    setTimeout(() => setIsToastVisible(false), type === 'error' ? 6000 : 3000);
+    setTimeout(() => {
+      setIsToastVisible(false);
+      setToastAction(null);
+    }, type === 'error' ? 7500 : 7500); // Extended by 1.5s more (was 6000ms, now 7500ms)
   };
 
   const handleReload = async () => {
@@ -224,16 +229,33 @@ export default function Jobs() {
     }));
   };
 
+  // Track jobs that are in the process of having monitoring enabled
+  const [pendingMonitoringJobs, setPendingMonitoringJobs] = React.useState(new Set());
+
   // Merge monitor data with jobs
   const jobsWithMonitors = React.useMemo(() => {
     if (!jobs || !monitors) return jobs || [];
     
     return jobs.map(job => {
+      // Check if this job is pending monitoring activation
+      const isPendingMonitoring = pendingMonitoringJobs.has(job.key);
+      
       // If job has a code (should be monitored) but no monitor found, treat as unmonitored
       if (job.code && job.monitored) {
         const monitor = monitors.find(m => m.key === job.key || m.attributes?.code === job.code);
         if (!monitor) {
-          // Monitor not found in response, treat as unmonitored
+          // If we're waiting for the monitor to be created, preserve the monitored state
+          if (isPendingMonitoring) {
+            return {
+              ...job,
+              passing: false,
+              disabled: false,
+              paused: false,
+              initialized: false
+            };
+          }
+          
+          // Monitor not found in response and not pending, treat as unmonitored
           return {
             ...job,
             monitored: false,
@@ -244,7 +266,15 @@ export default function Jobs() {
           };
         }
         
-        // Monitor found, merge its data
+        // Monitor found, merge its data and clear pending state
+        if (isPendingMonitoring) {
+          setPendingMonitoringJobs(prev => {
+            const next = new Set(prev);
+            next.delete(job.key);
+            return next;
+          });
+        }
+        
         return {
           ...job,
           name: monitor.name || job.name,
@@ -258,7 +288,7 @@ export default function Jobs() {
       // Job not monitored, return as-is
       return job;
     });
-  }, [jobs, monitors]);
+  }, [jobs, monitors, pendingMonitoringJobs]);
 
   // Filter jobs based on active filters and search term
   const filteredJobs = React.useMemo(() => {
@@ -309,13 +339,13 @@ export default function Jobs() {
           <div className="mt-2 text-sm text-red-700 dark:text-red-300">
             <pre className="whitespace-pre-wrap break-words">{error.message}</pre>
           </div>
-          {error.message.includes('Unable to connect') && (
+          {(error.message.includes('Unable to connect') || error.message.includes('Load failed')) && (
             <div className="mt-2 text-sm text-red-700 dark:text-red-300">
               <p>Possible causes:</p>
               <ul className="list-disc list-inside mt-1">
-                <li>The dash server is not running</li>
+                <li>The dash service is not running</li>
                 <li>Your IP is not whitelisted</li>
-                <li>A VPN connection is required</li>
+                <li>An SSH tunnel or VPN connection is required</li>
                 <li>Server is restarting</li>
               </ul>
             </div>
@@ -364,6 +394,9 @@ export default function Jobs() {
         throw new Error('Failed to create job');
       }
 
+      // Store the job name before resetting the form
+      const createdJobName = newJobForm.name;
+
       setShowNewJob(false);
       setNewJobForm({
         name: '',
@@ -377,7 +410,19 @@ export default function Jobs() {
       });
       mutate();
       mutateCrontabs(); // Also refresh crontabs cache since jobs are part of crontabs
-      showToast('Job created successfully', 'success');
+      
+      // Show toast with "Show Job" action
+      showToast('Job created successfully', 'success', {
+        label: 'Show Job',
+        onClick: () => {
+          // Clear all filters and set search to the job name
+          setActiveFilters({});
+          setInputValue(createdJobName);
+          setSearchTerm(createdJobName);
+          setIsToastVisible(false);
+          setToastAction(null);
+        }
+      });
     } catch (error) {
       console.error('Error creating job:', error);
       showToast('Failed to create job: ' + error.message);
@@ -459,6 +504,7 @@ export default function Jobs() {
               monitorsLoading={!monitors}
               users={users || []}
               crontabs={crontabs || []}
+              setPendingMonitoringJobs={setPendingMonitoringJobs}
               key={showNewCrontab ? 'new-crontab' : 'no-crontab'}
             />
             {showNewCrontab && (
@@ -496,6 +542,7 @@ export default function Jobs() {
               monitorsLoading={!monitors}
               users={users || []}
               crontabs={crontabs || []}
+              setPendingMonitoringJobs={setPendingMonitoringJobs}
             />
           ))
         ) : (
@@ -591,7 +638,7 @@ export default function Jobs() {
           ) : null;
         })()}
       </div>
-      {isToastVisible && <Toast message={toastMessage} onClose={() => setIsToastVisible(false)} type={toastType} />}
+      {isToastVisible && <Toast message={toastMessage} onClose={() => setIsToastVisible(false)} type={toastType} action={toastAction} />}
     </div>
   );
 } 

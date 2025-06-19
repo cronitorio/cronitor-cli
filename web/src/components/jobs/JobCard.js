@@ -14,7 +14,7 @@ import { LearnMoreModal } from './LearnMoreModal';
 import { useJobOperations } from '../../hooks/useJobOperations';
 import { csrfFetch } from '../../utils/api';
 
-export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNew = false, onSave, onDiscard, onFormChange, onLocationChange, showToast, isMacOS, onJobChange, crontabMutate, selectedCrontab, setSelectedCrontab, readOnly = false, settings, monitorsLoading = false, users = [], crontabs = [] }) {
+export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNew = false, onSave, onDiscard, onFormChange, onLocationChange, showToast, isMacOS, onJobChange, crontabMutate, selectedCrontab, setSelectedCrontab, readOnly = false, settings, monitorsLoading = false, users = [], crontabs = [], setPendingMonitoringJobs }) {
   const [isEditing, setIsEditing] = React.useState(isNew);
   const [isEditingCommand, setIsEditingCommand] = React.useState(isNew);
   const [isEditingSchedule, setIsEditingSchedule] = React.useState(isNew);
@@ -177,7 +177,7 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
         if (isEditing) setIsEditing(false);
         if (isEditingCommand) setIsEditingCommand(false);
         if (isEditingSchedule) setIsEditingSchedule(false);
-      }, 1000);
+      }, 1500);
     } catch (error) {
       setSavingStatus(null);
       setPendingChanges(null); // Clear pending changes on error
@@ -573,11 +573,17 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
           onEditEnd={() => {
             if (!isNew) {
               setIsEditing(false);
+              // Auto-save when leaving the field
+              handleSave();
             }
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault();
+              // Check validation for new jobs before saving
+              if (isNew && (!editedName || !editedSchedule || !editedCommand || !editedCronFile || (!editedCronFile.startsWith('user') && !editedRunAsUser))) {
+                return;
+              }
               handleSave();
             } else if (e.key === 'Escape') {
               if (!isNew) {
@@ -617,11 +623,17 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
                     onEditEnd={() => {
                       if (!isNew) {
                         setIsEditingSchedule(false);
+                        // Auto-save when leaving the field
+                        handleSave();
                       }
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
+                        // Check validation for new jobs before saving
+                        if (isNew && (!editedName || !editedSchedule || !editedCommand || !editedCronFile || (!editedCronFile.startsWith('user') && !editedRunAsUser))) {
+                          return;
+                        }
                         handleSave();
                       } else if (e.key === 'Escape') {
                         if (!isNew) {
@@ -651,11 +663,17 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
                     onEditEnd={() => {
                       if (!isNew) {
                         setIsEditingCommand(false);
+                        // Auto-save when leaving the field
+                        handleSave();
                       }
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
+                        // Check validation for new jobs before saving
+                        if (isNew && (!editedName || !editedSchedule || !editedCommand || !editedCronFile || (!editedCronFile.startsWith('user') && !editedRunAsUser))) {
+                          return;
+                        }
                         handleSave();
                       } else if (e.key === 'Escape') {
                         if (!isNew) {
@@ -691,11 +709,17 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
                         onEditEnd={() => {
                           if (!isNew) {
                             setIsEditingSchedule(false);
+                            // Auto-save when leaving the field
+                            handleSave();
                           }
                         }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             e.preventDefault();
+                            // Check validation for new jobs before saving
+                            if (isNew && (!editedName || !editedSchedule || !editedCommand || !editedCronFile || (!editedCronFile.startsWith('user') && !editedRunAsUser))) {
+                              return;
+                            }
                             handleSave();
                           } else if (e.key === 'Escape') {
                             if (!isNew) {
@@ -747,10 +771,22 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
                         onFormChange(updatedJob);
                       } else {
                         try {
+                          // Mark job as pending monitoring if monitoring is being enabled
+                          if (updatedJob.monitored && !initialJob.monitored && setPendingMonitoringJobs) {
+                            setPendingMonitoringJobs(prev => new Set(prev).add(initialJob.key));
+                          }
                           await toggleJobMonitoring(initialJob.key, updatedJob.monitored);
                           mutate();
                           if (onJobChange) onJobChange();
                         } catch (error) {
+                          // Remove from pending if the update failed
+                          if (setPendingMonitoringJobs) {
+                            setPendingMonitoringJobs(prev => {
+                              const next = new Set(prev);
+                              next.delete(initialJob.key);
+                              return next;
+                            });
+                          }
                           showToast('Failed to update monitoring status: ' + error.message);
                         }
                       }
@@ -881,6 +917,11 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
                       monitored: true
                     });
                   } else {
+                    // Mark job as pending monitoring
+                    if (setPendingMonitoringJobs) {
+                      setPendingMonitoringJobs(prev => new Set(prev).add(pendingMonitoringJob.key));
+                    }
+                    
                     // For existing jobs, make the API call
                     const response = await csrfFetch('/api/jobs', {
                       method: 'PUT',
@@ -894,6 +935,14 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
                     });
 
                     if (!response.ok) {
+                      // Remove from pending if the update failed
+                      if (setPendingMonitoringJobs) {
+                        setPendingMonitoringJobs(prev => {
+                          const next = new Set(prev);
+                          next.delete(pendingMonitoringJob.key);
+                          return next;
+                        });
+                      }
                       throw new Error('Failed to enable monitoring');
                     }
                     
@@ -918,19 +967,39 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
           />
         )}
 
-        {isNew && (
+        {(isNew || isEditing || isEditingCommand || isEditingSchedule) && (
           <div className="mt-4 flex justify-end space-x-4">
             <button
-              onClick={onDiscard}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                if (isNew) {
+                  onDiscard();
+                } else {
+                  // For existing jobs, reset all editing states and values
+                  setIsEditing(false);
+                  setIsEditingCommand(false);
+                  setIsEditingSchedule(false);
+                  setPendingChanges(null);
+                  
+                  // Reset to current values
+                  const currentJob = allJobs.find(j => j.key === initialJob.key) || initialJob;
+                  setEditedName(currentJob.name || currentJob.default_name);
+                  setEditedCommand(currentJob.command);
+                  setEditedSchedule(currentJob.expression || '');
+                }
+              }}
               className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             >
               Discard
             </button>
             <button
-              onClick={onSave}
-              disabled={!editedName || !editedSchedule || !editedCommand || !editedCronFile || (!editedCronFile.startsWith('user') && !editedRunAsUser)}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleSave}
+              disabled={isNew && (!editedName || !editedSchedule || !editedCommand || !editedCronFile || (!editedCronFile.startsWith('user') && !editedRunAsUser))}
               className={`px-4 py-2 text-sm font-medium text-white rounded-md ${
-                !editedName || !editedSchedule || !editedCommand || !editedCronFile || (!editedCronFile.startsWith('user') && !editedRunAsUser)
+                isNew && (!editedName || !editedSchedule || !editedCommand || !editedCronFile || (!editedCronFile.startsWith('user') && !editedRunAsUser))
                   ? 'bg-gray-400 cursor-not-allowed'
                   : 'bg-blue-600 hover:bg-blue-700'
               }`}

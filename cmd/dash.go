@@ -1699,6 +1699,7 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 		Command         string `json:"command"`
 		CrontabFilename string `json:"crontab_filename"`
 		Key             string `json:"key"`
+		WithMonitoring  bool   `json:"with_monitoring"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -1711,7 +1712,8 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shell := "/bin/sh" // Default shell
+	shell := "/bin/sh"     // Default shell
+	var monitorCode string // For monitoring
 
 	// If crontab filename and key are provided, use them to find the specific job
 	if request.CrontabFilename != "" && request.Key != "" {
@@ -1739,6 +1741,10 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 				if foundLine.CommandToRun != request.Command && isSafeModeEnabled {
 					http.Error(w, "Command does not match the job in the crontab", http.StatusForbidden)
 					return
+				}
+				// Get monitor code if monitoring is requested
+				if request.WithMonitoring && foundLine.Code != "" {
+					monitorCode = foundLine.Code
 				}
 			} else if isSafeModeEnabled {
 				http.Error(w, "Job not found in crontab", http.StatusForbidden)
@@ -1778,6 +1784,19 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	// For monitoring support
+	var monitoringWaitGroup sync.WaitGroup
+	var series string
+	var startTimestamp float64
+
+	if request.WithMonitoring && monitorCode != "" {
+		startTimestamp = makeStamp()
+		series = formatStamp(startTimestamp)
+		// Send run ping
+		monitoringWaitGroup.Add(1)
+		go sendPing("run", monitorCode, request.Command, series, startTimestamp, nil, nil, nil, "", &monitoringWaitGroup)
+	}
+
 	// Start the command in a goroutine
 	go func() {
 		defer close(done)
@@ -1816,6 +1835,42 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 
 		// Ensure temp file is synced before reading final output
 		tempFile.Sync()
+
+		// Handle monitoring if enabled
+		if request.WithMonitoring && monitorCode != "" {
+			endTimestamp := makeStamp()
+			durationSeconds := endTimestamp - startTimestamp
+
+			// Gather output for monitoring
+			tempFile.Seek(0, 0)
+			outputBytes, _ := ioutil.ReadAll(tempFile)
+			outputStr := string(outputBytes)
+			if len(outputStr) > 1000 {
+				outputStr = outputStr[len(outputStr)-1000:] // Take last 1000 chars
+			}
+
+			// Calculate metrics
+			metrics := map[string]int{
+				"length": len(outputBytes),
+			}
+
+			if err != nil {
+				// Command failed
+				if exitErr, ok := err.(*exec.ExitError); ok {
+					exitCode = exitErr.ExitCode()
+				} else {
+					exitCode = 1
+				}
+
+				message := strings.TrimSpace(fmt.Sprintf("%s [%s]", outputStr, err.Error()))
+				monitoringWaitGroup.Add(1)
+				go sendPing("fail", monitorCode, message, series, endTimestamp, &durationSeconds, &exitCode, metrics, "", &monitoringWaitGroup)
+			} else {
+				// Command succeeded
+				monitoringWaitGroup.Add(1)
+				go sendPing("complete", monitorCode, outputStr, series, endTimestamp, &durationSeconds, &exitCode, metrics, "", &monitoringWaitGroup)
+			}
+		}
 
 		// Determine exit status and reason
 		var statusMsg string
@@ -1898,6 +1953,11 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 	case <-ctx.Done():
 		fmt.Fprintf(w, "data: %s\n\n", `{"error":"Command timed out"}`)
 		w.(http.Flusher).Flush()
+	}
+
+	// Wait for monitoring to complete if enabled
+	if request.WithMonitoring && monitorCode != "" {
+		monitoringWaitGroup.Wait()
 	}
 }
 

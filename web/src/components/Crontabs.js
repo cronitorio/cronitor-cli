@@ -401,15 +401,15 @@ export default function Crontabs() {
             <div className="mt-2 text-sm text-red-700 dark:text-red-300">
               <pre className="whitespace-pre-wrap break-words">{error.message}</pre>
             </div>
-            {error.message.includes('Unable to connect') && (
+            {(error.message.includes('Unable to connect') || error.message.includes('Load failed')) && (
               <div className="mt-2 text-sm text-red-700 dark:text-red-300">
                 <p>Possible causes:</p>
                 <ul className="list-disc list-inside mt-1">
-                  <li>The dash server is not running</li>
-                  <li>Your IP is not whitelisted</li>
-                  <li>A VPN connection is required</li>
-                  <li>Server is restarting</li>
-                </ul>
+                <li>The dash service is not running</li>
+                <li>Your IP is not whitelisted</li>
+                <li>An SSH tunnel or VPN connection is required</li>
+                <li>Server is restarting</li>
+              </ul>
               </div>
             )}
             <div className="mt-4">
