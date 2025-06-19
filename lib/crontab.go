@@ -114,7 +114,8 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 	var name string
 	var ignored bool
 
-	for lineNumber, fullLine := range lines {
+	for lineIndex, fullLine := range lines {
+		lineNumber := lineIndex + 1 // Convert to 1-indexed
 		var cronExpression string
 		var command []string
 		var runAs string
@@ -696,7 +697,7 @@ func (l Line) MarshalJSON() ([]byte, error) {
 			Expression:         l.CronExpression,
 			CrontabFilename:    l.Crontab.Filename,
 			CrontabDisplayName: l.Crontab.DisplayName(),
-			LineNumber:         l.LineNumber + 1, // 1-indexed for UI
+			LineNumber:         l.LineNumber,
 			RunAsUser:          l.RunAs,
 			Timezone:           timezone,
 			Monitored:          len(l.Code) > 0,

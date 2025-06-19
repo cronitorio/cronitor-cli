@@ -5,17 +5,19 @@ import { Toast } from './Toast';
 import { JobCard } from './jobs/JobCard';
 import { CommentCard } from './crontabs/CommentCard';
 import { EnvVarCard } from './crontabs/EnvVarCard';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { csrfFetcher, csrfFetch } from '../utils/api';
 
 export default function Crontabs() {
   const location = useLocation();
   const isCrontabsView = location.pathname === '/crontabs';
+  const [searchParams, setSearchParams] = useSearchParams();
   
   const [revalidationKey, setRevalidationKey] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState('');
   const textareaRef = useRef(null);
+  const scrollContainerRef = useRef(null);
   
   // Settings data - minimal refresh
   const { data: settings } = useSWR('/api/settings', csrfFetcher, {
@@ -65,6 +67,7 @@ export default function Crontabs() {
     timezone: '',
     comments: ''
   });
+  const [isReloading, setIsReloading] = useState(false);
 
   // Update timezone when settings are loaded
   useEffect(() => {
@@ -76,36 +79,98 @@ export default function Crontabs() {
     }
   }, [settings]);
 
-  // Select first crontab when data loads
+  // Select crontab from URL or first crontab when data loads
   useEffect(() => {
-    if (crontabs && crontabs.length > 0 && !selectedCrontab) {
-      setSelectedCrontab(crontabs[0]);
-    }
-  }, [crontabs, selectedCrontab]);
-
-  // Update selectedLine when selectedCrontab changes to keep data in sync
-  useEffect(() => {
-    if (selectedCrontab && selectedLine) {
-      // Find the line index in the current crontab
-      const currentIndex = selectedCrontab.lines.findIndex(line => line === selectedLine);
-      if (currentIndex === -1) {
-        // The selectedLine is from an old crontab, find the corresponding line by index
-        const originalIndex = selectedLine.line_number;
-        if (originalIndex >= 0 && originalIndex < selectedCrontab.lines.length) {
-          const updatedLine = selectedCrontab.lines[originalIndex];
-          if (updatedLine && updatedLine !== selectedLine) {
-            setSelectedLine(updatedLine);
+    if (crontabs && crontabs.length > 0) {
+      const crontabFromURL = searchParams.get('crontab');
+      const lineFromURL = searchParams.get('line');
+      
+      if (crontabFromURL && !selectedCrontab) {
+        // Try to find the crontab from URL
+        const foundCrontab = crontabs.find(c => c.filename === crontabFromURL);
+        if (foundCrontab) {
+          setSelectedCrontab(foundCrontab);
+          
+          // If we also have a line number, select it after crontab is set
+          if (lineFromURL) {
+            const lineNumber = parseInt(lineFromURL, 10);
+            if (!isNaN(lineNumber) && foundCrontab.lines) {
+              // Find the line with matching line_number (1-indexed)
+              const lineToSelect = foundCrontab.lines.find(line => line.line_number === lineNumber);
+              if (lineToSelect) {
+                setSelectedLine(lineToSelect);
+              }
+            }
           }
+          // Mark initial load as complete after processing URL params
+          setIsInitialLoad(false);
+        } else if (!selectedCrontab) {
+          // Crontab from URL not found, select first one
+          setSelectedCrontab(crontabs[0]);
+          setIsInitialLoad(false);
         }
+      } else if (!selectedCrontab) {
+        // No URL params, select first crontab
+        setSelectedCrontab(crontabs[0]);
+        setIsInitialLoad(false);
+      } else {
+        // We already have a selected crontab, initial load is done
+        setIsInitialLoad(false);
       }
     }
-  }, [selectedCrontab, selectedLine]);
+  }, [crontabs, searchParams]); // Removed selectedCrontab from deps to avoid infinite loop
+
+  // Clear selectedLine when selectedCrontab changes
+  useEffect(() => {
+    if (selectedCrontab) {
+      // Clear the selected line when switching crontabs
+      // (unless we're setting both from URL params, which is handled in the previous effect)
+      const lineFromURL = searchParams.get('line');
+      if (!lineFromURL) {
+        setSelectedLine(null);
+      }
+    }
+  }, [selectedCrontab, searchParams]);
+
+  // Track if we're still loading initial data from URL
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  
+  // Update URL when selectedCrontab or selectedLine changes
+  useEffect(() => {
+    // Skip URL updates during initial load to prevent clearing URL params
+    if (isInitialLoad) return;
+    
+    const newParams = new URLSearchParams();
+    
+    if (selectedCrontab) {
+      newParams.set('crontab', selectedCrontab.filename);
+    }
+    
+    if (selectedLine && selectedCrontab) {
+      // Use the line_number (1-indexed) instead of array index
+      if (selectedLine.line_number !== undefined && selectedLine.line_number !== null) {
+        newParams.set('line', selectedLine.line_number.toString());
+      }
+    }
+    
+    // Only update if the string form of params actually changes
+    if (newParams.toString() !== searchParams.toString()) {
+      setSearchParams(newParams, { replace: true });
+    }
+  }, [selectedCrontab, selectedLine, setSearchParams, searchParams, isInitialLoad]);
 
   const showToast = (message, type = 'error') => {
     setToastMessage(message);
     setToastType(type);
     setIsToastVisible(true);
     setTimeout(() => setIsToastVisible(false), type === 'error' ? 6000 : 3000);
+  };
+
+  const handleReload = async () => {
+    setIsReloading(true);
+    await mutate();
+    // Ensure loading state shows for at least 1 second
+    setTimeout(() => setIsReloading(false), 1000);
   };
 
   const handleCreateCrontab = async () => {
@@ -174,6 +239,16 @@ export default function Crontabs() {
     let lineNumber = 1;
     
     selectedCrontab.lines.forEach((line) => {
+      // If this is a job line that's ignored, add the cronitor: ignore comment first
+      if (line.is_job && line.ignored) {
+        formattedLines.push({
+          lineNumber: lineNumber++,
+          text: `# cronitor: ignore`,
+          originalLine: line,
+          isCronitorIgnoreComment: true
+        });
+      }
+      
       // If this is a job line with a name, add the Name comment first
       if (line.is_job && line.name) {
         formattedLines.push({
@@ -196,12 +271,39 @@ export default function Crontabs() {
         lineNumber: lineNumber++,
         text: displayText,
         originalLine: line,
-        isNameComment: false
+        isNameComment: false,
+        isCronitorIgnoreComment: false
       });
     });
     
     return formattedLines;
   };
+
+  // Scroll to selected line when it changes
+  useEffect(() => {
+    if (selectedLine && scrollContainerRef.current && !isEditing) {
+      // Find the index of the selected line in the formatted content
+      const formattedLines = formatCrontabContent();
+      const selectedIndex = formattedLines.findIndex(fl => fl.originalLine === selectedLine);
+      
+      if (selectedIndex !== -1) {
+        // Calculate the scroll position based on line height (1.5 * font-size)
+        // Assuming font-size is 14px (text-sm), line height is 21px
+        const lineHeight = 21; // 1.5 * 14px
+        const paddingTop = 16; // py-4 = 1rem = 16px
+        const scrollTop = selectedIndex * lineHeight + paddingTop;
+        
+        // Scroll to position with some offset to center the line
+        const containerHeight = scrollContainerRef.current.clientHeight;
+        const targetScroll = scrollTop - (containerHeight / 2) + (lineHeight / 2);
+        
+        scrollContainerRef.current.scrollTo({
+          top: Math.max(0, targetScroll),
+          behavior: 'smooth'
+        });
+      }
+    }
+  }, [selectedLine, isEditing, selectedCrontab]); // Added selectedCrontab as dependency
 
   // Get or create a job object for the selected line
   const getJobForLine = () => {
@@ -211,6 +313,11 @@ export default function Crontabs() {
     if (selectedLine.job) {
       // Add any missing fields that might be needed
       const job = { ...selectedLine.job };
+      
+      // Ensure line_number is set from the selectedLine if not in job
+      if (!job.line_number && selectedLine.line_number !== undefined) {
+        job.line_number = selectedLine.line_number;
+      }
       
       // Add instances from the jobs list if available
       if (jobs && jobs.length > 0 && selectedLine.key) {
@@ -265,20 +372,28 @@ export default function Crontabs() {
   const handleEditStart = (displayedLineIndex) => {
     if (!selectedCrontab) return;
     
-    // Get all lines including Name comments (same as what's displayed)
+    // Get all lines including Name comments and cronitor: ignore comments (same as what's displayed)
     const lines = selectedCrontab.lines.map(line => {
-      if (line.is_job && line.name) {
-        // For job lines with names, add the Name comment first, then the job line
-        const jobLineText = line.is_comment ? `# ${line.line_text}` : line.line_text;
-        return [`# Name: ${line.name}`, jobLineText];
-      } else {
-        // For other lines, add # prefix if it's a comment line and doesn't already have it
-        let lineText = line.line_text;
-        if (line.is_comment && lineText && !lineText.startsWith('#')) {
-          lineText = `# ${lineText}`;
-        }
-        return [lineText];
+      const result = [];
+      
+      // Add cronitor: ignore comment if the job is ignored
+      if (line.is_job && line.ignored) {
+        result.push('# cronitor: ignore');
       }
+      
+      // Add Name comment if the job has a name
+      if (line.is_job && line.name) {
+        result.push(`# Name: ${line.name}`);
+      }
+      
+      // Add the actual line
+      let lineText = line.line_text;
+      if (line.is_comment && lineText && !lineText.startsWith('#')) {
+        lineText = `# ${lineText}`;
+      }
+      result.push(lineText);
+      
+      return result;
     }).flat();
     
     const content = lines.join('\n');
@@ -312,9 +427,18 @@ export default function Crontabs() {
       const lines = editedContent.split('\n').map(line => line.trim());
       const processedLines = [];
       let currentName = null;
+      let currentIgnored = false;
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
+        
+        // Check if this is a cronitor: ignore comment
+        const ignoreMatch = line.match(/^#\s*cronitor:\s*ignore\s*$/i);
+        if (ignoreMatch) {
+          currentIgnored = true;
+          // Don't add the cronitor: ignore comment to processed lines
+          continue;
+        }
         
         // Check if this is a Name comment (handles both # Name: and #Name: formats)
         const nameMatch = line.match(/^#\s*Name:\s*(.+)$/i);
@@ -327,15 +451,17 @@ export default function Crontabs() {
         // Check if this is a job line (either active or suspended)
         const isJobLine = line && (
           !line.startsWith('#') || // Active job line
-          (line.startsWith('#') && line.trim().length > 1 && !line.match(/^#\s*Name:/i)) // Suspended job line (but not a Name comment)
+          (line.startsWith('#') && line.trim().length > 1 && !line.match(/^#\s*Name:/i) && !line.match(/^#\s*cronitor:\s*ignore/i)) // Suspended job line (but not a Name or cronitor comment)
         );
 
         if (isJobLine) {
           processedLines.push({
             line_text: line,
-            name: currentName || undefined
+            name: currentName || undefined,
+            ignored: currentIgnored || undefined
           });
           currentName = null; // Reset the name after associating it
+          currentIgnored = false; // Reset the ignored flag after associating it
         } else {
           // Regular comment, empty line, or environment variable
           processedLines.push({ line_text: line });
@@ -414,10 +540,26 @@ export default function Crontabs() {
             )}
             <div className="mt-4">
               <button
-                onClick={() => mutate()}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md shadow-sm text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                onClick={handleReload}
+                disabled={isReloading}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md shadow-sm text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Reload
+                {isReloading ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-gray-500 dark:text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Reloading...
+                  </>
+                ) : (
+                  <>
+                    <svg className="mr-2 -ml-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Reload
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -466,10 +608,9 @@ export default function Crontabs() {
 
       <div className="flex-1 flex flex-col gap-4 min-h-0">
         {/* Main content area - full width */}
-        <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
-          <div className="h-full rounded-lg">
-            <div className="h-full rounded-lg overflow-hidden" style={{ backgroundColor: 'rgba(0, 0, 0, 0.9)' }}>
-              <div className="h-full flex">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow" style={{ height: '60vh', overflow: 'hidden' }}>
+          <div className="h-full rounded-lg" style={{ backgroundColor: 'rgba(0, 0, 0, 0.9)', overflow: 'hidden' }}>
+            <div ref={scrollContainerRef} className="h-full overflow-y-auto flex">
                 {/* Line numbers column */}
                 <div className="flex-shrink-0 py-4 pl-4 pr-2 text-gray-400 dark:text-gray-500 font-mono text-sm select-none" style={{ lineHeight: '1.5' }}>
                   {isEditing ? (
@@ -495,7 +636,7 @@ export default function Crontabs() {
                   )}
                 </div>
                 {/* Content area */}
-                <div className="flex-1 overflow-auto">
+                <div className="flex-1">
                   {isEditing ? (
                     <textarea
                       ref={textareaRef}
@@ -533,21 +674,21 @@ export default function Crontabs() {
                         
                         if (e.key === 'ArrowUp' && currentIndex > 0) {
                           newIndex = currentIndex - 1;
-                          // Skip name comment lines
-                          while (newIndex >= 0 && formattedLines[newIndex].isNameComment) {
+                          // Skip name comment and cronitor: ignore lines
+                          while (newIndex >= 0 && (formattedLines[newIndex].isNameComment || formattedLines[newIndex].isCronitorIgnoreComment)) {
                             newIndex--;
                           }
                           e.preventDefault();
                         } else if (e.key === 'ArrowDown' && currentIndex < formattedLines.length - 1) {
                           newIndex = currentIndex + 1;
-                          // Skip name comment lines
-                          while (newIndex < formattedLines.length && formattedLines[newIndex].isNameComment) {
+                          // Skip name comment and cronitor: ignore lines
+                          while (newIndex < formattedLines.length && (formattedLines[newIndex].isNameComment || formattedLines[newIndex].isCronitorIgnoreComment)) {
                             newIndex++;
                           }
                           e.preventDefault();
                         }
                         
-                        if (newIndex !== currentIndex && newIndex >= 0 && newIndex < formattedLines.length && !formattedLines[newIndex].isNameComment) {
+                        if (newIndex !== currentIndex && newIndex >= 0 && newIndex < formattedLines.length && !formattedLines[newIndex].isNameComment && !formattedLines[newIndex].isCronitorIgnoreComment) {
                           setSelectedLine(formattedLines[newIndex].originalLine);
                         }
                       }}
@@ -563,11 +704,11 @@ export default function Crontabs() {
                             onClick={() => line.originalLine && handleLineClick(selectedCrontab.lines.indexOf(line.originalLine))}
                             onDoubleClick={() => !settings?.safe_mode && handleEditStart(index)}
                             className={`pr-4 ${
-                              !line.isNameComment ? 'hover:bg-gray-900 cursor-pointer' : 'hover:bg-gray-900 cursor-pointer'
+                              !line.isNameComment && !line.isCronitorIgnoreComment ? 'hover:bg-gray-900 cursor-pointer' : 'hover:bg-gray-900 cursor-pointer'
                             } ${
                               line.originalLine === selectedLine ? 'bg-blue-900/30' : ''
                             } ${
-                              line.isNameComment || (line.originalLine && line.originalLine.is_comment) ? 'text-gray-400' : ''
+                              line.isNameComment || line.isCronitorIgnoreComment || (line.originalLine && line.originalLine.is_comment) ? 'text-gray-400' : ''
                             }`}
                           >
                             {line.text || '\u00A0'}
@@ -580,7 +721,6 @@ export default function Crontabs() {
               </div>
             </div>
           </div>
-        </div>
 
         {/* Edit controls or detail card */}
         {isEditing ? (

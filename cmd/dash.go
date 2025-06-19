@@ -881,20 +881,40 @@ not start a web server but instead communicates via stdio protocol.`,
 		// Create a custom file server that serves index.html for all routes
 		fileServer := http.FileServer(http.FS(fsys))
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Don't serve index.html for API routes or static assets
+			// Don't serve index.html for API routes
 			if strings.HasPrefix(r.URL.Path, "/api/") {
-				fileServer.ServeHTTP(w, r)
+				http.Error(w, "Not Found", http.StatusNotFound)
 				return
 			}
 
-			// For static assets, remove the /static prefix since it's already in our filesystem
+			// For static assets in the /static/ directory
 			if strings.HasPrefix(r.URL.Path, "/static/") {
+				// The files are already in the root of fsys, so we need to remove /static prefix
 				r.URL.Path = strings.TrimPrefix(r.URL.Path, "/static")
 				fileServer.ServeHTTP(w, r)
 				return
 			}
 
-			// For all other routes, serve index.html
+			// List of known static files that should be served from root
+			staticFiles := []string{
+				"/manifest.json",
+				"/favicon.ico",
+				"/favicon.png",
+				"/logo192.png",
+				"/logo512.png",
+				"/asset-manifest.json",
+			}
+
+			// Check if this is a known static file
+			for _, staticFile := range staticFiles {
+				if r.URL.Path == staticFile {
+					// Serve the file directly without modifying the path
+					fileServer.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			// For all other routes (including /), serve index.html for client-side routing
 			index, err := fsys.Open("index.html")
 			if err != nil {
 				http.Error(w, "Not Found", http.StatusNotFound)
@@ -904,8 +924,29 @@ not start a web server but instead communicates via stdio protocol.`,
 			http.ServeContent(w, r, "index.html", time.Now(), index.(io.ReadSeeker))
 		})
 
-		// Apply request size limits, IP filter, CORS, auth and CSRF middleware to all routes
-		http.Handle("/", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(handler))))))
+		// Create a separate handler for public static files (no auth required)
+		publicFiles := []string{
+			"/manifest.json",
+			"/favicon.ico",
+			"/favicon.png",
+			"/logo192.png",
+			"/logo512.png",
+		}
+
+		publicHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Check if this is a public file
+			for _, publicFile := range publicFiles {
+				if r.URL.Path == publicFile {
+					fileServer.ServeHTTP(w, r)
+					return
+				}
+			}
+			// Not a public file, pass to main handler with auth
+			authMiddleware(csrfMiddleware(handler)).ServeHTTP(w, r)
+		})
+
+		// Apply request size limits, IP filter, and CORS to all routes, but auth only where needed
+		http.Handle("/", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(publicHandler))))
 
 		// Add settings API endpoints
 		http.Handle("/api/settings", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleSettings)))))))
@@ -1387,6 +1428,9 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if this request is from the Crontabs view (has a 'key' query parameter)
+	includeIgnoredJobs := r.URL.Query().Get("key") != ""
+
 	var jobs []Job
 
 	// Process each crontab
@@ -1397,8 +1441,8 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			// Skip ignored jobs - they should not be shown on the dashboard
-			if line.Ignored {
+			// Skip ignored jobs only if not requested from Crontabs view
+			if line.Ignored && !includeIgnoredJobs {
 				continue
 			}
 
@@ -1436,7 +1480,7 @@ func handleGetJobs(w http.ResponseWriter, r *http.Request) {
 				RunAsUser:          runAsUser,
 				CrontabDisplayName: crontab.DisplayName(),
 				CrontabFilename:    crontab.Filename,
-				LineNumber:         line.LineNumber + 1,
+				LineNumber:         line.LineNumber,
 				Monitored:          len(line.Code) > 0,
 				Timezone:           timezone,
 				Passing:            false,
@@ -1785,16 +1829,14 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// For monitoring support
-	var monitoringWaitGroup sync.WaitGroup
 	var series string
 	var startTimestamp float64
 
 	if request.WithMonitoring && monitorCode != "" {
 		startTimestamp = makeStamp()
 		series = formatStamp(startTimestamp)
-		// Send run ping
-		monitoringWaitGroup.Add(1)
-		go sendPing("run", monitorCode, request.Command, series, startTimestamp, nil, nil, nil, "", &monitoringWaitGroup)
+		// Send run ping without waitgroup
+		go sendPing("run", monitorCode, request.Command, series, startTimestamp, nil, nil, nil, "", nil)
 	}
 
 	// Start the command in a goroutine
@@ -1841,17 +1883,14 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 			endTimestamp := makeStamp()
 			durationSeconds := endTimestamp - startTimestamp
 
-			// Gather output for monitoring
-			tempFile.Seek(0, 0)
-			outputBytes, _ := ioutil.ReadAll(tempFile)
-			outputStr := string(outputBytes)
-			if len(outputStr) > 1000 {
-				outputStr = outputStr[len(outputStr)-1000:] // Take last 1000 chars
-			}
+			// Gather output for monitoring (truncated for ping)
+			outputForPing := gatherOutputForDash(tempFile, true)
+			outputStr := string(outputForPing)
 
 			// Calculate metrics
+			fileSize, _ := getFileSize(tempFile)
 			metrics := map[string]int{
-				"length": len(outputBytes),
+				"length": int(fileSize),
 			}
 
 			if err != nil {
@@ -1863,13 +1902,14 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 				}
 
 				message := strings.TrimSpace(fmt.Sprintf("%s [%s]", outputStr, err.Error()))
-				monitoringWaitGroup.Add(1)
-				go sendPing("fail", monitorCode, message, series, endTimestamp, &durationSeconds, &exitCode, metrics, "", &monitoringWaitGroup)
+				go sendPing("fail", monitorCode, message, series, endTimestamp, &durationSeconds, &exitCode, metrics, "", nil)
 			} else {
 				// Command succeeded
-				monitoringWaitGroup.Add(1)
-				go sendPing("complete", monitorCode, outputStr, series, endTimestamp, &durationSeconds, &exitCode, metrics, "", &monitoringWaitGroup)
+				go sendPing("complete", monitorCode, outputStr, series, endTimestamp, &durationSeconds, &exitCode, metrics, "", nil)
 			}
+
+			// Ship full log data
+			go shipLogDataForDash(tempFile, monitorCode, series)
 		}
 
 		// Determine exit status and reason
@@ -1954,10 +1994,39 @@ func handleRunJob(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "data: %s\n\n", `{"error":"Command timed out"}`)
 		w.(http.Flusher).Flush()
 	}
+}
 
-	// Wait for monitoring to complete if enabled
-	if request.WithMonitoring && monitorCode != "" {
-		monitoringWaitGroup.Wait()
+// gatherOutputForDash is similar to gatherOutput in exec.go but adapted for dashboard
+func gatherOutputForDash(tempFile *os.File, truncateForPingOutput bool) []byte {
+	var outputBytes []byte
+	const outputForPingMaxLen int64 = 1000
+	const outputForLogUploadMaxLen int64 = 100000000
+
+	if size, err := getFileSize(tempFile); err == nil {
+		// In all cases, if we have to truncate, we want to read the END
+		// of the log file, because it is more informative.
+		if truncateForPingOutput && size > outputForPingMaxLen {
+			outputBytes = make([]byte, outputForPingMaxLen)
+			tempFile.Seek(outputForPingMaxLen*-1, 2)
+		} else if !truncateForPingOutput && size > outputForLogUploadMaxLen {
+			outputBytes = make([]byte, outputForLogUploadMaxLen)
+			tempFile.Seek(outputForLogUploadMaxLen*-1, 2)
+		} else {
+			outputBytes = make([]byte, size)
+			tempFile.Seek(0, 0)
+		}
+		tempFile.Read(outputBytes)
+	}
+
+	return outputBytes
+}
+
+// shipLogDataForDash sends full log data to Cronitor, similar to shipLogData in exec.go but without waitgroup
+func shipLogDataForDash(tempFile *os.File, monitorCode string, series string) {
+	outputForLogs := gatherOutputForDash(tempFile, false)
+	_, err := lib.SendLogData(viper.GetString(varApiKey), monitorCode, series, string(outputForLogs))
+	if err != nil {
+		log(fmt.Sprintf("Failed to ship log data: %v", err))
 	}
 }
 
@@ -2714,6 +2783,9 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 			monitor.Key = foundLine.Key(crontab.CanonicalName())
 			paused := false
 			monitor.Paused = &paused
+		} else {
+			// If we have an existing code, include it in the monitor update
+			monitor.Code = foundLine.Code
 		}
 
 	} else if foundLine.Code != "" {
@@ -2786,8 +2858,12 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 
 		if updatedMonitor, exists := updatedMonitors[monitor.Key]; exists {
 			crontab.Lines[foundLineIndex].Mon = *updatedMonitor
-			crontab.Lines[foundLineIndex].Code = updatedMonitor.Attributes.Code
-			hasChanges = true
+			// Only update the code if we get one back (for new monitors)
+			// For existing monitors, preserve the existing code
+			if updatedMonitor.Attributes.Code != "" {
+				crontab.Lines[foundLineIndex].Code = updatedMonitor.Attributes.Code
+				hasChanges = true
+			}
 		}
 	}
 
@@ -2803,9 +2879,18 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 	invalidateCrontabCache()
 
 	// Update the job with the latest values
-	job.Name = foundLine.Name
-	job.Code = foundLine.Code
-	job.Monitored = len(foundLine.Code) > 0
+	job.Name = crontab.Lines[foundLineIndex].Name
+	job.Code = crontab.Lines[foundLineIndex].Code
+
+	// If a monitor was created/updated in this request, use the requested monitored status
+	// Otherwise, determine monitored status based on whether the job has a code
+	if monitor != nil {
+		// Monitor was created or updated, so use the requested monitored status
+		job.Monitored = true
+	} else {
+		// No monitor operation was performed, determine status based on code presence
+		job.Monitored = len(crontab.Lines[foundLineIndex].Code) > 0
+	}
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(job)

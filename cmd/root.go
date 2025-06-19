@@ -24,7 +24,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var Version string = "31.3"
+var Version string = "31.4"
 
 var cfgFile string
 var userAgent string
@@ -123,7 +123,9 @@ func initConfig() {
 }
 
 func sendPing(endpoint string, uniqueIdentifier string, message string, series string, timestamp float64, duration *float64, exitCode *int, metrics map[string]int, schedule string, group *sync.WaitGroup) {
-	defer group.Done()
+	if group != nil {
+		defer group.Done()
+	}
 
 	Client := &http.Client{
 		Timeout: time.Second * 10,

@@ -76,7 +76,7 @@ if (fs.existsSync(buildStaticDir)) {
 }
 
 // Copy individual files
-const filesToCopy = ['index.html', 'asset-manifest.json'];
+const filesToCopy = ['index.html', 'asset-manifest.json', 'manifest.json', 'favicon.ico', 'favicon.png', 'logo192.png', 'logo512.png'];
 for (const file of filesToCopy) {
   const srcFile = path.join(buildDir, file);
   const destFile = path.join(staticDir, file);

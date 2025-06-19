@@ -339,7 +339,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 
 		if !isAutoDiscover && !line.IsAutoDiscoverCommand() {
 
-			printSuccessText(fmt.Sprintf("Line %d:", line.LineNumber+1), true)
+			printSuccessText(fmt.Sprintf("Line %d:", line.LineNumber), true)
 			fmt.Printf("\n   %s %s\n", line.CronExpression, line.CommandToRun)
 
 			model := initialNameInputModel(name)

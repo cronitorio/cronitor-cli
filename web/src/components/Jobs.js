@@ -242,7 +242,7 @@ export default function Jobs() {
       
       // If job has a code (should be monitored) but no monitor found, treat as unmonitored
       if (job.code && job.monitored) {
-        const monitor = monitors.find(m => m.key === job.key || m.attributes?.code === job.code);
+        const monitor = monitors.find(m => m.attributes?.code === job.code);
         if (!monitor) {
           // If we're waiting for the monitor to be created, preserve the monitored state
           if (isPendingMonitoring) {

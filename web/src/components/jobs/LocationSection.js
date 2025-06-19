@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 
 export function LocationSection({
   job,
@@ -32,7 +33,13 @@ export function LocationSection({
         </select>
       ) : (
         <div>
-          {job.crontab_display_name.replace(/^user /, 'User ')} L{job.line_number}
+          <Link 
+            to={`/crontabs?crontab=${encodeURIComponent(job.crontab_filename)}&line=${job.line_number}`}
+            className="text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300"
+            title="Show in Crontab"
+          >
+            {job.crontab_display_name.replace(/^user /, 'User ')} L{job.line_number}
+          </Link>
         </div>
       )}
     </div>

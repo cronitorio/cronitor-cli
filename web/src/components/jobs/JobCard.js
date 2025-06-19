@@ -23,6 +23,7 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
   const [editedSchedule, setEditedSchedule] = React.useState(initialJob.expression || '');
   const [editedCronFile, setEditedCronFile] = React.useState(initialJob.crontab_filename || '');
   const [editedRunAsUser, setEditedRunAsUser] = React.useState(initialJob.run_as_user || '');
+  const [editedMonitored, setEditedMonitored] = React.useState(initialJob.monitored || false);
   const [selectedLocation, setSelectedLocation] = React.useState('');
   const [selectedUser, setSelectedUser] = React.useState('');
   const [isUserCrontab, setIsUserCrontab] = React.useState(false);
@@ -66,6 +67,7 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
       setEditedName(currentJob.name || currentJob.default_name);
       setEditedCommand(currentJob.command);
       setEditedSchedule(currentJob.expression || '');
+      setEditedMonitored(currentJob.monitored || false);
     }
   }, [allJobs, initialJob, isEditing, isEditingCommand, isEditingSchedule, pendingChanges]);
 
@@ -92,6 +94,10 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
 
   const handleFormChange = (field, value) => {
     const newData = { ...initialJob, [field]: value };
+    // Update local state for the monitored field
+    if (field === 'monitored') {
+      setEditedMonitored(value);
+    }
     // Only call onFormChange if it's provided (for new jobs)
     if (typeof onFormChange === 'function') {
       onFormChange(newData);
@@ -117,7 +123,7 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
         expression: editedSchedule,
         is_draft: false,
         suspended: initialJob.suspended,
-        monitored: initialJob.monitored
+        monitored: editedMonitored
       };
 
       if (isNew && typeof onSave === 'function') {
@@ -517,6 +523,19 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
     return initialJob[field];
   };
 
+  // Check if there are actual changes to save
+  const hasChanges = () => {
+    const currentJob = allJobs.find(j => j.key === initialJob.key) || initialJob;
+    
+    // Compare edited values with current job values
+    const nameChanged = editedName !== (currentJob.name || currentJob.default_name);
+    const commandChanged = editedCommand !== currentJob.command;
+    const scheduleChanged = editedSchedule !== (currentJob.expression || '');
+    const monitoringChanged = editedMonitored !== (currentJob.monitored || false);
+    
+    return nameChanged || commandChanged || scheduleChanged || monitoringChanged;
+  };
+
   return (
     <div className={`bg-white dark:bg-gray-800 shadow rounded-lg p-4 relative group ${initialJob.suspended ? 'bg-gray-100 dark:bg-gray-700' : ''}`}>
       {/* Hide button - positioned outside card on hover */}
@@ -573,8 +592,10 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
           onEditEnd={() => {
             if (!isNew) {
               setIsEditing(false);
-              // Auto-save when leaving the field
-              handleSave();
+              // Auto-save when leaving the field only if there are changes
+              if (hasChanges()) {
+                handleSave();
+              }
             }
           }}
           onKeyDown={(e) => {
@@ -623,8 +644,10 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
                     onEditEnd={() => {
                       if (!isNew) {
                         setIsEditingSchedule(false);
-                        // Auto-save when leaving the field
-                        handleSave();
+                        // Auto-save when leaving the field only if there are changes
+                        if (hasChanges()) {
+                          handleSave();
+                        }
                       }
                     }}
                     onKeyDown={(e) => {
@@ -663,8 +686,10 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
                     onEditEnd={() => {
                       if (!isNew) {
                         setIsEditingCommand(false);
-                        // Auto-save when leaving the field
-                        handleSave();
+                        // Auto-save when leaving the field only if there are changes
+                        if (hasChanges()) {
+                          handleSave();
+                        }
                       }
                     }}
                     onKeyDown={(e) => {
@@ -709,8 +734,10 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
                         onEditEnd={() => {
                           if (!isNew) {
                             setIsEditingSchedule(false);
-                            // Auto-save when leaving the field
-                            handleSave();
+                            // Auto-save when leaving the field only if there are changes
+                            if (hasChanges()) {
+                              handleSave();
+                            }
                           }
                         }}
                         onKeyDown={(e) => {
@@ -762,33 +789,45 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
               <tr>
                 <td className="py-2 text-sm text-gray-900 dark:text-gray-100" style={{ width: '25%' }}>
                   <MonitoringSection
-                    job={initialJob}
+                    job={{...initialJob, monitored: editedMonitored}}
                     onUpdate={async (updatedJob) => {
-                      handleFormChange('suspended', updatedJob.suspended);
-                      handleFormChange('monitored', updatedJob.monitored);
-                      handleFormChange('pause_hours', updatedJob.pause_hours);
-                      if (isNew) {
-                        onFormChange(updatedJob);
-                      } else {
-                        try {
-                          // Mark job as pending monitoring if monitoring is being enabled
-                          if (updatedJob.monitored && !initialJob.monitored && setPendingMonitoringJobs) {
+                                              // Apply optimistic updates immediately BEFORE any async operations
+                        handleFormChange('suspended', updatedJob.suspended);
+                        handleFormChange('monitored', updatedJob.monitored);
+                        handleFormChange('pause_hours', updatedJob.pause_hours);
+                        
+                        if (isNew) {
+                          onFormChange(updatedJob);
+                        } else {
+                          // Mark job as pending monitoring BEFORE the API call if monitoring is being enabled
+                          if (updatedJob.monitored && !editedMonitored && setPendingMonitoringJobs) {
                             setPendingMonitoringJobs(prev => new Set(prev).add(initialJob.key));
                           }
-                          await toggleJobMonitoring(initialJob.key, updatedJob.monitored);
-                          mutate();
-                          if (onJobChange) onJobChange();
-                        } catch (error) {
-                          // Remove from pending if the update failed
-                          if (setPendingMonitoringJobs) {
-                            setPendingMonitoringJobs(prev => {
-                              const next = new Set(prev);
-                              next.delete(initialJob.key);
-                              return next;
-                            });
+                          
+                          // Apply optimistic update to the jobs list immediately
+                          const optimisticData = allJobs.map(j => 
+                            j.key === initialJob.key ? {...j, monitored: updatedJob.monitored} : j
+                          );
+                          mutate(optimisticData, false); // false = don't revalidate yet
+                          
+                          try {
+                            await toggleJobMonitoring(initialJob.key, updatedJob.monitored);
+                            // Now revalidate with the server data
+                            mutate();
+                            if (onJobChange) onJobChange();
+                                                  } catch (error) {
+                            // Remove from pending if the update failed
+                            if (setPendingMonitoringJobs) {
+                              setPendingMonitoringJobs(prev => {
+                                const next = new Set(prev);
+                                next.delete(initialJob.key);
+                                return next;
+                              });
+                            }
+                            // Revert the optimistic update on error
+                            mutate();
+                            showToast('Failed to update monitoring status: ' + error.message);
                           }
-                          showToast('Failed to update monitoring status: ' + error.message);
-                        }
                       }
                     }}
                     onShowLearnMore={() => {
@@ -916,14 +955,20 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
                       ...initialJob,
                       monitored: true
                     });
-                  } else {
-                    // Mark job as pending monitoring
-                    if (setPendingMonitoringJobs) {
-                      setPendingMonitoringJobs(prev => new Set(prev).add(pendingMonitoringJob.key));
-                    }
-                    
-                    // For existing jobs, make the API call
-                    const response = await csrfFetch('/api/jobs', {
+                                      } else {
+                      // Mark job as pending monitoring BEFORE the API call
+                      if (setPendingMonitoringJobs) {
+                        setPendingMonitoringJobs(prev => new Set(prev).add(pendingMonitoringJob.key));
+                      }
+                      
+                      // Apply optimistic update to show monitoring as enabled immediately
+                      const optimisticData = allJobs.map(j => 
+                        j.key === pendingMonitoringJob.key ? {...j, monitored: true} : j
+                      );
+                      mutate(optimisticData, false); // false = don't revalidate yet
+                      
+                      // For existing jobs, make the API call
+                      const response = await csrfFetch('/api/jobs', {
                       method: 'PUT',
                       headers: {
                         'Content-Type': 'application/json',
@@ -934,21 +979,23 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
                       }),
                     });
 
-                    if (!response.ok) {
-                      // Remove from pending if the update failed
-                      if (setPendingMonitoringJobs) {
-                        setPendingMonitoringJobs(prev => {
-                          const next = new Set(prev);
-                          next.delete(pendingMonitoringJob.key);
-                          return next;
-                        });
+                                          if (!response.ok) {
+                        // Remove from pending if the update failed
+                        if (setPendingMonitoringJobs) {
+                          setPendingMonitoringJobs(prev => {
+                            const next = new Set(prev);
+                            next.delete(pendingMonitoringJob.key);
+                            return next;
+                          });
+                        }
+                        // Revert the optimistic update on error
+                        mutate();
+                        throw new Error('Failed to enable monitoring');
                       }
-                      throw new Error('Failed to enable monitoring');
-                    }
-                    
-                    // Refresh the jobs list
-                    mutate();
-                    if (onJobChange) onJobChange();
+                      
+                      // Refresh the jobs list with server data
+                      mutate();
+                      if (onJobChange) onJobChange();
                   }
                   
                   showToast('Monitoring enabled successfully!', 'success');
@@ -987,6 +1034,7 @@ export function JobCard({ job: initialJob, mutate, mutateCrontabs, allJobs, isNe
                   setEditedName(currentJob.name || currentJob.default_name);
                   setEditedCommand(currentJob.command);
                   setEditedSchedule(currentJob.expression || '');
+                  setEditedMonitored(currentJob.monitored || false);
                 }
               }}
               className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
