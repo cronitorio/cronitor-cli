@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import useSWR from 'swr';
 import { NewCrontabOverlay } from './jobs/NewCrontabOverlay';
 import { Toast } from './Toast';
@@ -118,7 +118,8 @@ export default function Crontabs() {
         setIsInitialLoad(false);
       }
     }
-  }, [crontabs, searchParams]); // Removed selectedCrontab from deps to avoid infinite loop
+  }, [crontabs, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Note: selectedCrontab is intentionally omitted to avoid infinite loop when setting from URL params
 
   // Clear selectedLine when selectedCrontab changes
   useEffect(() => {
@@ -130,7 +131,8 @@ export default function Crontabs() {
         setSelectedLine(null);
       }
     }
-  }, [selectedCrontab, searchParams]);
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Note: selectedCrontab is intentionally omitted to avoid clearing the line when it's set from URL params
 
   // Track if we're still loading initial data from URL
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -232,7 +234,7 @@ export default function Crontabs() {
     }
   };
 
-  const formatCrontabContent = () => {
+  const formatCrontabContent = useCallback(() => {
     if (!selectedCrontab || !selectedCrontab.lines) return [];
     
     const formattedLines = [];
@@ -277,7 +279,7 @@ export default function Crontabs() {
     });
     
     return formattedLines;
-  };
+  }, [selectedCrontab]);
 
   // Scroll to selected line when it changes
   useEffect(() => {
@@ -303,7 +305,7 @@ export default function Crontabs() {
         });
       }
     }
-  }, [selectedLine, isEditing, selectedCrontab]); // Added selectedCrontab as dependency
+  }, [selectedLine, isEditing, selectedCrontab, formatCrontabContent]);
 
   // Get or create a job object for the selected line
   const getJobForLine = () => {
