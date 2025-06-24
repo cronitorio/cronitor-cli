@@ -759,6 +759,15 @@ not start a web server but instead communicates via stdio protocol.`,
 		ipFilterMiddleware := createIPFilterMiddleware(ipFilter)
 		corsMiddleware := createCORSMiddleware(corsManager)
 
+		// Helper function to chain middleware
+		chainMiddleware := func(handler http.Handler, middlewares ...func(http.Handler) http.Handler) http.Handler {
+			// Apply middleware in reverse order so they execute in the order specified
+			for i := len(middlewares) - 1; i >= 0; i-- {
+				handler = middlewares[i](handler)
+			}
+			return handler
+		}
+
 		// CSRF middleware
 		csrfMiddleware := func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -945,37 +954,36 @@ not start a web server but instead communicates via stdio protocol.`,
 			authMiddleware(csrfMiddleware(handler)).ServeHTTP(w, r)
 		})
 
+		// Define common middleware chains
+		baseMiddleware := []func(http.Handler) http.Handler{
+			requestSizeLimitMiddleware,
+			ipFilterMiddleware,
+			corsMiddleware,
+		}
+
+		apiMiddleware := append(baseMiddleware, authMiddleware, csrfMiddleware)
+
 		// Apply request size limits, IP filter, and CORS to all routes, but auth only where needed
-		http.Handle("/", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(publicHandler))))
+		http.Handle("/", chainMiddleware(publicHandler, baseMiddleware...))
 
-		// Add settings API endpoints
-		http.Handle("/api/settings", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleSettings)))))))
+		// Register API endpoints with middleware
+		apiRoutes := map[string]http.HandlerFunc{
+			"/api/settings":       handleSettings,
+			"/api/jobs":           handleJobs,
+			"/api/crontabs":       handleCrontabs,
+			"/api/crontabs/":      handleCrontab,
+			"/api/users":          handleUsers,
+			"/api/jobs/kill":      handleKillInstances,
+			"/api/jobs/run":       handleRunJob,
+			"/api/monitors":       handleGetMonitors,
+			"/api/signup":         handleSignup,
+			"/api/update/check":   handleUpdateCheck,
+			"/api/update/perform": handleUpdatePerform,
+		}
 
-		// Add jobs endpoint
-		http.Handle("/api/jobs", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleJobs)))))))
-
-		// Add crontabs endpoint
-		http.Handle("/api/crontabs", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontabs)))))))
-		http.Handle("/api/crontabs/", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleCrontab)))))))
-
-		// Add users endpoint
-		http.Handle("/api/users", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUsers)))))))
-
-		// Add kill jobs endpoint
-		http.Handle("/api/jobs/kill", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleKillInstances)))))))
-
-		// Add run job endpoint
-		http.Handle("/api/jobs/run", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleRunJob)))))))
-
-		// Add monitors endpoint
-		http.Handle("/api/monitors", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleGetMonitors)))))))
-
-		// Add signup endpoint
-		http.Handle("/api/signup", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleSignup)))))))
-
-		// Add update endpoints
-		http.Handle("/api/update/check", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdateCheck)))))))
-		http.Handle("/api/update/perform", requestSizeLimitMiddleware(ipFilterMiddleware(corsMiddleware(authMiddleware(csrfMiddleware(http.HandlerFunc(handleUpdatePerform)))))))
+		for path, handler := range apiRoutes {
+			http.Handle(path, chainMiddleware(http.HandlerFunc(handler), apiMiddleware...))
+		}
 
 		// Create HTTP server with proper configuration
 		server := &http.Server{
