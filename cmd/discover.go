@@ -381,7 +381,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 		line.Mon = lib.Monitor{
 			Name:             name,
 			DefaultName:      defaultName,
-			Key:              key,
+			Key:              line.Code,
 			Tags:             tags,
 			Schedule:         line.CronExpression,
 			Type:             "job",
@@ -391,6 +391,11 @@ func processCrontab(crontab *lib.Crontab) bool {
 			Note:             createNote(line, crontab),
 			Notify:           notifications,
 			NoStdoutPassthru: noStdoutPassthru,
+		}
+
+		// If we're enabling monitoring for the first time, we won't have a code yet, use the key instead
+		if line.Code == "" {
+			line.Mon.Key = key
 		}
 
 		monitors[key] = &line.Mon
