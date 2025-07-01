@@ -2791,9 +2791,6 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 			monitor.Key = foundLine.Key(crontab.CanonicalName())
 			paused := false
 			monitor.Paused = &paused
-		} else {
-			// If we have an existing code, include it in the monitor update
-			monitor.Code = foundLine.Code
 		}
 
 	} else if foundLine.Code != "" {
@@ -3091,18 +3088,31 @@ func isRunningUnderSystemd() bool {
 
 // requestSystemdRestart attempts to restart the service via systemd
 func requestSystemdRestart() error {
-	// Try to determine the service name by looking at the process
+	// Instead of trying to run systemctl (which requires sudo), we'll just exit gracefully
+	// and let systemd restart us automatically (assuming Restart=always or Restart=on-failure)
+	//
+	// NOTE: Your systemd service file should have one of these restart policies:
+	//   Restart=always       - Always restart the service when it exits
+	//   Restart=on-failure   - Restart only on non-zero exit codes
+	//   Restart=on-success   - Restart only on zero exit codes
+	//
+	// Example systemd service file:
+	//   [Service]
+	//   Type=simple
+	//   Restart=always
+	//   RestartSec=5
+	//   ExecStart=/usr/local/bin/cronitor dash
+
+	// Try to determine the service name for logging purposes
 	serviceName := getSystemdServiceName()
-	if serviceName == "" {
-		return fmt.Errorf("could not determine systemd service name")
+	if serviceName != "" {
+		log(fmt.Sprintf("Exiting to trigger systemd restart of service: %s", serviceName))
+	} else {
+		log("Exiting to trigger systemd restart")
 	}
 
-	// Use systemctl to restart the service
-	cmd := exec.Command("systemctl", "restart", serviceName)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to restart systemd service %s: %v", serviceName, err)
-	}
-
+	// Exit with success code to trigger systemd restart
+	// Most systemd services are configured with Restart=always or Restart=on-failure
 	return nil
 }
 
