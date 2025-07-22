@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/spf13/viper"
 )
 
 const DROP_IN_DIRECTORY = "/etc/cron.d"
@@ -490,6 +492,13 @@ func (l Line) Write() string {
 
 		if code := l.GetCode(); code != "" {
 			lineParts = append(lineParts, "cronitor")
+
+			// Add the --env flag if environment is set
+			if env := viper.GetString("CRONITOR_ENV"); env != "" {
+				lineParts = append(lineParts, "--env")
+				lineParts = append(lineParts, env)
+			}
+
 			if l.Mon.NoStdoutPassthru {
 				lineParts = append(lineParts, "--no-stdout")
 			}

@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/spf13/viper"
 )
 
 func TestCronitorIgnoreComment(t *testing.T) {
@@ -117,4 +119,151 @@ func TestCronitorIgnoreComment(t *testing.T) {
 	if strings.Contains(secondLineOutput, "# cronitor: ignore") {
 		t.Errorf("Expected Write() output to NOT contain '# cronitor: ignore' for second line, got: %s", secondLineOutput)
 	}
+}
+
+func TestLineWriteWithEnvFlag(t *testing.T) {
+	// Save original viper value
+	originalEnv := viper.GetString("CRONITOR_ENV")
+
+	// Test cases
+	testCases := []struct {
+		name          string
+		envValue      string
+		line          Line
+		shouldHaveEnv bool
+	}{
+		{
+			name:     "With environment set",
+			envValue: "production",
+			line: Line{
+				IsJob:          true,
+				CronExpression: "0 * * * *",
+				CommandToRun:   "/path/to/script.sh",
+				Code:           "abc123",
+				Mon:            Monitor{Code: "abc123"},
+			},
+			shouldHaveEnv: true,
+		},
+		{
+			name:     "Without environment set",
+			envValue: "",
+			line: Line{
+				IsJob:          true,
+				CronExpression: "0 * * * *",
+				CommandToRun:   "/path/to/script.sh",
+				Code:           "def456",
+				Mon:            Monitor{Code: "def456"},
+			},
+			shouldHaveEnv: false,
+		},
+		{
+			name:     "With staging environment",
+			envValue: "staging",
+			line: Line{
+				IsJob:          true,
+				CronExpression: "*/5 * * * *",
+				CommandToRun:   "/usr/bin/backup.sh",
+				Code:           "xyz789",
+				Mon:            Monitor{Code: "xyz789"},
+			},
+			shouldHaveEnv: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Set the environment value
+			viper.Set("CRONITOR_ENV", tc.envValue)
+
+			// Write the line
+			output := tc.line.Write()
+
+			// Check if --env flag is present
+			hasEnvFlag := strings.Contains(output, "--env")
+			if tc.shouldHaveEnv && !hasEnvFlag {
+				t.Errorf("Expected --env flag in output but not found. Output: %s", output)
+			}
+			if !tc.shouldHaveEnv && hasEnvFlag {
+				t.Errorf("Did not expect --env flag in output but found it. Output: %s", output)
+			}
+
+			// If env should be present, verify the value is included
+			if tc.shouldHaveEnv {
+				expectedEnvString := "--env " + tc.envValue
+				if !strings.Contains(output, expectedEnvString) {
+					t.Errorf("Expected '%s' in output but not found. Output: %s", expectedEnvString, output)
+				}
+			}
+
+			// Verify the cronitor exec structure is correct
+			if strings.Contains(output, "cronitor") {
+				// Check the order: cronitor [--env <value>] [--no-stdout] exec <code> <command>
+				parts := strings.Fields(output)
+				cronitorIndex := -1
+				for i, part := range parts {
+					if part == "cronitor" {
+						cronitorIndex = i
+						break
+					}
+				}
+
+				if cronitorIndex >= 0 {
+					execIndex := -1
+					for i := cronitorIndex + 1; i < len(parts); i++ {
+						if parts[i] == "exec" {
+							execIndex = i
+							break
+						}
+					}
+
+					if execIndex < 0 {
+						t.Errorf("'exec' not found after 'cronitor' in output: %s", output)
+					}
+
+					// If env flag is present, it should come before 'exec'
+					if tc.shouldHaveEnv {
+						envFlagIndex := -1
+						for i := cronitorIndex + 1; i < execIndex; i++ {
+							if parts[i] == "--env" {
+								envFlagIndex = i
+								break
+							}
+						}
+						if envFlagIndex < 0 {
+							t.Errorf("--env flag should appear between 'cronitor' and 'exec'. Output: %s", output)
+						}
+					}
+				}
+			}
+		})
+	}
+
+	// Restore original viper value
+	viper.Set("CRONITOR_ENV", originalEnv)
+}
+
+func TestLineWriteWithNoStdoutAndEnv(t *testing.T) {
+	// Save original viper value
+	originalEnv := viper.GetString("CRONITOR_ENV")
+
+	// Set environment
+	viper.Set("CRONITOR_ENV", "testing")
+
+	line := Line{
+		IsJob:          true,
+		CronExpression: "0 0 * * *",
+		CommandToRun:   "/bin/daily-task",
+		Code:           "test123",
+		Mon:            Monitor{Code: "test123", NoStdoutPassthru: true},
+	}
+
+	output := line.Write()
+
+	// Check that both flags are present and in correct order
+	if !strings.Contains(output, "cronitor --env testing --no-stdout exec test123") {
+		t.Errorf("Expected 'cronitor --env testing --no-stdout exec test123' in output but got: %s", output)
+	}
+
+	// Restore original viper value
+	viper.Set("CRONITOR_ENV", originalEnv)
 }
