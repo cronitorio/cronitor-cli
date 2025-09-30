@@ -72,7 +72,7 @@ ssh -L 9000:localhost:9000 user@your-server
 Access control & options
 ```
 # Set login credentials for the dashboard
-cronitor configure --auth-username USER --auth-password PASS
+cronitor configure --dash-username USER --dash-password PASS
 
 # Optionally, restrict which system users' crontabs are loaded
 cronitor configure --users user1,user2
