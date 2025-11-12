@@ -293,7 +293,7 @@ func getTempFile() (*os.File, error) {
 	path := filepath.Join(os.TempDir(), "cronitor")
 
 	// Create directory with restricted permissions
-	if err := os.MkdirAll(path, 0750); err != nil {
+	if err := os.MkdirAll(path, 0777); err != nil {
 		return nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
