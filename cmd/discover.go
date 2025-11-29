@@ -383,7 +383,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 			DefaultName:      defaultName,
 			Key:              line.Code,
 			Tags:             tags,
-			Schedule:         line.CronExpression,
+			Schedules:        &[]string{line.CronExpression},
 			Type:             "job",
 			Platform:         lib.CRON,
 			Code:             line.Code,

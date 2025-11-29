@@ -2351,7 +2351,7 @@ func handlePostJob(w http.ResponseWriter, r *http.Request) {
 		monitor := &lib.Monitor{
 			Name:        job.Name,
 			DefaultName: createDefaultName(line, crontab, "", []string{}, map[string]bool{}),
-			Schedule:    job.Expression,
+			Schedules:   &[]string{job.Expression},
 			Type:        "job",
 			Platform:    lib.CRON,
 			Timezone:    job.Timezone,
@@ -2778,7 +2778,7 @@ func handlePutJob(w http.ResponseWriter, r *http.Request) {
 		monitor = &lib.Monitor{
 			Name:        job.Name,
 			DefaultName: createDefaultName(foundLine, crontab, "", []string{}, map[string]bool{}),
-			Schedule:    job.Expression,
+			Schedules:   &[]string{job.Expression},
 			Type:        "job",
 			Platform:    lib.CRON,
 			Timezone:    job.Timezone,

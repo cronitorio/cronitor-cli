@@ -50,22 +50,23 @@ type Monitor struct {
 		Key       string `json:"key"`
 		Code      string `json:"code"`
 	} `json:"attributes,omitempty"`
-	Name             string   `json:"name,omitempty"`
-	DefaultName      string   `json:"defaultName"`
-	Key              string   `json:"key"`
-	Schedule         string   `json:"schedule,omitempty"`
-	Platform         Platform `json:"platform,omitempty"`
-	Tags             []string `json:"tags"`
-	Type             string   `json:"type"`
-	Code             string   `json:"code,omitempty"`
-	Timezone         string   `json:"timezone,omitempty"`
-	Note             string   `json:"defaultNote,omitempty"`
-	Notify           []string `json:"notify,omitempty"`
-	Passing          bool     `json:"passing,omitempty"`
-	Initialized      bool     `json:"initialized,omitempty"`
-	Disabled         bool     `json:"disabled,omitempty"`
-	Paused           *bool    `json:"paused,omitempty"`
-	NoStdoutPassthru bool     `json:"-"`
+	Name             string    `json:"name,omitempty"`
+	DefaultName      string    `json:"defaultName"`
+	Key              string    `json:"key"`
+	Schedules        *[]string `json:"schedules,omitempty"`
+	GraceSeconds     int       `json:"grace_seconds,omitempty"`
+	Platform         Platform  `json:"platform,omitempty"`
+	Tags             []string  `json:"tags"`
+	Type             string    `json:"type"`
+	Code             string    `json:"code,omitempty"`
+	Timezone         string    `json:"timezone,omitempty"`
+	Note             string    `json:"defaultNote,omitempty"`
+	Notify           []string  `json:"notify,omitempty"`
+	Passing          bool      `json:"passing,omitempty"`
+	Initialized      bool      `json:"initialized,omitempty"`
+	Disabled         bool      `json:"disabled,omitempty"`
+	Paused           *bool     `json:"paused,omitempty"`
+	NoStdoutPassthru bool      `json:"-"`
 }
 
 // UnmarshalJSON implements custom unmarshaling for the Monitor struct
@@ -275,7 +276,7 @@ func (api CronitorApi) send(method string, url string, body string) ([]byte, err
 	}
 
 	request.Header.Add("User-Agent", api.UserAgent)
-	request.Header.Add("Cronitor-Version", "2020-10-01")
+	request.Header.Add("Cronitor-Version", "2025-11-28")
 	request.ContentLength = int64(len(body))
 	response, err := client.Do(request)
 	if err != nil {
