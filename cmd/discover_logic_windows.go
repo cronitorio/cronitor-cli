@@ -75,6 +75,25 @@ func (r WrappedWindowsTask) GetCommandToRun() string {
 
 		execAction := action.(taskmaster.ExecAction)
 
+		// If this action is already wrapped with cronitor.exe, extract the underlying command
+		// The wrapper format is: cronitor.exe [flags...] exec <key> <original_path> <original_args>
+		// Flags like --env, --no-stdout may appear before "exec"
+		if strings.HasSuffix(strings.ToLower(execAction.Path), "cronitor.exe") {
+			args := strings.TrimSpace(execAction.Args)
+			// Find "exec " in the args - it may not be at the start due to flags
+			execIndex := strings.Index(args, "exec ")
+			if execIndex != -1 {
+				// Get everything after "exec "
+				remainder := args[execIndex+5:] // len("exec ") = 5
+				// Skip the monitor key (first space-delimited token)
+				parts := strings.SplitN(remainder, " ", 2)
+				if len(parts) == 2 {
+					commands = append(commands, strings.TrimSpace(parts[1]))
+					continue
+				}
+			}
+		}
+
 		commands = append(commands, strings.TrimSpace(fmt.Sprintf("%s %s", execAction.Path, execAction.Args)))
 	}
 
@@ -431,7 +450,11 @@ func processWindowsTaskScheduler() bool {
 	// Read crontab into map of Monitor structs
 	monitors := map[string]*lib.Monitor{}
 	monitorToRegisteredTask := map[string]taskmaster.RegisteredTask{}
+	exited := false
 	for _, task := range collection {
+		if exited {
+			break
+		}
 		t := NewWrappedWindowsTask(task)
 		// Skip all built-in tasks; users don't want to monitor those
 		if t.IsMicrosoftTask() {
@@ -449,18 +472,28 @@ func processWindowsTaskScheduler() bool {
 		name := defaultName
 		skip := false
 
-		// The monitor name will always be the same, so we don't have to fetch it
-		// from the Cronitor existing monitors
+		// Check if we have an existing monitor name for this task
+		existingMonitors.CurrentKey = key
+		existingMonitors.CurrentCode = ""
+		isMonitored := false
+		if existingName, err := existingMonitors.GetNameForCurrent(); err == nil {
+			name = existingName
+			isMonitored = true
+		}
 
 		if !isAutoDiscover {
-			fmt.Println(fmt.Sprintf("\n    %s  %s", defaultName, t.GetCommandToRun()))
+			fmt.Println(renderJobInfoBox(name, "", t.GetCommandToRun(), isMonitored))
 			for {
 				model := initialNameInputModel(name)
 				p := tea.NewProgram(model)
 
 				if result, err := p.Run(); err == nil {
 					finalModel := result.(nameInputModel)
-					if !finalModel.done {
+					if finalModel.exited {
+						printWarningText("Exiting", true)
+						exited = true
+						userAbortedSync = true
+					} else if !finalModel.done {
 						printWarningText("Skipped", true)
 						skip = true
 					} else {
@@ -472,6 +505,10 @@ func processWindowsTaskScheduler() bool {
 
 				break
 			}
+		}
+
+		if exited {
+			break
 		}
 
 		if skip {
@@ -519,6 +556,11 @@ func processWindowsTaskScheduler() bool {
 	}
 
 	printLn()
+
+	// If user pressed Ctrl+D, exit without posting anything
+	if exited {
+		return false
+	}
 
 	if len(monitors) > 0 {
 		printDoneText("Sending to Cronitor", true)

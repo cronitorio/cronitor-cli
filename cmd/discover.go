@@ -18,6 +18,15 @@ import (
 	"github.com/spf13/viper"
 )
 
+// getJobLabel returns the appropriate term for a job based on the platform
+// Returns "scheduled task" on Windows, "cron job" on other platforms
+func getJobLabel() string {
+	if runtime.GOOS == "windows" {
+		return "scheduled task"
+	}
+	return "cron job"
+}
+
 type ExistingMonitors struct {
 	Monitors    []lib.Monitor
 	Names       []string
@@ -99,6 +108,7 @@ var maxNameLen = 75
 var notificationList string
 var existingMonitors = ExistingMonitors{}
 var processingMultipleCrontabs = false
+var userAbortedSync = false // Set to true when user presses Ctrl+D to abort sync entirely
 
 // To deprecate this feature we are hijacking this flag that will trigger removal of auto-discover lines from existing user's crontabs.
 var noAutoDiscover = true
@@ -168,7 +178,7 @@ Example where you perform a dry-run without any crontab modifications:
 			username = u.Username
 		}
 
-		printSuccessText("Scanning for cron jobs...", false)
+		printSuccessText(fmt.Sprintf("Scanning for %ss...", getJobLabel()), false)
 
 		// Fetch list of existing monitor names for easy unique name validation and prompt prefill later on
 		existingMonitors.Monitors, _ = getCronitorApi().GetMonitors()
@@ -199,22 +209,33 @@ Example where you perform a dry-run without any crontab modifications:
 			}
 
 			for _, user := range users {
+				if userAbortedSync {
+					break
+				}
 				if processCrontab(lib.CrontabFactory(user, fmt.Sprintf("user:%s", user))) {
 					importedCrontabs++
 				}
 			}
 
-			if systemCrontab := lib.CrontabFactory(username, lib.SYSTEM_CRONTAB); systemCrontab.Exists() {
-				if processCrontab(systemCrontab) {
-					importedCrontabs++
+			if !userAbortedSync {
+				if systemCrontab := lib.CrontabFactory(username, lib.SYSTEM_CRONTAB); systemCrontab.Exists() {
+					if processCrontab(systemCrontab) {
+						importedCrontabs++
+					}
 				}
 			}
 
-			processDirectory(username, lib.DROP_IN_DIRECTORY)
+			if !userAbortedSync {
+				processDirectory(username, lib.DROP_IN_DIRECTORY)
+			}
 		}
 
-		printDoneText("Sync complete", false)
-		printSuccessText("View your dashboard https://cronitor.io/app/dashboard", false)
+		if userAbortedSync {
+			printWarningText("Sync aborted", false)
+		} else {
+			printDoneText("Sync complete", false)
+			printSuccessText("View your dashboard https://cronitor.io/app/dashboard", false)
+		}
 		if dryRun {
 			saveCommand := strings.Join(os.Args, " ")
 			saveCommand = strings.Replace(saveCommand, " --dry-run", "", -1)
@@ -240,6 +261,9 @@ func processDirectory(username, directory string) {
 		}
 
 		for _, crontabFile := range files {
+			if userAbortedSync {
+				break
+			}
 			if importedCrontabs > 0 {
 				printLn()
 			}
@@ -298,6 +322,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 	// Read crontab into map of Monitor structs
 	monitors := map[string]*lib.Monitor{}
 	allNameCandidates := map[string]bool{}
+	userExited := false
 
 	for _, line := range crontab.Lines {
 		if !line.IsMonitorable() {
@@ -338,9 +363,10 @@ func processCrontab(crontab *lib.Crontab) bool {
 		}
 
 		if !isAutoDiscover && !line.IsAutoDiscoverCommand() {
+			isMonitored := line.Code != ""
 
 			printSuccessText(fmt.Sprintf("Line %d:", line.LineNumber), true)
-			fmt.Printf("\n   %s %s\n", line.CronExpression, line.CommandToRun)
+			fmt.Println(renderJobInfoBox(name, line.CronExpression, line.CommandToRun, isMonitored))
 
 			model := initialNameInputModel(name)
 			p := tea.NewProgram(model)
@@ -350,6 +376,12 @@ func processCrontab(crontab *lib.Crontab) bool {
 				skip = true
 			} else {
 				finalModel := result.(nameInputModel)
+				if finalModel.exited {
+					printWarningText("Exiting", true)
+					userExited = true
+					userAbortedSync = true
+					break
+				}
 				if !finalModel.done {
 					printWarningText("Skipped", true)
 					skip = true
@@ -402,6 +434,11 @@ func processCrontab(crontab *lib.Crontab) bool {
 	}
 
 	printLn()
+
+	// If user pressed Ctrl+D, exit without posting anything
+	if userExited {
+		return false
+	}
 
 	if len(monitors) > 0 {
 		printDoneText("Sending to Cronitor", true)
@@ -567,12 +604,61 @@ func (i item) Title() string       { return i.title }
 func (i item) Description() string { return i.desc }
 func (i item) FilterValue() string { return i.title }
 
+// renderJobInfoBox renders job information in a styled box for interactive sync mode
+func renderJobInfoBox(name string, schedule string, command string, monitored bool) string {
+	// Define styles - use full terminal width minus margin
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Padding(0, 1).
+		MarginLeft(2).
+		Width(100)
+
+	nameStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("15")) // Bright white - readable on blue PowerShell backgrounds
+
+	labelStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")).
+		Width(12)
+
+	yesStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("10")) // Green
+
+	noStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")) // Gray
+
+	// Build content lines
+	var lines []string
+
+	lines = append(lines, nameStyle.Render(name))
+	lines = append(lines, "")
+
+	if schedule != "" {
+		lines = append(lines, labelStyle.Render("Schedule:")+"  "+schedule)
+	}
+
+	// Show full command - box width will accommodate long names/commands
+	lines = append(lines, labelStyle.Render("Command:")+"  "+command)
+
+	// Show monitoring status
+	monitoredStr := noStyle.Render("No")
+	if monitored {
+		monitoredStr = yesStyle.Render("Yes")
+	}
+	lines = append(lines, labelStyle.Render("Monitored:")+"  "+monitoredStr)
+
+	content := strings.Join(lines, "\n")
+	return boxStyle.Render(content)
+}
+
 type nameInputModel struct {
 	list        list.Model
 	textInput   textinput.Model
 	defaultName string
 	err         error
 	done        bool
+	exited      bool   // True if user pressed Ctrl+D to exit entirely
 	state       string // "choosing" or "naming"
 	width       int    // Add width field to store terminal width
 }
@@ -582,7 +668,7 @@ func initialNameInputModel(defaultName string) nameInputModel {
 	items := []list.Item{
 		item{title: UseDefaultName, desc: defaultName},
 		item{title: EnterCustomName, desc: "Add a friendly, unique name for this job"},
-		item{title: SkipJob, desc: "Do not monitor this cron job"},
+		item{title: SkipJob, desc: fmt.Sprintf("Do not monitor this %s", getJobLabel())},
 	}
 
 	// Setup list with height of 3 to show all items
@@ -628,6 +714,11 @@ func (m nameInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC:
+			// Skip this job
+			return m, tea.Quit
+		case tea.KeyCtrlD:
+			// Exit interactive sync entirely
+			m.exited = true
 			return m, tea.Quit
 		case tea.KeyEnter:
 			if m.state == "choosing" {
