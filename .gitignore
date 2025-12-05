@@ -76,7 +76,13 @@ local.md
 TODO.md
 *.exe
 
-# LocalDash
+# Dashboard
 node_modules/
 web/static/
 cronitor-linux
+
+Claude.md
+
+
+TEST_COVERAGE.md
+

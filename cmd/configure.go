@@ -141,14 +141,14 @@ Example setting common exclude text for use with 'cronitor discover':
 			fmt.Println(viper.GetString(varLog))
 		}
 
-		fmt.Println("\nLocalDash Username:")
+		fmt.Println("\nDashboard Username:")
 		if configData.DashUsername == "" {
 			fmt.Println("Not Set")
 		} else {
 			fmt.Println(configData.DashUsername)
 		}
 
-		fmt.Println("\nLocalDash Password:")
+		fmt.Println("\nDashboard Password:")
 		if configData.DashPassword == "" {
 			fmt.Println("Not Set")
 		} else {

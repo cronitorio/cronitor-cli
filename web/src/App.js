@@ -125,7 +125,7 @@ function Sidebar({ isDark, toggleTheme }) {
             >
               <img 
                 src={cronitorLogo} 
-                alt="LocalDash Logo" 
+                alt="Dashboard Logo" 
                 className="h-8 w-8 object-contain"
               />
             </a>

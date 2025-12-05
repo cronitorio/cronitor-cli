@@ -338,7 +338,7 @@ export default function Docs() {
             Configure dashboard access credentials:
           </p>
           <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
-            <li>LocalDash username and password</li>
+            <li>Dashboard username and password</li>
             <li>Session timeout settings</li>
             <li>Password strength requirements</li>
           </ul>
