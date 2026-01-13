@@ -79,6 +79,14 @@ cronitor configure --users user1,user2
 ```
 For systemd and Docker examples, and security best‑practices, see the full [Dashboard documentation](https://crontab.guru/dashboard.html).
 
+## MCP Server (AI Integration)
+
+The Cronitor CLI includes a built-in [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for managing cron jobs with natural language through AI-powered tools like Claude Code, Cursor, Cline, and Windsurf.
+
+**Quick start:** Run `cronitor dash` on your server, then configure your MCP client to spawn `cronitor dash --mcp-instance default`.
+
+For setup instructions, available tools, and configuration options, see the [MCP Integration Guide](docs/MCP_INTEGRATION.md).
+
 ## Uninstall CronitorCLI
 First, you will need to update any crontab files that were edited to include Cronitor to remove the reference to `cronitor exec MONITOR_KEY` that were added when you created monitors.
 
