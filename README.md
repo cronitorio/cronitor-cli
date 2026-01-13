@@ -79,6 +79,99 @@ cronitor configure --users user1,user2
 ```
 For systemd and Docker examples, and security best‑practices, see the full [Dashboard documentation](https://crontab.guru/dashboard.html).
 
+## MCP Server (AI Integration)
+
+The Cronitor CLI includes a built-in [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server, enabling integration with AI-powered development tools like Claude Code, Cursor, Cline, Windsurf, and others. Manage your cron jobs using natural language directly from your editor or terminal.
+
+### How It Works
+
+The MCP integration has two components:
+1. **Dashboard** - The web UI (`cronitor dash`) that must be running to manage cron jobs
+2. **MCP Server** - A bridge process (`cronitor dash --mcp-instance`) that your AI tool spawns and communicates with via stdio; it connects to the dashboard over HTTP
+
+### Quick Setup
+
+1. **Start the dashboard** on the machine where your cron jobs run:
+   ```bash
+   # Set credentials first
+   cronitor configure --dash-username USER --dash-password PASS
+
+   # Start the dashboard (runs on port 9000)
+   cronitor dash
+   ```
+
+2. **Configure your MCP client** (Claude Code, Cursor, etc.) to spawn the MCP server:
+
+   Example configuration for tools using `mcp.json`:
+   ```json
+   {
+     "mcpServers": {
+       "cronitor": {
+         "command": "cronitor",
+         "args": ["dash", "--mcp-instance", "default"]
+       }
+     }
+   }
+   ```
+
+   The `default` instance connects to `localhost:9000` using your configured credentials.
+
+3. **Start using natural language** to manage your cron jobs!
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `create_cronjob` | Create a new cron job with name, command, and schedule |
+| `list_cronjobs` | List all cron jobs with optional filtering |
+| `update_cronjob` | Update an existing job's schedule, command, or status |
+| `delete_cronjob` | Delete a cron job |
+| `run_cronjob_now` | Execute a cron job immediately |
+| `get_cronitor_instance` | Get info about the current Cronitor instance |
+
+### Example Prompts
+
+- "Create a database backup job that runs every night at 2 AM"
+- "List all cron jobs containing 'backup'"
+- "Suspend the cleanup job"
+- "Run the backup job now"
+
+### Human-Readable Schedules
+
+The MCP server understands natural language schedules:
+- `"every 15 minutes"` → `*/15 * * * *`
+- `"every day at noon"` → `0 12 * * *`
+- `"every Monday at 10:30"` → `30 10 * * 1`
+- `"hourly"`, `"daily"`, `"weekly"`, `"monthly"`
+
+### Multi-Instance Support
+
+Connect to multiple Cronitor dashboards (dev, staging, production) by configuring instances in `~/.cronitor/cronitor.json`:
+
+```json
+{
+  "mcp_instances": {
+    "production": {
+      "url": "http://prod-server:9000",
+      "username": "admin",
+      "password": "password"
+    }
+  }
+}
+```
+
+Then configure separate MCP servers in your client for each instance.
+
+### Resources
+
+The MCP server also exposes resources for programmatic access:
+- `cronitor://crontabs` - All crontab files as JSON
+- `cronitor://jobs` - All cron jobs as JSON
+
+For complete documentation including SSH tunneling, custom prompts, and troubleshooting, see:
+- [MCP Integration Guide](docs/MCP_INTEGRATION.md)
+- [MCP Prompts Configuration](docs/MCP_PROMPTS.md)
+
 ## Uninstall CronitorCLI
 First, you will need to update any crontab files that were edited to include Cronitor to remove the reference to `cronitor exec MONITOR_KEY` that were added when you created monitors.
 
