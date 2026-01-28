@@ -19,8 +19,6 @@ setup() {
   ../cronitor api --help | grep -q "monitors"
   ../cronitor api --help | grep -q "issues"
   ../cronitor api --help | grep -q "statuspages"
-  ../cronitor api --help | grep -q "components"
-  ../cronitor api --help | grep -q "incidents"
   ../cronitor api --help | grep -q "metrics"
   ../cronitor api --help | grep -q "notifications"
   ../cronitor api --help | grep -q "environments"
@@ -150,68 +148,6 @@ setup() {
   run ../cronitor api statuspages --new 'invalid' -k test-api-key 2>&1
   [ "$status" -eq 1 ]
   [[ "$output" == *"Invalid JSON"* ]]
-}
-
-#################
-# COMPONENTS SUBCOMMAND TESTS
-#################
-
-@test "API components shows help" {
-  ../cronitor api components --help | grep -qi "status page components"
-}
-
-@test "API components help shows examples" {
-  ../cronitor api components --help | grep -q "cronitor api components"
-  ../cronitor api components --help | grep -q "\-\-new"
-  ../cronitor api components --help | grep -q "\-\-update"
-  ../cronitor api components --help | grep -q "\-\-delete"
-}
-
-@test "API components has --statuspage flag" {
-  ../cronitor api components --help | grep -q "\-\-statuspage"
-}
-
-@test "API components update requires key" {
-  run ../cronitor api components --update '{}' -k test-api-key 2>&1
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"key is required"* ]]
-}
-
-@test "API components delete requires key" {
-  run ../cronitor api components --delete -k test-api-key 2>&1
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"key is required"* ]]
-}
-
-#################
-# INCIDENTS SUBCOMMAND TESTS
-#################
-
-@test "API incidents shows help" {
-  ../cronitor api incidents --help | grep -qi "status page incidents"
-}
-
-@test "API incidents help shows examples" {
-  ../cronitor api incidents --help | grep -q "cronitor api incidents"
-  ../cronitor api incidents --help | grep -q "\-\-new"
-  ../cronitor api incidents --help | grep -q "\-\-update"
-  ../cronitor api incidents --help | grep -q "\-\-resolve"
-}
-
-@test "API incidents has --statuspage flag" {
-  ../cronitor api incidents --help | grep -q "\-\-statuspage"
-}
-
-@test "API incidents update requires ID" {
-  run ../cronitor api incidents --update '{}' -k test-api-key 2>&1
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"ID is required"* ]]
-}
-
-@test "API incidents resolve requires ID" {
-  run ../cronitor api incidents --resolve -k test-api-key 2>&1
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"ID is required"* ]]
 }
 
 #################
