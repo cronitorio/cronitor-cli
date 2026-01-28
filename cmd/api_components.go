@@ -8,23 +8,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var componentStatuspage string
+var (
+	componentNew        string
+	componentUpdate     string
+	componentDelete     bool
+	componentStatuspage string
+)
 
 var apiComponentsCmd = &cobra.Command{
-	Use:   "components [action] [key]",
+	Use:   "components [key]",
 	Short: "Manage status page components",
 	Long: `
 Manage Cronitor status page components.
 
 Components are the building blocks of status pages. Each component represents
 a monitor or group of monitors that feed into your status page.
-
-Actions:
-  list     - List all components (default)
-  get      - Get a specific component by key
-  create   - Create a new component
-  update   - Update an existing component
-  delete   - Delete a component
 
 Examples:
   List all components:
@@ -34,62 +32,53 @@ Examples:
   $ cronitor api components --statuspage <statuspage-key>
 
   Get a specific component:
-  $ cronitor api components get <key>
+  $ cronitor api components <key>
 
   Create a component:
-  $ cronitor api components create --data '{"name":"API Server","statuspage":"my-status-page","monitor":"api-check"}'
+  $ cronitor api components --new '{"name":"API Server","statuspage":"my-status-page","monitor":"api-check"}'
 
   Update a component:
-  $ cronitor api components update <key> --data '{"name":"Updated Name"}'
+  $ cronitor api components <key> --update '{"name":"Updated Name"}'
 
   Delete a component:
-  $ cronitor api components delete <key>
+  $ cronitor api components <key> --delete
 
   Output as table:
   $ cronitor api components --format table
 `,
 	Run: func(cmd *cobra.Command, args []string) {
-		action := "list"
-		var key string
-
-		if len(args) > 0 {
-			action = args[0]
-		}
-		if len(args) > 1 {
-			key = args[1]
-		}
-
 		client := getAPIClient()
+		key := ""
+		if len(args) > 0 {
+			key = args[0]
+		}
 
-		switch action {
-		case "list":
-			listComponents(client)
-		case "get":
+		switch {
+		case componentNew != "":
+			createComponent(client, componentNew)
+		case componentUpdate != "":
 			if key == "" {
-				fatal("component key is required for get action", 1)
+				fatal("component key is required for --update", 1)
 			}
-			getComponent(client, key)
-		case "create":
-			createComponent(client)
-		case "update":
+			updateComponent(client, key, componentUpdate)
+		case componentDelete:
 			if key == "" {
-				fatal("component key is required for update action", 1)
-			}
-			updateComponent(client, key)
-		case "delete":
-			if key == "" {
-				fatal("component key is required for delete action", 1)
+				fatal("component key is required for --delete", 1)
 			}
 			deleteComponent(client, key)
+		case key != "":
+			getComponent(client, key)
 		default:
-			// Treat first arg as a key for get if it doesn't match an action
-			getComponent(client, action)
+			listComponents(client)
 		}
 	},
 }
 
 func init() {
 	apiCmd.AddCommand(apiComponentsCmd)
+	apiComponentsCmd.Flags().StringVar(&componentNew, "new", "", "Create component with JSON data")
+	apiComponentsCmd.Flags().StringVar(&componentUpdate, "update", "", "Update component with JSON data")
+	apiComponentsCmd.Flags().BoolVar(&componentDelete, "delete", false, "Delete the component")
 	apiComponentsCmd.Flags().StringVar(&componentStatuspage, "statuspage", "", "Filter by status page key")
 }
 
@@ -140,14 +129,12 @@ func getComponent(client *lib.APIClient, key string) {
 	outputResponse(resp, nil, nil)
 }
 
-func createComponent(client *lib.APIClient) {
-	body, err := readStdinIfEmpty()
-	if err != nil {
-		fatal(err.Error(), 1)
-	}
+func createComponent(client *lib.APIClient, jsonData string) {
+	body := []byte(jsonData)
 
-	if body == nil {
-		fatal("request body is required for create action (use --data, --file, or pipe JSON to stdin)", 1)
+	var js json.RawMessage
+	if err := json.Unmarshal(body, &js); err != nil {
+		fatal(fmt.Sprintf("Invalid JSON: %s", err), 1)
 	}
 
 	resp, err := client.POST("/statuspage_components", body, nil)
@@ -158,14 +145,12 @@ func createComponent(client *lib.APIClient) {
 	outputResponse(resp, nil, nil)
 }
 
-func updateComponent(client *lib.APIClient, key string) {
-	body, err := readStdinIfEmpty()
-	if err != nil {
-		fatal(err.Error(), 1)
-	}
+func updateComponent(client *lib.APIClient, key string, jsonData string) {
+	body := []byte(jsonData)
 
-	if body == nil {
-		fatal("request body is required for update action (use --data, --file, or pipe JSON to stdin)", 1)
+	var js json.RawMessage
+	if err := json.Unmarshal(body, &js); err != nil {
+		fatal(fmt.Sprintf("Invalid JSON: %s", err), 1)
 	}
 
 	resp, err := client.PUT(fmt.Sprintf("/statuspage_components/%s", key), body, nil)
@@ -187,7 +172,7 @@ func deleteComponent(client *lib.APIClient, key string) {
 	}
 
 	if resp.IsSuccess() {
-		fmt.Printf("Component '%s' deleted successfully\n", key)
+		fmt.Printf("Component '%s' deleted\n", key)
 	} else {
 		outputResponse(resp, nil, nil)
 	}

@@ -8,26 +8,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var issueState string
-var issueSeverity string
+var (
+	issueNew      string
+	issueUpdate   string
+	issueDelete   bool
+	issueResolve  bool
+	issueState    string
+	issueSeverity string
+)
 
 var apiIssuesCmd = &cobra.Command{
-	Use:   "issues [action] [key]",
-	Short: "Manage issues and incidents",
+	Use:   "issues [key]",
+	Short: "Manage issues",
 	Long: `
 Manage Cronitor issues and incidents.
 
 Issues are Cronitor's incident management hub - they help your team coordinate
-response when monitors fail. Issues automatically open when monitors fail and
-close when they recover.
-
-Actions:
-  list     - List all issues (default)
-  get      - Get a specific issue by key
-  create   - Create a new issue
-  update   - Update an existing issue
-  delete   - Delete an issue
-  bulk     - Perform bulk operations on issues
+response when monitors fail.
 
 Examples:
   List all issues:
@@ -36,74 +33,66 @@ Examples:
   List open issues:
   $ cronitor api issues --state open
 
-  List issues filtered by severity:
+  Filter by severity:
   $ cronitor api issues --severity critical
 
   Get a specific issue:
-  $ cronitor api issues get <issue-key>
+  $ cronitor api issues <key>
 
   Create an issue:
-  $ cronitor api issues create --data '{"title":"Service Outage","severity":"critical","monitors":["web-api"]}'
+  $ cronitor api issues --new '{"title":"Service Outage","severity":"critical"}'
 
   Update an issue:
-  $ cronitor api issues update <issue-key> --data '{"state":"resolved"}'
+  $ cronitor api issues <key> --update '{"message":"Investigating..."}'
 
-  Add an update to an issue:
-  $ cronitor api issues update <issue-key> --data '{"message":"Investigating the root cause"}'
+  Resolve an issue:
+  $ cronitor api issues <key> --resolve
 
   Delete an issue:
-  $ cronitor api issues delete <issue-key>
-
-  Bulk resolve issues:
-  $ cronitor api issues bulk --data '{"action":"resolve","keys":["issue-1","issue-2"]}'
+  $ cronitor api issues <key> --delete
 
   Output as table:
   $ cronitor api issues --format table
 `,
 	Run: func(cmd *cobra.Command, args []string) {
-		action := "list"
-		var key string
-
-		if len(args) > 0 {
-			action = args[0]
-		}
-		if len(args) > 1 {
-			key = args[1]
-		}
-
 		client := getAPIClient()
+		key := ""
+		if len(args) > 0 {
+			key = args[0]
+		}
 
-		switch action {
-		case "list":
-			listIssues(client)
-		case "get":
+		switch {
+		case issueNew != "":
+			createIssue(client, issueNew)
+		case issueUpdate != "":
 			if key == "" {
-				fatal("issue key is required for get action", 1)
+				fatal("issue key is required for --update", 1)
 			}
-			getIssue(client, key)
-		case "create":
-			createIssue(client)
-		case "update":
+			updateIssue(client, key, issueUpdate)
+		case issueResolve:
 			if key == "" {
-				fatal("issue key is required for update action", 1)
+				fatal("issue key is required for --resolve", 1)
 			}
-			updateIssue(client, key)
-		case "delete":
+			resolveIssue(client, key)
+		case issueDelete:
 			if key == "" {
-				fatal("issue key is required for delete action", 1)
+				fatal("issue key is required for --delete", 1)
 			}
 			deleteIssue(client, key)
-		case "bulk":
-			bulkIssues(client)
+		case key != "":
+			getIssue(client, key)
 		default:
-			// Treat first arg as a key for get if it doesn't match an action
-			getIssue(client, action)
+			listIssues(client)
 		}
 	},
 }
 
 func init() {
 	apiCmd.AddCommand(apiIssuesCmd)
+	apiIssuesCmd.Flags().StringVar(&issueNew, "new", "", "Create issue with JSON data")
+	apiIssuesCmd.Flags().StringVar(&issueUpdate, "update", "", "Update issue with JSON data")
+	apiIssuesCmd.Flags().BoolVar(&issueDelete, "delete", false, "Delete the issue")
+	apiIssuesCmd.Flags().BoolVar(&issueResolve, "resolve", false, "Resolve the issue")
 	apiIssuesCmd.Flags().StringVar(&issueState, "state", "", "Filter by state (open, resolved)")
 	apiIssuesCmd.Flags().StringVar(&issueSeverity, "severity", "", "Filter by severity (critical, warning, info)")
 }
@@ -122,16 +111,15 @@ func listIssues(client *lib.APIClient) {
 		fatal(fmt.Sprintf("Failed to list issues: %s", err), 1)
 	}
 
-	outputResponse(resp, []string{"Key", "Title", "State", "Severity", "Monitors", "Created"},
+	outputResponse(resp, []string{"Key", "Title", "State", "Severity", "Created"},
 		func(data []byte) [][]string {
 			var result struct {
 				Issues []struct {
-					Key       string   `json:"key"`
-					Title     string   `json:"title"`
-					State     string   `json:"state"`
-					Severity  string   `json:"severity"`
-					Monitors  []string `json:"monitors"`
-					CreatedAt string   `json:"created_at"`
+					Key       string `json:"key"`
+					Title     string `json:"title"`
+					State     string `json:"state"`
+					Severity  string `json:"severity"`
+					CreatedAt string `json:"created_at"`
 				} `json:"issues"`
 			}
 			if err := json.Unmarshal(data, &result); err != nil {
@@ -140,11 +128,7 @@ func listIssues(client *lib.APIClient) {
 
 			rows := make([][]string, len(result.Issues))
 			for i, issue := range result.Issues {
-				monitors := ""
-				if len(issue.Monitors) > 0 {
-					monitors = fmt.Sprintf("%v", issue.Monitors)
-				}
-				rows[i] = []string{issue.Key, issue.Title, issue.State, issue.Severity, monitors, issue.CreatedAt}
+				rows[i] = []string{issue.Key, issue.Title, issue.State, issue.Severity, issue.CreatedAt}
 			}
 			return rows
 		})
@@ -163,14 +147,12 @@ func getIssue(client *lib.APIClient, key string) {
 	outputResponse(resp, nil, nil)
 }
 
-func createIssue(client *lib.APIClient) {
-	body, err := readStdinIfEmpty()
-	if err != nil {
-		fatal(err.Error(), 1)
-	}
+func createIssue(client *lib.APIClient, jsonData string) {
+	body := []byte(jsonData)
 
-	if body == nil {
-		fatal("request body is required for create action (use --data, --file, or pipe JSON to stdin)", 1)
+	var js json.RawMessage
+	if err := json.Unmarshal(body, &js); err != nil {
+		fatal(fmt.Sprintf("Invalid JSON: %s", err), 1)
 	}
 
 	resp, err := client.POST("/issues", body, nil)
@@ -181,14 +163,12 @@ func createIssue(client *lib.APIClient) {
 	outputResponse(resp, nil, nil)
 }
 
-func updateIssue(client *lib.APIClient, key string) {
-	body, err := readStdinIfEmpty()
-	if err != nil {
-		fatal(err.Error(), 1)
-	}
+func updateIssue(client *lib.APIClient, key string, jsonData string) {
+	body := []byte(jsonData)
 
-	if body == nil {
-		fatal("request body is required for update action (use --data, --file, or pipe JSON to stdin)", 1)
+	var js json.RawMessage
+	if err := json.Unmarshal(body, &js); err != nil {
+		fatal(fmt.Sprintf("Invalid JSON: %s", err), 1)
 	}
 
 	resp, err := client.PUT(fmt.Sprintf("/issues/%s", key), body, nil)
@@ -197,6 +177,21 @@ func updateIssue(client *lib.APIClient, key string) {
 	}
 
 	outputResponse(resp, nil, nil)
+}
+
+func resolveIssue(client *lib.APIClient, key string) {
+	body := []byte(`{"state":"resolved"}`)
+
+	resp, err := client.PUT(fmt.Sprintf("/issues/%s", key), body, nil)
+	if err != nil {
+		fatal(fmt.Sprintf("Failed to resolve issue: %s", err), 1)
+	}
+
+	if resp.IsSuccess() {
+		fmt.Printf("Issue '%s' resolved\n", key)
+	} else {
+		outputResponse(resp, nil, nil)
+	}
 }
 
 func deleteIssue(client *lib.APIClient, key string) {
@@ -210,26 +205,8 @@ func deleteIssue(client *lib.APIClient, key string) {
 	}
 
 	if resp.IsSuccess() {
-		fmt.Printf("Issue '%s' deleted successfully\n", key)
+		fmt.Printf("Issue '%s' deleted\n", key)
 	} else {
 		outputResponse(resp, nil, nil)
 	}
-}
-
-func bulkIssues(client *lib.APIClient) {
-	body, err := readStdinIfEmpty()
-	if err != nil {
-		fatal(err.Error(), 1)
-	}
-
-	if body == nil {
-		fatal("request body is required for bulk action (use --data, --file, or pipe JSON to stdin)", 1)
-	}
-
-	resp, err := client.POST("/issues/bulk", body, nil)
-	if err != nil {
-		fatal(fmt.Sprintf("Failed to perform bulk operation: %s", err), 1)
-	}
-
-	outputResponse(resp, nil, nil)
 }

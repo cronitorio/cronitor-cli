@@ -40,46 +40,41 @@ setup() {
   ../cronitor api monitors --help | grep -q "Manage Cronitor monitors"
 }
 
-@test "API monitors help shows all actions" {
-  ../cronitor api monitors --help | grep -q "list"
-  ../cronitor api monitors --help | grep -q "get"
-  ../cronitor api monitors --help | grep -q "create"
-  ../cronitor api monitors --help | grep -q "update"
-  ../cronitor api monitors --help | grep -q "delete"
-  ../cronitor api monitors --help | grep -q "pause"
-  ../cronitor api monitors --help | grep -q "unpause"
-}
-
-@test "API monitors has --hours flag for pause" {
-  ../cronitor api monitors --help | grep -q "\-\-hours"
+@test "API monitors help shows examples" {
+  ../cronitor api monitors --help | grep -q "cronitor api monitors"
+  ../cronitor api monitors --help | grep -q "\-\-new"
+  ../cronitor api monitors --help | grep -q "\-\-update"
+  ../cronitor api monitors --help | grep -q "\-\-delete"
+  ../cronitor api monitors --help | grep -q "\-\-pause"
+  ../cronitor api monitors --help | grep -q "\-\-unpause"
 }
 
 @test "API monitors has --with-events flag" {
   ../cronitor api monitors --help | grep -q "\-\-with-events"
 }
 
-@test "API monitors get requires key" {
-  run ../cronitor api monitors get -k test-api-key 2>&1
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"key is required"* ]]
-}
-
 @test "API monitors update requires key" {
-  run ../cronitor api monitors update -k test-api-key 2>&1
+  run ../cronitor api monitors --update '{}' -k test-api-key 2>&1
   [ "$status" -eq 1 ]
   [[ "$output" == *"key is required"* ]]
 }
 
 @test "API monitors pause requires key" {
-  run ../cronitor api monitors pause -k test-api-key 2>&1
+  run ../cronitor api monitors --pause -k test-api-key 2>&1
   [ "$status" -eq 1 ]
   [[ "$output" == *"key is required"* ]]
 }
 
-@test "API monitors create requires body" {
-  run ../cronitor api monitors create -k test-api-key 2>&1
+@test "API monitors delete requires key" {
+  run ../cronitor api monitors --delete -k test-api-key 2>&1
   [ "$status" -eq 1 ]
-  [[ "$output" == *"request body is required"* ]]
+  [[ "$output" == *"key is required"* ]]
+}
+
+@test "API monitors new rejects invalid JSON" {
+  run ../cronitor api monitors --new 'not valid json' -k test-api-key 2>&1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid JSON"* ]]
 }
 
 #################
@@ -90,13 +85,12 @@ setup() {
   ../cronitor api issues --help | grep -q "Manage Cronitor issues"
 }
 
-@test "API issues help shows all actions" {
-  ../cronitor api issues --help | grep -q "list"
-  ../cronitor api issues --help | grep -q "get"
-  ../cronitor api issues --help | grep -q "create"
-  ../cronitor api issues --help | grep -q "update"
-  ../cronitor api issues --help | grep -q "delete"
-  ../cronitor api issues --help | grep -q "bulk"
+@test "API issues help shows examples" {
+  ../cronitor api issues --help | grep -q "cronitor api issues"
+  ../cronitor api issues --help | grep -q "\-\-new"
+  ../cronitor api issues --help | grep -q "\-\-update"
+  ../cronitor api issues --help | grep -q "\-\-delete"
+  ../cronitor api issues --help | grep -q "\-\-resolve"
 }
 
 @test "API issues has --state flag" {
@@ -107,16 +101,22 @@ setup() {
   ../cronitor api issues --help | grep -q "\-\-severity"
 }
 
-@test "API issues get requires key" {
-  run ../cronitor api issues get -k test-api-key 2>&1
+@test "API issues update requires key" {
+  run ../cronitor api issues --update '{}' -k test-api-key 2>&1
   [ "$status" -eq 1 ]
   [[ "$output" == *"key is required"* ]]
 }
 
-@test "API issues create requires body" {
-  run ../cronitor api issues create -k test-api-key 2>&1
+@test "API issues delete requires key" {
+  run ../cronitor api issues --delete -k test-api-key 2>&1
   [ "$status" -eq 1 ]
-  [[ "$output" == *"request body is required"* ]]
+  [[ "$output" == *"key is required"* ]]
+}
+
+@test "API issues new rejects invalid JSON" {
+  run ../cronitor api issues --new '{broken' -k test-api-key 2>&1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid JSON"* ]]
 }
 
 #################
@@ -127,24 +127,29 @@ setup() {
   ../cronitor api statuspages --help | grep -q "Manage Cronitor status pages"
 }
 
-@test "API statuspages help shows all actions" {
-  ../cronitor api statuspages --help | grep -q "list"
-  ../cronitor api statuspages --help | grep -q "get"
-  ../cronitor api statuspages --help | grep -q "create"
-  ../cronitor api statuspages --help | grep -q "update"
-  ../cronitor api statuspages --help | grep -q "delete"
+@test "API statuspages help shows examples" {
+  ../cronitor api statuspages --help | grep -q "cronitor api statuspages"
+  ../cronitor api statuspages --help | grep -q "\-\-new"
+  ../cronitor api statuspages --help | grep -q "\-\-update"
+  ../cronitor api statuspages --help | grep -q "\-\-delete"
 }
 
-@test "API statuspages get requires key" {
-  run ../cronitor api statuspages get -k test-api-key 2>&1
+@test "API statuspages update requires key" {
+  run ../cronitor api statuspages --update '{}' -k test-api-key 2>&1
   [ "$status" -eq 1 ]
   [[ "$output" == *"key is required"* ]]
 }
 
-@test "API statuspages create requires body" {
-  run ../cronitor api statuspages create -k test-api-key 2>&1
+@test "API statuspages delete requires key" {
+  run ../cronitor api statuspages --delete -k test-api-key 2>&1
   [ "$status" -eq 1 ]
-  [[ "$output" == *"request body is required"* ]]
+  [[ "$output" == *"key is required"* ]]
+}
+
+@test "API statuspages new rejects invalid JSON" {
+  run ../cronitor api statuspages --new 'invalid' -k test-api-key 2>&1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid JSON"* ]]
 }
 
 #################
@@ -155,20 +160,25 @@ setup() {
   ../cronitor api components --help | grep -qi "status page components"
 }
 
-@test "API components help shows all actions" {
-  ../cronitor api components --help | grep -q "list"
-  ../cronitor api components --help | grep -q "get"
-  ../cronitor api components --help | grep -q "create"
-  ../cronitor api components --help | grep -q "update"
-  ../cronitor api components --help | grep -q "delete"
+@test "API components help shows examples" {
+  ../cronitor api components --help | grep -q "cronitor api components"
+  ../cronitor api components --help | grep -q "\-\-new"
+  ../cronitor api components --help | grep -q "\-\-update"
+  ../cronitor api components --help | grep -q "\-\-delete"
 }
 
 @test "API components has --statuspage flag" {
   ../cronitor api components --help | grep -q "\-\-statuspage"
 }
 
-@test "API components get requires key" {
-  run ../cronitor api components get -k test-api-key 2>&1
+@test "API components update requires key" {
+  run ../cronitor api components --update '{}' -k test-api-key 2>&1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"key is required"* ]]
+}
+
+@test "API components delete requires key" {
+  run ../cronitor api components --delete -k test-api-key 2>&1
   [ "$status" -eq 1 ]
   [[ "$output" == *"key is required"* ]]
 }
@@ -181,26 +191,25 @@ setup() {
   ../cronitor api incidents --help | grep -qi "status page incidents"
 }
 
-@test "API incidents help shows all actions" {
-  ../cronitor api incidents --help | grep -q "list"
-  ../cronitor api incidents --help | grep -q "get"
-  ../cronitor api incidents --help | grep -q "create"
-  ../cronitor api incidents --help | grep -q "update"
-  ../cronitor api incidents --help | grep -q "resolve"
+@test "API incidents help shows examples" {
+  ../cronitor api incidents --help | grep -q "cronitor api incidents"
+  ../cronitor api incidents --help | grep -q "\-\-new"
+  ../cronitor api incidents --help | grep -q "\-\-update"
+  ../cronitor api incidents --help | grep -q "\-\-resolve"
 }
 
 @test "API incidents has --statuspage flag" {
   ../cronitor api incidents --help | grep -q "\-\-statuspage"
 }
 
-@test "API incidents get requires key" {
-  run ../cronitor api incidents get -k test-api-key 2>&1
+@test "API incidents update requires ID" {
+  run ../cronitor api incidents --update '{}' -k test-api-key 2>&1
   [ "$status" -eq 1 ]
   [[ "$output" == *"ID is required"* ]]
 }
 
-@test "API incidents resolve requires key" {
-  run ../cronitor api incidents resolve -k test-api-key 2>&1
+@test "API incidents resolve requires ID" {
+  run ../cronitor api incidents --resolve -k test-api-key 2>&1
   [ "$status" -eq 1 ]
   [[ "$output" == *"ID is required"* ]]
 }
@@ -234,24 +243,29 @@ setup() {
   ../cronitor api notifications --help | grep -qi "notification lists"
 }
 
-@test "API notifications help shows all actions" {
-  ../cronitor api notifications --help | grep -q "list"
-  ../cronitor api notifications --help | grep -q "get"
-  ../cronitor api notifications --help | grep -q "create"
-  ../cronitor api notifications --help | grep -q "update"
-  ../cronitor api notifications --help | grep -q "delete"
+@test "API notifications help shows examples" {
+  ../cronitor api notifications --help | grep -q "cronitor api notifications"
+  ../cronitor api notifications --help | grep -q "\-\-new"
+  ../cronitor api notifications --help | grep -q "\-\-update"
+  ../cronitor api notifications --help | grep -q "\-\-delete"
 }
 
-@test "API notifications get requires key" {
-  run ../cronitor api notifications get -k test-api-key 2>&1
+@test "API notifications update requires key" {
+  run ../cronitor api notifications --update '{}' -k test-api-key 2>&1
   [ "$status" -eq 1 ]
   [[ "$output" == *"key is required"* ]]
 }
 
-@test "API notifications create requires body" {
-  run ../cronitor api notifications create -k test-api-key 2>&1
+@test "API notifications delete requires key" {
+  run ../cronitor api notifications --delete -k test-api-key 2>&1
   [ "$status" -eq 1 ]
-  [[ "$output" == *"request body is required"* ]]
+  [[ "$output" == *"key is required"* ]]
+}
+
+@test "API notifications new rejects invalid JSON" {
+  run ../cronitor api notifications --new 'bad json' -k test-api-key 2>&1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid JSON"* ]]
 }
 
 #################
@@ -262,37 +276,34 @@ setup() {
   ../cronitor api environments --help | grep -qi "environments"
 }
 
-@test "API environments help shows all actions" {
-  ../cronitor api environments --help | grep -q "list"
-  ../cronitor api environments --help | grep -q "get"
-  ../cronitor api environments --help | grep -q "create"
-  ../cronitor api environments --help | grep -q "update"
-  ../cronitor api environments --help | grep -q "delete"
+@test "API environments help shows examples" {
+  ../cronitor api environments --help | grep -q "cronitor api environments"
+  ../cronitor api environments --help | grep -q "\-\-new"
+  ../cronitor api environments --help | grep -q "\-\-update"
+  ../cronitor api environments --help | grep -q "\-\-delete"
 }
 
-@test "API environments get requires key" {
-  run ../cronitor api environments get -k test-api-key 2>&1
+@test "API environments update requires key" {
+  run ../cronitor api environments --update '{}' -k test-api-key 2>&1
   [ "$status" -eq 1 ]
   [[ "$output" == *"key is required"* ]]
 }
 
-@test "API environments create requires body" {
-  run ../cronitor api environments create -k test-api-key 2>&1
+@test "API environments delete requires key" {
+  run ../cronitor api environments --delete -k test-api-key 2>&1
   [ "$status" -eq 1 ]
-  [[ "$output" == *"request body is required"* ]]
+  [[ "$output" == *"key is required"* ]]
+}
+
+@test "API environments new rejects invalid JSON" {
+  run ../cronitor api environments --new 'bad json' -k test-api-key 2>&1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid JSON"* ]]
 }
 
 #################
 # GLOBAL FLAGS TESTS
 #################
-
-@test "API command has --data flag" {
-  ../cronitor api --help | grep -q "\-d, \-\-data"
-}
-
-@test "API command has --file flag" {
-  ../cronitor api --help | grep -q "\-f, \-\-file"
-}
 
 @test "API command has --format flag" {
   ../cronitor api --help | grep -q "\-\-format"
@@ -310,26 +321,6 @@ setup() {
   ../cronitor api --help | grep -q "\-\-raw"
 }
 
-@test "API command has --env global flag" {
-  ../cronitor api --help | grep -q "\-\-env"
-}
-
-#################
-# JSON VALIDATION TESTS
-#################
-
-@test "API monitors create rejects invalid JSON" {
-  run ../cronitor api monitors create -k test-api-key --data 'not valid json' 2>&1
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"invalid JSON"* ]]
-}
-
-@test "API issues create rejects invalid JSON" {
-  run ../cronitor api issues create -k test-api-key --data '{broken' 2>&1
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"invalid JSON"* ]]
-}
-
 #################
 # INTEGRATION TESTS (SKIPPED BY DEFAULT)
 #################
@@ -341,12 +332,12 @@ setup() {
 
 @test "API monitors get integration test" {
   skip "Integration test requires valid API key and existing monitor"
-  # ../cronitor api monitors get test-monitor -k $CRONITOR_API_KEY
+  # ../cronitor api monitors test-monitor -k $CRONITOR_API_KEY
 }
 
 @test "API monitors create integration test" {
   skip "Integration test requires valid API key"
-  # ../cronitor api monitors create -k $CRONITOR_API_KEY --data '{"key":"test-cli-monitor","type":"job"}'
+  # ../cronitor api monitors --new '{"key":"test-cli-monitor","type":"job"}' -k $CRONITOR_API_KEY
 }
 
 @test "API issues list integration test" {

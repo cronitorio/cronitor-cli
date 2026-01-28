@@ -8,84 +8,73 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	environmentNew    string
+	environmentUpdate string
+	environmentDelete bool
+)
+
 var apiEnvironmentsCmd = &cobra.Command{
-	Use:   "environments [action] [key]",
+	Use:   "environments [key]",
 	Short: "Manage environments",
 	Long: `
 Manage Cronitor environments.
 
-Environments allow you to separate monitoring data between different
-deployment stages (e.g., staging, production) while sharing monitor
-configurations.
-
-Actions:
-  list     - List all environments (default)
-  get      - Get a specific environment by key
-  create   - Create a new environment
-  update   - Update an existing environment
-  delete   - Delete an environment
+Environments separate monitoring data between deployment stages (staging, production)
+while sharing monitor configurations.
 
 Examples:
   List all environments:
   $ cronitor api environments
 
   Get a specific environment:
-  $ cronitor api environments get <key>
+  $ cronitor api environments <key>
 
   Create an environment:
-  $ cronitor api environments create --data '{"key":"staging","name":"Staging"}'
+  $ cronitor api environments --new '{"key":"staging","name":"Staging"}'
 
   Update an environment:
-  $ cronitor api environments update <key> --data '{"name":"Updated Name"}'
+  $ cronitor api environments <key> --update '{"name":"Updated Name"}'
 
   Delete an environment:
-  $ cronitor api environments delete <key>
+  $ cronitor api environments <key> --delete
 
   Output as table:
   $ cronitor api environments --format table
 `,
 	Run: func(cmd *cobra.Command, args []string) {
-		action := "list"
-		var key string
-
-		if len(args) > 0 {
-			action = args[0]
-		}
-		if len(args) > 1 {
-			key = args[1]
-		}
-
 		client := getAPIClient()
+		key := ""
+		if len(args) > 0 {
+			key = args[0]
+		}
 
-		switch action {
-		case "list":
-			listEnvironments(client)
-		case "get":
+		switch {
+		case environmentNew != "":
+			createEnvironment(client, environmentNew)
+		case environmentUpdate != "":
 			if key == "" {
-				fatal("environment key is required for get action", 1)
+				fatal("environment key is required for --update", 1)
 			}
-			getEnvironment(client, key)
-		case "create":
-			createEnvironment(client)
-		case "update":
+			updateEnvironment(client, key, environmentUpdate)
+		case environmentDelete:
 			if key == "" {
-				fatal("environment key is required for update action", 1)
-			}
-			updateEnvironment(client, key)
-		case "delete":
-			if key == "" {
-				fatal("environment key is required for delete action", 1)
+				fatal("environment key is required for --delete", 1)
 			}
 			deleteEnvironment(client, key)
+		case key != "":
+			getEnvironment(client, key)
 		default:
-			// Treat first arg as a key for get if it doesn't match an action
-			getEnvironment(client, action)
+			listEnvironments(client)
 		}
 	},
 }
 
 func init() {
 	apiCmd.AddCommand(apiEnvironmentsCmd)
+	apiEnvironmentsCmd.Flags().StringVar(&environmentNew, "new", "", "Create environment with JSON data")
+	apiEnvironmentsCmd.Flags().StringVar(&environmentUpdate, "update", "", "Update environment with JSON data")
+	apiEnvironmentsCmd.Flags().BoolVar(&environmentDelete, "delete", false, "Delete the environment")
 }
 
 func listEnvironments(client *lib.APIClient) {
@@ -95,14 +84,13 @@ func listEnvironments(client *lib.APIClient) {
 		fatal(fmt.Sprintf("Failed to list environments: %s", err), 1)
 	}
 
-	outputResponse(resp, []string{"Key", "Name", "Default", "Created"},
+	outputResponse(resp, []string{"Key", "Name", "Default"},
 		func(data []byte) [][]string {
 			var result struct {
 				Environments []struct {
 					Key       string `json:"key"`
 					Name      string `json:"name"`
 					IsDefault bool   `json:"is_default"`
-					CreatedAt string `json:"created_at"`
 				} `json:"environments"`
 			}
 			if err := json.Unmarshal(data, &result); err != nil {
@@ -115,7 +103,7 @@ func listEnvironments(client *lib.APIClient) {
 				if e.IsDefault {
 					isDefault = "Yes"
 				}
-				rows[i] = []string{e.Key, e.Name, isDefault, e.CreatedAt}
+				rows[i] = []string{e.Key, e.Name, isDefault}
 			}
 			return rows
 		})
@@ -134,14 +122,12 @@ func getEnvironment(client *lib.APIClient, key string) {
 	outputResponse(resp, nil, nil)
 }
 
-func createEnvironment(client *lib.APIClient) {
-	body, err := readStdinIfEmpty()
-	if err != nil {
-		fatal(err.Error(), 1)
-	}
+func createEnvironment(client *lib.APIClient, jsonData string) {
+	body := []byte(jsonData)
 
-	if body == nil {
-		fatal("request body is required for create action (use --data, --file, or pipe JSON to stdin)", 1)
+	var js json.RawMessage
+	if err := json.Unmarshal(body, &js); err != nil {
+		fatal(fmt.Sprintf("Invalid JSON: %s", err), 1)
 	}
 
 	resp, err := client.POST("/environments", body, nil)
@@ -152,14 +138,12 @@ func createEnvironment(client *lib.APIClient) {
 	outputResponse(resp, nil, nil)
 }
 
-func updateEnvironment(client *lib.APIClient, key string) {
-	body, err := readStdinIfEmpty()
-	if err != nil {
-		fatal(err.Error(), 1)
-	}
+func updateEnvironment(client *lib.APIClient, key string, jsonData string) {
+	body := []byte(jsonData)
 
-	if body == nil {
-		fatal("request body is required for update action (use --data, --file, or pipe JSON to stdin)", 1)
+	var js json.RawMessage
+	if err := json.Unmarshal(body, &js); err != nil {
+		fatal(fmt.Sprintf("Invalid JSON: %s", err), 1)
 	}
 
 	resp, err := client.PUT(fmt.Sprintf("/environments/%s", key), body, nil)
@@ -181,7 +165,7 @@ func deleteEnvironment(client *lib.APIClient, key string) {
 	}
 
 	if resp.IsSuccess() {
-		fmt.Printf("Environment '%s' deleted successfully\n", key)
+		fmt.Printf("Environment '%s' deleted\n", key)
 	} else {
 		outputResponse(resp, nil, nil)
 	}

@@ -8,84 +8,72 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	notificationNew    string
+	notificationUpdate string
+	notificationDelete bool
+)
+
 var apiNotificationsCmd = &cobra.Command{
-	Use:   "notifications [action] [key]",
+	Use:   "notifications [key]",
 	Short: "Manage notification lists",
 	Long: `
 Manage Cronitor notification lists.
 
 Notification lists define where alerts are sent when monitors detect issues.
-Each list can contain multiple notification channels like email, Slack,
-PagerDuty, webhooks, and more.
-
-Actions:
-  list     - List all notification lists (default)
-  get      - Get a specific notification list by key
-  create   - Create a new notification list
-  update   - Update an existing notification list
-  delete   - Delete a notification list
 
 Examples:
   List all notification lists:
   $ cronitor api notifications
 
   Get a specific notification list:
-  $ cronitor api notifications get <key>
+  $ cronitor api notifications <key>
 
   Create a notification list:
-  $ cronitor api notifications create --data '{"key":"ops-team","name":"Ops Team","templates":["email:ops@company.com","slack:#alerts"]}'
+  $ cronitor api notifications --new '{"key":"ops-team","name":"Ops","templates":["email:ops@co.com"]}'
 
   Update a notification list:
-  $ cronitor api notifications update <key> --data '{"name":"Updated Name"}'
+  $ cronitor api notifications <key> --update '{"name":"Updated Name"}'
 
   Delete a notification list:
-  $ cronitor api notifications delete <key>
+  $ cronitor api notifications <key> --delete
 
   Output as table:
   $ cronitor api notifications --format table
 `,
 	Run: func(cmd *cobra.Command, args []string) {
-		action := "list"
-		var key string
-
-		if len(args) > 0 {
-			action = args[0]
-		}
-		if len(args) > 1 {
-			key = args[1]
-		}
-
 		client := getAPIClient()
+		key := ""
+		if len(args) > 0 {
+			key = args[0]
+		}
 
-		switch action {
-		case "list":
-			listNotifications(client)
-		case "get":
+		switch {
+		case notificationNew != "":
+			createNotification(client, notificationNew)
+		case notificationUpdate != "":
 			if key == "" {
-				fatal("notification list key is required for get action", 1)
+				fatal("notification list key is required for --update", 1)
 			}
-			getNotification(client, key)
-		case "create":
-			createNotification(client)
-		case "update":
+			updateNotification(client, key, notificationUpdate)
+		case notificationDelete:
 			if key == "" {
-				fatal("notification list key is required for update action", 1)
-			}
-			updateNotification(client, key)
-		case "delete":
-			if key == "" {
-				fatal("notification list key is required for delete action", 1)
+				fatal("notification list key is required for --delete", 1)
 			}
 			deleteNotification(client, key)
+		case key != "":
+			getNotification(client, key)
 		default:
-			// Treat first arg as a key for get if it doesn't match an action
-			getNotification(client, action)
+			listNotifications(client)
 		}
 	},
 }
 
 func init() {
 	apiCmd.AddCommand(apiNotificationsCmd)
+	apiNotificationsCmd.Flags().StringVar(&notificationNew, "new", "", "Create notification list with JSON data")
+	apiNotificationsCmd.Flags().StringVar(&notificationUpdate, "update", "", "Update notification list with JSON data")
+	apiNotificationsCmd.Flags().BoolVar(&notificationDelete, "delete", false, "Delete the notification list")
 }
 
 func listNotifications(client *lib.APIClient) {
@@ -95,14 +83,13 @@ func listNotifications(client *lib.APIClient) {
 		fatal(fmt.Sprintf("Failed to list notification lists: %s", err), 1)
 	}
 
-	outputResponse(resp, []string{"Key", "Name", "Channels", "Environments"},
+	outputResponse(resp, []string{"Key", "Name", "Channels"},
 		func(data []byte) [][]string {
 			var result struct {
 				NotificationLists []struct {
-					Key          string   `json:"key"`
-					Name         string   `json:"name"`
-					Templates    []string `json:"templates"`
-					Environments []string `json:"environments"`
+					Key       string   `json:"key"`
+					Name      string   `json:"name"`
+					Templates []string `json:"templates"`
 				} `json:"notification_lists"`
 			}
 			if err := json.Unmarshal(data, &result); err != nil {
@@ -111,15 +98,8 @@ func listNotifications(client *lib.APIClient) {
 
 			rows := make([][]string, len(result.NotificationLists))
 			for i, n := range result.NotificationLists {
-				channels := fmt.Sprintf("%d channels", len(n.Templates))
-				if len(n.Templates) <= 3 {
-					channels = fmt.Sprintf("%v", n.Templates)
-				}
-				envs := "all"
-				if len(n.Environments) > 0 {
-					envs = fmt.Sprintf("%v", n.Environments)
-				}
-				rows[i] = []string{n.Key, n.Name, channels, envs}
+				channels := fmt.Sprintf("%d", len(n.Templates))
+				rows[i] = []string{n.Key, n.Name, channels}
 			}
 			return rows
 		})
@@ -138,14 +118,12 @@ func getNotification(client *lib.APIClient, key string) {
 	outputResponse(resp, nil, nil)
 }
 
-func createNotification(client *lib.APIClient) {
-	body, err := readStdinIfEmpty()
-	if err != nil {
-		fatal(err.Error(), 1)
-	}
+func createNotification(client *lib.APIClient, jsonData string) {
+	body := []byte(jsonData)
 
-	if body == nil {
-		fatal("request body is required for create action (use --data, --file, or pipe JSON to stdin)", 1)
+	var js json.RawMessage
+	if err := json.Unmarshal(body, &js); err != nil {
+		fatal(fmt.Sprintf("Invalid JSON: %s", err), 1)
 	}
 
 	resp, err := client.POST("/notification-lists", body, nil)
@@ -156,14 +134,12 @@ func createNotification(client *lib.APIClient) {
 	outputResponse(resp, nil, nil)
 }
 
-func updateNotification(client *lib.APIClient, key string) {
-	body, err := readStdinIfEmpty()
-	if err != nil {
-		fatal(err.Error(), 1)
-	}
+func updateNotification(client *lib.APIClient, key string, jsonData string) {
+	body := []byte(jsonData)
 
-	if body == nil {
-		fatal("request body is required for update action (use --data, --file, or pipe JSON to stdin)", 1)
+	var js json.RawMessage
+	if err := json.Unmarshal(body, &js); err != nil {
+		fatal(fmt.Sprintf("Invalid JSON: %s", err), 1)
 	}
 
 	resp, err := client.PUT(fmt.Sprintf("/notification-lists/%s", key), body, nil)
@@ -185,7 +161,7 @@ func deleteNotification(client *lib.APIClient, key string) {
 	}
 
 	if resp.IsSuccess() {
-		fmt.Printf("Notification list '%s' deleted successfully\n", key)
+		fmt.Printf("Notification list '%s' deleted\n", key)
 	} else {
 		outputResponse(resp, nil, nil)
 	}

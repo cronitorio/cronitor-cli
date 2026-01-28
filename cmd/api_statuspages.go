@@ -8,8 +8,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	statuspageNew    string
+	statuspageUpdate string
+	statuspageDelete bool
+)
+
 var apiStatuspagesCmd = &cobra.Command{
-	Use:   "statuspages [action] [key]",
+	Use:   "statuspages [key]",
 	Short: "Manage status pages",
 	Long: `
 Manage Cronitor status pages.
@@ -18,74 +24,58 @@ Status pages turn your Cronitor monitoring data into public (or private)
 communication. Your monitors feed directly into status components, creating
 a real-time view of your system health.
 
-Actions:
-  list     - List all status pages (default)
-  get      - Get a specific status page by key
-  create   - Create a new status page
-  update   - Update an existing status page
-  delete   - Delete a status page
-
 Examples:
   List all status pages:
   $ cronitor api statuspages
 
   Get a specific status page:
-  $ cronitor api statuspages get <key>
+  $ cronitor api statuspages <key>
 
   Create a status page:
-  $ cronitor api statuspages create --data '{"name":"API Status","hosted_subdomain":"api-status"}'
+  $ cronitor api statuspages --new '{"name":"API Status","hosted_subdomain":"api-status"}'
 
   Update a status page:
-  $ cronitor api statuspages update <key> --data '{"name":"Updated Status Page"}'
+  $ cronitor api statuspages <key> --update '{"name":"Updated Status Page"}'
 
   Delete a status page:
-  $ cronitor api statuspages delete <key>
+  $ cronitor api statuspages <key> --delete
 
   Output as table:
   $ cronitor api statuspages --format table
 `,
 	Run: func(cmd *cobra.Command, args []string) {
-		action := "list"
-		var key string
-
-		if len(args) > 0 {
-			action = args[0]
-		}
-		if len(args) > 1 {
-			key = args[1]
-		}
-
 		client := getAPIClient()
+		key := ""
+		if len(args) > 0 {
+			key = args[0]
+		}
 
-		switch action {
-		case "list":
-			listStatuspages(client)
-		case "get":
+		switch {
+		case statuspageNew != "":
+			createStatuspage(client, statuspageNew)
+		case statuspageUpdate != "":
 			if key == "" {
-				fatal("status page key is required for get action", 1)
+				fatal("status page key is required for --update", 1)
 			}
-			getStatuspage(client, key)
-		case "create":
-			createStatuspage(client)
-		case "update":
+			updateStatuspage(client, key, statuspageUpdate)
+		case statuspageDelete:
 			if key == "" {
-				fatal("status page key is required for update action", 1)
-			}
-			updateStatuspage(client, key)
-		case "delete":
-			if key == "" {
-				fatal("status page key is required for delete action", 1)
+				fatal("status page key is required for --delete", 1)
 			}
 			deleteStatuspage(client, key)
+		case key != "":
+			getStatuspage(client, key)
 		default:
-			// Treat first arg as a key for get if it doesn't match an action
-			getStatuspage(client, action)
+			listStatuspages(client)
 		}
 	},
 }
 
 func init() {
 	apiCmd.AddCommand(apiStatuspagesCmd)
+	apiStatuspagesCmd.Flags().StringVar(&statuspageNew, "new", "", "Create status page with JSON data")
+	apiStatuspagesCmd.Flags().StringVar(&statuspageUpdate, "update", "", "Update status page with JSON data")
+	apiStatuspagesCmd.Flags().BoolVar(&statuspageDelete, "delete", false, "Delete the status page")
 }
 
 func listStatuspages(client *lib.APIClient) {
@@ -131,14 +121,12 @@ func getStatuspage(client *lib.APIClient, key string) {
 	outputResponse(resp, nil, nil)
 }
 
-func createStatuspage(client *lib.APIClient) {
-	body, err := readStdinIfEmpty()
-	if err != nil {
-		fatal(err.Error(), 1)
-	}
+func createStatuspage(client *lib.APIClient, jsonData string) {
+	body := []byte(jsonData)
 
-	if body == nil {
-		fatal("request body is required for create action (use --data, --file, or pipe JSON to stdin)", 1)
+	var js json.RawMessage
+	if err := json.Unmarshal(body, &js); err != nil {
+		fatal(fmt.Sprintf("Invalid JSON: %s", err), 1)
 	}
 
 	resp, err := client.POST("/statuspages", body, nil)
@@ -149,14 +137,12 @@ func createStatuspage(client *lib.APIClient) {
 	outputResponse(resp, nil, nil)
 }
 
-func updateStatuspage(client *lib.APIClient, key string) {
-	body, err := readStdinIfEmpty()
-	if err != nil {
-		fatal(err.Error(), 1)
-	}
+func updateStatuspage(client *lib.APIClient, key string, jsonData string) {
+	body := []byte(jsonData)
 
-	if body == nil {
-		fatal("request body is required for update action (use --data, --file, or pipe JSON to stdin)", 1)
+	var js json.RawMessage
+	if err := json.Unmarshal(body, &js); err != nil {
+		fatal(fmt.Sprintf("Invalid JSON: %s", err), 1)
 	}
 
 	resp, err := client.PUT(fmt.Sprintf("/statuspages/%s", key), body, nil)
@@ -178,7 +164,7 @@ func deleteStatuspage(client *lib.APIClient, key string) {
 	}
 
 	if resp.IsSuccess() {
-		fmt.Printf("Status page '%s' deleted successfully\n", key)
+		fmt.Printf("Status page '%s' deleted\n", key)
 	} else {
 		outputResponse(resp, nil, nil)
 	}
