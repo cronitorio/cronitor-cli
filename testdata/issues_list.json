@@ -1,5 +1,5 @@
 {
-  "issues": [
+  "data": [
     {
       "key": "issue-001",
       "name": "Database connection timeout",

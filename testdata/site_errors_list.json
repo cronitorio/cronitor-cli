@@ -1,5 +1,5 @@
 {
-  "site_errors": [
+  "data": [
     {
       "key": "err-001",
       "message": "Uncaught TypeError: Cannot read properties of null",

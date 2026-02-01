@@ -323,14 +323,16 @@ Examples:
 			os.Exit(1)
 		}
 
-		var js json.RawMessage
-		if err := json.Unmarshal([]byte(groupData), &js); err != nil {
+		var bodyMap map[string]interface{}
+		if err := json.Unmarshal([]byte(groupData), &bodyMap); err != nil {
 			Error(fmt.Sprintf("Invalid JSON: %s", err))
 			os.Exit(1)
 		}
+		bodyMap["key"] = key
+		body, _ := json.Marshal(bodyMap)
 
 		client := lib.NewAPIClient(dev, log)
-		resp, err := client.PUT(fmt.Sprintf("/groups/%s", key), []byte(groupData), nil)
+		resp, err := client.PUT(fmt.Sprintf("/groups/%s", key), body, nil)
 		if err != nil {
 			Error(fmt.Sprintf("Failed to update group: %s", err))
 			os.Exit(1)

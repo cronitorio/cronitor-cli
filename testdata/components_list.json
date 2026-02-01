@@ -1,5 +1,5 @@
 {
-  "statuspage_components": [
+  "data": [
     {
       "key": "comp-001",
       "name": "API",

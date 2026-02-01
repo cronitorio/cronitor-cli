@@ -144,13 +144,13 @@ Examples:
 		}
 
 		if issueFetchAll {
-			bodies, err := FetchAllPages(client, "/issues", params, "issues")
+			bodies, err := FetchAllPages(client, "/issues", params, "data")
 			if err != nil {
 				Error(fmt.Sprintf("Failed to list issues: %s", err))
 				os.Exit(1)
 			}
 			if issueFormat == "json" || issueFormat == "" {
-				issueOutputToTarget(FormatJSON(MergePagedJSON(bodies, "issues")))
+				issueOutputToTarget(FormatJSON(MergePagedJSON(bodies, "data")))
 				return
 			}
 			// Table: accumulate rows from all pages
@@ -165,7 +165,7 @@ Examples:
 						State    string `json:"state"`
 						Severity string `json:"severity"`
 						Started  string `json:"started"`
-					} `json:"issues"`
+					} `json:"data"`
 				}
 				json.Unmarshal(body, &result)
 				for _, issue := range result.Issues {
@@ -203,7 +203,7 @@ Examples:
 				State    string `json:"state"`
 				Severity string `json:"severity"`
 				Started  string `json:"started"`
-			} `json:"issues"`
+			} `json:"data"`
 		}
 		if err := json.Unmarshal(resp.Body, &result); err != nil {
 			Error(fmt.Sprintf("Failed to parse response: %s", err))
@@ -376,14 +376,16 @@ Examples:
 			os.Exit(1)
 		}
 
-		var js json.RawMessage
-		if err := json.Unmarshal([]byte(issueData), &js); err != nil {
+		var bodyMap map[string]interface{}
+		if err := json.Unmarshal([]byte(issueData), &bodyMap); err != nil {
 			Error(fmt.Sprintf("Invalid JSON: %s", err))
 			os.Exit(1)
 		}
+		bodyMap["key"] = key
+		body, _ := json.Marshal(bodyMap)
 
 		client := lib.NewAPIClient(dev, log)
-		resp, err := client.PUT(fmt.Sprintf("/issues/%s", key), []byte(issueData), nil)
+		resp, err := client.PUT(fmt.Sprintf("/issues/%s", key), body, nil)
 		if err != nil {
 			Error(fmt.Sprintf("Failed to update issue: %s", err))
 			os.Exit(1)
@@ -413,15 +415,29 @@ var issueResolveCmd = &cobra.Command{
 		key := args[0]
 		client := lib.NewAPIClient(dev, log)
 
-		body := []byte(`{"state":"resolved"}`)
-		resp, err := client.PUT(fmt.Sprintf("/issues/%s", key), body, nil)
+		// Fetch current issue to get required fields
+		getResp, err := client.GET(fmt.Sprintf("/issues/%s", key), nil)
 		if err != nil {
 			Error(fmt.Sprintf("Failed to resolve issue: %s", err))
 			os.Exit(1)
 		}
-
-		if resp.IsNotFound() {
+		if getResp.IsNotFound() {
 			Error(fmt.Sprintf("Issue '%s' not found", key))
+			os.Exit(1)
+		}
+		if !getResp.IsSuccess() {
+			Error(fmt.Sprintf("API Error (%d): %s", getResp.StatusCode, getResp.ParseError()))
+			os.Exit(1)
+		}
+
+		var current map[string]interface{}
+		json.Unmarshal(getResp.Body, &current)
+		current["state"] = "resolved"
+		body, _ := json.Marshal(current)
+
+		resp, err := client.PUT(fmt.Sprintf("/issues/%s", key), body, nil)
+		if err != nil {
+			Error(fmt.Sprintf("Failed to resolve issue: %s", err))
 			os.Exit(1)
 		}
 

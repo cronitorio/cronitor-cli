@@ -97,13 +97,13 @@ Examples:
 		}
 
 		if siteFetchAll {
-			bodies, err := FetchAllPages(client, "/sites", params, "sites")
+			bodies, err := FetchAllPages(client, "/sites", params, "data")
 			if err != nil {
 				Error(fmt.Sprintf("Failed to list sites: %s", err))
 				os.Exit(1)
 			}
 			if siteFormat == "json" || siteFormat == "" {
-				siteOutputToTarget(FormatJSON(MergePagedJSON(bodies, "sites")))
+				siteOutputToTarget(FormatJSON(MergePagedJSON(bodies, "data")))
 				return
 			}
 			// Table: accumulate rows from all pages
@@ -119,7 +119,7 @@ Examples:
 						WebVitalsEnabled bool   `json:"webvitals_enabled"`
 						ErrorsEnabled    bool   `json:"errors_enabled"`
 						Sampling         int    `json:"sampling"`
-					} `json:"sites"`
+					} `json:"data"`
 				}
 				json.Unmarshal(body, &result)
 				for _, s := range result.Sites {
@@ -163,7 +163,7 @@ Examples:
 				WebVitalsEnabled bool   `json:"webvitals_enabled"`
 				ErrorsEnabled    bool   `json:"errors_enabled"`
 				Sampling         int    `json:"sampling"`
-			} `json:"sites"`
+			} `json:"data"`
 		}
 		if err := json.Unmarshal(resp.Body, &result); err != nil {
 			Error(fmt.Sprintf("Failed to parse response: %s", err))
@@ -305,14 +305,16 @@ Examples:
 			os.Exit(1)
 		}
 
-		var js json.RawMessage
-		if err := json.Unmarshal([]byte(siteData), &js); err != nil {
+		var bodyMap map[string]interface{}
+		if err := json.Unmarshal([]byte(siteData), &bodyMap); err != nil {
 			Error(fmt.Sprintf("Invalid JSON: %s", err))
 			os.Exit(1)
 		}
+		bodyMap["key"] = key
+		body, _ := json.Marshal(bodyMap)
 
 		client := lib.NewAPIClient(dev, log)
-		resp, err := client.PUT(fmt.Sprintf("/sites/%s", key), []byte(siteData), nil)
+		resp, err := client.PUT(fmt.Sprintf("/sites/%s", key), body, nil)
 		if err != nil {
 			Error(fmt.Sprintf("Failed to update site: %s", err))
 			os.Exit(1)
@@ -557,7 +559,7 @@ Examples:
 				ErrorType string `json:"error_type"`
 				Filename  string `json:"filename"`
 				Count     int    `json:"count"`
-			} `json:"site_errors"`
+			} `json:"data"`
 		}
 		if err := json.Unmarshal(resp.Body, &result); err != nil {
 			Error(fmt.Sprintf("Failed to parse response: %s", err))

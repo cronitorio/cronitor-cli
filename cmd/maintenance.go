@@ -105,13 +105,13 @@ Examples:
 		}
 
 		if maintenanceFetchAll {
-			bodies, err := FetchAllPages(client, "/maintenance_windows", params, "maintenance_windows")
+			bodies, err := FetchAllPages(client, "/maintenance_windows", params, "data")
 			if err != nil {
 				Error(fmt.Sprintf("Failed to list maintenance windows: %s", err))
 				os.Exit(1)
 			}
 			if maintenanceFormat == "json" || maintenanceFormat == "" {
-				maintenanceOutputToTarget(FormatJSON(MergePagedJSON(bodies, "maintenance_windows")))
+				maintenanceOutputToTarget(FormatJSON(MergePagedJSON(bodies, "data")))
 				return
 			}
 			// Table: accumulate rows from all pages
@@ -127,7 +127,7 @@ Examples:
 						End      string `json:"end"`
 						State    string `json:"state"`
 						Duration int    `json:"duration"`
-					} `json:"maintenance_windows"`
+					} `json:"data"`
 				}
 				json.Unmarshal(body, &result)
 				for _, w := range result.Windows {
@@ -179,7 +179,7 @@ Examples:
 				End      string `json:"end"`
 				State    string `json:"state"`
 				Duration int    `json:"duration"`
-			} `json:"maintenance_windows"`
+			} `json:"data"`
 		}
 		if err := json.Unmarshal(resp.Body, &result); err != nil {
 			Error(fmt.Sprintf("Failed to parse response: %s", err))
@@ -337,6 +337,13 @@ Examples:
 		if body == nil {
 			Error("Update data required. Use --data or --file")
 			os.Exit(1)
+		}
+
+		// Inject key into body
+		var bodyMap map[string]interface{}
+		if err := json.Unmarshal(body, &bodyMap); err == nil {
+			bodyMap["key"] = key
+			body, _ = json.Marshal(bodyMap)
 		}
 
 		client := lib.NewAPIClient(dev, log)

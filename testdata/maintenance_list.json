@@ -1,5 +1,5 @@
 {
-  "maintenance_windows": [
+  "data": [
     {
       "key": "maint-001",
       "name": "Deploy v2.0",

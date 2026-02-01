@@ -87,13 +87,13 @@ Examples:
 		}
 
 		if statuspageFetchAll {
-			bodies, err := FetchAllPages(client, "/statuspages", params, "statuspages")
+			bodies, err := FetchAllPages(client, "/statuspages", params, "data")
 			if err != nil {
 				Error(fmt.Sprintf("Failed to list status pages: %s", err))
 				os.Exit(1)
 			}
 			if statuspageFormat == "json" || statuspageFormat == "" {
-				statuspageOutputToTarget(FormatJSON(MergePagedJSON(bodies, "statuspages")))
+				statuspageOutputToTarget(FormatJSON(MergePagedJSON(bodies, "data")))
 				return
 			}
 			// Table: accumulate rows from all pages
@@ -105,9 +105,9 @@ Examples:
 					StatusPages []struct {
 						Key       string `json:"key"`
 						Name      string `json:"name"`
-						Subdomain string `json:"subdomain"`
+						Subdomain string `json:"hosted_subdomain"`
 						Status    string `json:"status"`
-					} `json:"statuspages"`
+					} `json:"data"`
 				}
 				json.Unmarshal(body, &result)
 				for _, sp := range result.StatusPages {
@@ -137,9 +137,9 @@ Examples:
 			StatusPages []struct {
 				Key       string `json:"key"`
 				Name      string `json:"name"`
-				Subdomain string `json:"subdomain"`
+				Subdomain string `json:"hosted_subdomain"`
 				Status    string `json:"status"`
-			} `json:"statuspages"`
+			} `json:"data"`
 		}
 		if err := json.Unmarshal(resp.Body, &result); err != nil {
 			Error(fmt.Sprintf("Failed to parse response: %s", err))
@@ -266,14 +266,16 @@ Examples:
 			os.Exit(1)
 		}
 
-		var js json.RawMessage
-		if err := json.Unmarshal([]byte(statuspageData), &js); err != nil {
+		var bodyMap map[string]interface{}
+		if err := json.Unmarshal([]byte(statuspageData), &bodyMap); err != nil {
 			Error(fmt.Sprintf("Invalid JSON: %s", err))
 			os.Exit(1)
 		}
+		bodyMap["key"] = key
+		body, _ := json.Marshal(bodyMap)
 
 		client := lib.NewAPIClient(dev, log)
-		resp, err := client.PUT(fmt.Sprintf("/statuspages/%s", key), []byte(statuspageData), nil)
+		resp, err := client.PUT(fmt.Sprintf("/statuspages/%s", key), body, nil)
 		if err != nil {
 			Error(fmt.Sprintf("Failed to update status page: %s", err))
 			os.Exit(1)
@@ -404,7 +406,7 @@ Examples:
 				Type       string `json:"type"`
 				Statuspage string `json:"statuspage"`
 				Autopub    bool   `json:"autopublish"`
-			} `json:"statuspage_components"`
+			} `json:"data"`
 		}
 		if err := json.Unmarshal(resp.Body, &result); err != nil {
 			Error(fmt.Sprintf("Failed to parse response: %s", err))
@@ -491,14 +493,16 @@ Examples:
 			os.Exit(1)
 		}
 
-		var js json.RawMessage
-		if err := json.Unmarshal([]byte(componentData), &js); err != nil {
+		var bodyMap map[string]interface{}
+		if err := json.Unmarshal([]byte(componentData), &bodyMap); err != nil {
 			Error(fmt.Sprintf("Invalid JSON: %s", err))
 			os.Exit(1)
 		}
+		bodyMap["key"] = key
+		body, _ := json.Marshal(bodyMap)
 
 		client := lib.NewAPIClient(dev, log)
-		resp, err := client.PUT(fmt.Sprintf("/statuspage_components/%s", key), []byte(componentData), nil)
+		resp, err := client.PUT(fmt.Sprintf("/statuspage_components/%s", key), body, nil)
 		if err != nil {
 			Error(fmt.Sprintf("Failed to update component: %s", err))
 			os.Exit(1)
