@@ -1,0 +1,19 @@
+{
+  "groups": [
+    {
+      "key": "production",
+      "name": "Production Jobs",
+      "monitors": ["abc123", "def456"],
+      "created": "2024-01-10T00:00:00Z"
+    },
+    {
+      "key": "staging",
+      "name": "Staging",
+      "monitors": ["ghi789"],
+      "created": "2024-02-01T00:00:00Z"
+    }
+  ],
+  "page_size": 50,
+  "page": 1,
+  "total_count": 2
+}

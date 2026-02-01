@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/cronitorio/cronitor-cli/lib"
 )
 
 // Color palette
@@ -109,15 +110,16 @@ func (t *UITable) Render() string {
 		return mutedStyle.Render("No results found")
 	}
 
-	// Calculate column widths
+	// Calculate column widths using visual width (handles ANSI codes)
 	colWidths := make([]int, len(t.Headers))
 	for i, h := range t.Headers {
-		colWidths[i] = len(h)
+		colWidths[i] = lipgloss.Width(h)
 	}
 	for _, row := range t.Rows {
 		for i, cell := range row {
-			if i < len(colWidths) && len(cell) > colWidths[i] {
-				colWidths[i] = len(cell)
+			cellWidth := lipgloss.Width(cell)
+			if i < len(colWidths) && cellWidth > colWidths[i] {
+				colWidths[i] = cellWidth
 			}
 		}
 	}
@@ -132,10 +134,10 @@ func (t *UITable) Render() string {
 
 	var sb strings.Builder
 
-	// Render header
+	// Render header (add 2 for padding on each side)
 	var headerCells []string
 	for i, h := range t.Headers {
-		cell := tableHeaderStyle.Width(colWidths[i]).Render(h)
+		cell := tableHeaderStyle.Width(colWidths[i] + 2).Render(h)
 		headerCells = append(headerCells, cell)
 	}
 	sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, headerCells...))
@@ -146,11 +148,16 @@ func (t *UITable) Render() string {
 		var cells []string
 		for i, cell := range row {
 			if i < len(colWidths) {
-				// Truncate if needed
-				if len(cell) > colWidths[i] {
-					cell = cell[:colWidths[i]-1] + "…"
+				// Truncate if needed (only for plain text cells)
+				cellWidth := lipgloss.Width(cell)
+				if cellWidth > colWidths[i] {
+					// Simple truncation for cells without ANSI codes
+					if cellWidth == len(cell) {
+						cell = cell[:colWidths[i]-1] + "…"
+					}
+					// For styled cells, just let them overflow slightly
 				}
-				styledCell := tableCellStyle.Width(colWidths[i]).Render(cell)
+				styledCell := tableCellStyle.Width(colWidths[i] + 2).Render(cell)
 				cells = append(cells, styledCell)
 			}
 		}
@@ -209,6 +216,70 @@ func FormatJSON(data []byte) string {
 		return string(data)
 	}
 	return prettyJSON.String()
+}
+
+// FetchAllPages fetches all pages from a paginated API endpoint.
+// It returns all response bodies as a slice, stopping when a page returns
+// an empty items array (identified by itemsKey in the JSON response).
+func FetchAllPages(client *lib.APIClient, endpoint string, params map[string]string, itemsKey string) ([][]byte, error) {
+	var bodies [][]byte
+	page := 1
+	for {
+		p := make(map[string]string)
+		for k, v := range params {
+			p[k] = v
+		}
+		p["page"] = fmt.Sprintf("%d", page)
+
+		resp, err := client.GET(endpoint, p)
+		if err != nil {
+			return bodies, err
+		}
+		if !resp.IsSuccess() {
+			return nil, fmt.Errorf("API Error (%d): %s", resp.StatusCode, resp.ParseError())
+		}
+		bodies = append(bodies, resp.Body)
+
+		// Check if there are items in this page
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(resp.Body, &raw); err != nil {
+			break
+		}
+		if items, ok := raw[itemsKey]; ok {
+			var arr []json.RawMessage
+			if err := json.Unmarshal(items, &arr); err != nil || len(arr) == 0 {
+				break
+			}
+		} else {
+			break
+		}
+
+		page++
+		if page > 200 { // safety limit
+			break
+		}
+	}
+	return bodies, nil
+}
+
+// MergePagedJSON merges multiple paginated API responses into a single JSON array.
+// It extracts items from each page using the specified key and combines them.
+func MergePagedJSON(responses [][]byte, key string) []byte {
+	var allItems []json.RawMessage
+	for _, body := range responses {
+		var page map[string]json.RawMessage
+		if err := json.Unmarshal(body, &page); err != nil {
+			continue
+		}
+		if items, ok := page[key]; ok {
+			var arr []json.RawMessage
+			if err := json.Unmarshal(items, &arr); err == nil {
+				allItems = append(allItems, arr...)
+			}
+		}
+	}
+	result, _ := json.MarshalIndent(allItems, "", "  ")
+	return result
 }
 
 // RenderKeyValue renders a key-value pair

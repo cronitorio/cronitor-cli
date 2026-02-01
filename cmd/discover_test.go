@@ -201,3 +201,21 @@ func TestCreateDefaultName(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateDefaultNameAutoDiscover(t *testing.T) {
+	line := &lib.Line{
+		CommandToRun: "cronitor d3x0c1 cronitor discover --auto /discover/test",
+		LineNumber:   11,
+		RunAs:        "",
+	}
+	crontab := &lib.Crontab{
+		Filename: "/discover/test",
+	}
+
+	defaultName := createDefaultName(line, crontab, "localhost", nil, map[string]bool{})
+
+	expected := "[localhost] Auto discover /discover/test"
+	if defaultName != expected {
+		t.Errorf("Auto discover test failed, got: %s, expected: %s.", defaultName, expected)
+	}
+}

@@ -1,0 +1,18 @@
+{
+  "issues": [
+    {
+      "key": "issue-001",
+      "name": "Database connection timeout",
+      "state": "unresolved",
+      "severity": "outage",
+      "started": "2024-03-15T08:30:00Z"
+    },
+    {
+      "key": "issue-002",
+      "name": "High latency on API",
+      "state": "investigating",
+      "severity": "degraded_performance",
+      "started": "2024-03-14T12:00:00Z"
+    }
+  ]
+}

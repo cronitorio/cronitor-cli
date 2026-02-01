@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/user"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 // getJobLabel returns the appropriate term for a job based on the platform
@@ -109,6 +112,7 @@ var notificationList string
 var existingMonitors = ExistingMonitors{}
 var processingMultipleCrontabs = false
 var userAbortedSync = false // Set to true when user presses Ctrl+D to abort sync entirely
+var syncFile string         // Path to YAML/JSON file for bulk monitor import
 
 // To deprecate this feature we are hijacking this flag that will trigger removal of auto-discover lines from existing user's crontabs.
 var noAutoDiscover = true
@@ -171,6 +175,12 @@ Example where you perform a dry-run without any crontab modifications:
 				lipgloss.NewStyle().Italic(true).Render("cronitor signup"),
 				lipgloss.NewStyle().Bold(true).Render("Existing user?"),
 				lipgloss.NewStyle().Italic(true).Render("cronitor configure --api-key <key>")), 1)
+		}
+
+		// Handle --file flag for bulk monitor import from YAML/JSON file
+		if syncFile != "" {
+			importMonitorsFromFile(syncFile)
+			return
 		}
 
 		var username string
@@ -273,6 +283,74 @@ func processDirectory(username, directory string) {
 			}
 		}
 	}
+}
+
+// importMonitorsFromFile imports monitors from a YAML or JSON file
+// YAML files are sent with Content-Type: application/yaml
+// JSON files are sent with Content-Type: application/json
+func importMonitorsFromFile(filePath string) {
+	printSuccessText(fmt.Sprintf("Importing monitors from %s...", filePath), false)
+
+	// Read the file
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		fatal(fmt.Sprintf("Failed to read file: %s", err.Error()), 1)
+	}
+
+	// Determine content type based on file extension
+	ext := strings.ToLower(filepath.Ext(filePath))
+	var contentType string
+
+	switch ext {
+	case ".yaml", ".yml":
+		contentType = "application/yaml"
+		// Basic validation - try to parse YAML
+		var yamlData interface{}
+		if err := yaml.Unmarshal(data, &yamlData); err != nil {
+			fatal(fmt.Sprintf("Failed to parse YAML: %s", err.Error()), 1)
+		}
+	case ".json":
+		contentType = "application/json"
+		// Basic validation - try to parse JSON
+		var jsonData interface{}
+		if err := json.Unmarshal(data, &jsonData); err != nil {
+			fatal(fmt.Sprintf("Failed to parse JSON: %s", err.Error()), 1)
+		}
+	default:
+		fatal(fmt.Sprintf("Unsupported file format: %s (use .yaml, .yml, or .json)", ext), 1)
+	}
+
+	// Send to the API with the appropriate content type
+	printDoneText("Sending to Cronitor...", false)
+
+	response, err := getCronitorApi().PutRawMonitors(data, contentType)
+	if err != nil {
+		fatal(fmt.Sprintf("API error: %s", err.Error()), 1)
+	}
+
+	// Try to parse response to show results
+	// Response format may vary based on input format
+	var result struct {
+		Monitors []struct {
+			Key  string `json:"key"`
+			Name string `json:"name"`
+		} `json:"monitors"`
+	}
+	if err := json.Unmarshal(response, &result); err == nil && len(result.Monitors) > 0 {
+		printDoneText(fmt.Sprintf("Successfully synced %d monitor(s)", len(result.Monitors)), false)
+		for _, m := range result.Monitors {
+			name := m.Name
+			if name == "" {
+				name = m.Key
+			}
+			printSuccessText(fmt.Sprintf("  • %s", name), false)
+		}
+	} else {
+		// For YAML responses or other formats, just show success
+		printDoneText("Monitors synced successfully", false)
+	}
+
+	printSuccessText("View your dashboard: https://cronitor.io/app/dashboard", false)
 }
 
 func processCrontab(crontab *lib.Crontab) bool {
@@ -792,6 +870,7 @@ func init() {
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")
 	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Do not use an interactive shell. Write updated crontab to stdout.")
+	discoverCmd.Flags().StringVar(&syncFile, "file", "", "Path to YAML or JSON file containing monitor definitions for bulk import")
 
 	discoverCmd.Flags().BoolVar(&isSilent, "silent", isSilent, "")
 	discoverCmd.Flags().MarkHidden("silent")

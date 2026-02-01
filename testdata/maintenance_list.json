@@ -1,0 +1,20 @@
+{
+  "maintenance_windows": [
+    {
+      "key": "maint-001",
+      "name": "Deploy v2.0",
+      "start": "2024-03-20T02:00:00Z",
+      "end": "2024-03-20T04:00:00Z",
+      "state": "upcoming",
+      "duration": 120
+    },
+    {
+      "key": "maint-002",
+      "name": "DB Migration",
+      "start": "2024-03-15T00:00:00Z",
+      "end": "2024-03-15T02:00:00Z",
+      "state": "past",
+      "duration": 120
+    }
+  ]
+}

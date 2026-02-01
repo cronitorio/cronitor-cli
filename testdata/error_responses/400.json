@@ -1,0 +1,6 @@
+{
+  "errors": [
+    {"message": "name is required"},
+    {"message": "type must be one of: job, check, heartbeat, site"}
+  ]
+}

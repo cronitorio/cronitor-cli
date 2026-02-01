@@ -13,6 +13,10 @@ import (
 	"github.com/spf13/viper"
 )
 
+// BaseURLOverride allows tests to point NewAPIClient at a mock server.
+// When non-empty, NewAPIClient uses this instead of the default base URL.
+var BaseURLOverride string
+
 // APIClient provides a generic interface for Cronitor API operations
 type APIClient struct {
 	BaseURL   string
@@ -40,7 +44,9 @@ type PaginatedResponse struct {
 // NewAPIClient creates a new API client with the given configuration
 func NewAPIClient(isDev bool, logger func(string)) *APIClient {
 	baseURL := "https://cronitor.io/api"
-	if isDev {
+	if BaseURLOverride != "" {
+		baseURL = BaseURLOverride
+	} else if isDev {
 		baseURL = "http://dev.cronitor.io/api"
 	}
 
@@ -92,7 +98,9 @@ func (c *APIClient) Request(method, endpoint string, body []byte, queryParams ma
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", c.UserAgent)
-	req.Header.Set("Cronitor-Version", "2025-11-28")
+	if apiVersion := viper.GetString("CRONITOR_API_VERSION"); apiVersion != "" {
+		req.Header.Set("Cronitor-Version", apiVersion)
+	}
 
 	client := &http.Client{
 		Timeout: 120 * time.Second,

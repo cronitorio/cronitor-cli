@@ -17,12 +17,19 @@ var notificationCmd = &cobra.Command{
 	Short:   "Manage notification lists",
 	Long: `Manage Cronitor notification lists.
 
+Notification lists define where alerts are sent when monitors fail or recover.
+Supported channels: email, slack, pagerduty, opsgenie, victorops, microsoft-teams,
+discord, telegram, gchat, larksuite, webhooks, and SMS (phones).
+
 Examples:
   cronitor notification list
-  cronitor notification get <key>
-  cronitor notification create --data '{"name":"DevOps Team","email":["team@example.com"]}'
-  cronitor notification update <key> --data '{"name":"Updated Name"}'
-  cronitor notification delete <key>`,
+  cronitor notification get default
+  cronitor notification create "DevOps Team" --emails "dev@example.com,ops@example.com"
+  cronitor notification create "Slack Alerts" --slack "#alerts"
+  cronitor notification update my-list --name "New Name"
+  cronitor notification delete old-list
+
+For full API documentation, see https://cronitor.io/docs/notifications-api.md`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(viper.GetString(varApiKey)) < 10 {
 			return errors.New("API key required. Run 'cronitor configure' or use --api-key flag")
@@ -35,16 +42,18 @@ Examples:
 }
 
 var (
-	notificationPage   int
-	notificationFormat string
-	notificationOutput string
-	notificationData   string
-	notificationFile   string
+	notificationPage     int
+	notificationPageSize int
+	notificationFormat   string
+	notificationOutput   string
+	notificationData     string
+	notificationFetchAll bool
 )
 
 func init() {
 	RootCmd.AddCommand(notificationCmd)
 	notificationCmd.PersistentFlags().IntVar(&notificationPage, "page", 1, "Page number")
+	notificationCmd.PersistentFlags().IntVar(&notificationPageSize, "page-size", 0, "Number of results per page")
 	notificationCmd.PersistentFlags().StringVar(&notificationFormat, "format", "", "Output format: json, table")
 	notificationCmd.PersistentFlags().StringVarP(&notificationOutput, "output", "o", "", "Write output to file")
 }
@@ -53,14 +62,64 @@ func init() {
 var notificationListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all notification lists",
+	Long: `List all notification lists.
+
+Examples:
+  cronitor notification list
+  cronitor notification list --page 2
+  cronitor notification list --page-size 100
+  cronitor notification list --format json`,
 	Run: func(cmd *cobra.Command, args []string) {
 		client := lib.NewAPIClient(dev, log)
 		params := make(map[string]string)
 		if notificationPage > 1 {
 			params["page"] = fmt.Sprintf("%d", notificationPage)
 		}
+		if notificationPageSize > 0 {
+			params["pageSize"] = fmt.Sprintf("%d", notificationPageSize)
+		}
 
-		resp, err := client.GET("/notification-lists", params)
+		if notificationFetchAll {
+			bodies, err := FetchAllPages(client, "/notifications", params, "templates")
+			if err != nil {
+				Error(fmt.Sprintf("Failed to list notification lists: %s", err))
+				os.Exit(1)
+			}
+			if notificationFormat == "json" || notificationFormat == "" {
+				notificationOutputToTarget(FormatJSON(MergePagedJSON(bodies, "templates")))
+				return
+			}
+			// Table: accumulate rows from all pages
+			table := &UITable{
+				Headers: []string{"NAME", "KEY", "EMAILS", "SLACK", "MONITORS"},
+			}
+			for _, body := range bodies {
+				var result struct {
+					Templates []struct {
+						Key           string `json:"key"`
+						Name          string `json:"name"`
+						Notifications struct {
+							Emails   []string `json:"emails"`
+							Slack    []string `json:"slack"`
+							Webhooks []string `json:"webhooks"`
+							Phones   []string `json:"phones"`
+						} `json:"notifications"`
+						Monitors []string `json:"monitors"`
+					} `json:"templates"`
+				}
+				json.Unmarshal(body, &result)
+				for _, n := range result.Templates {
+					emailCount := fmt.Sprintf("%d", len(n.Notifications.Emails))
+					slackCount := fmt.Sprintf("%d", len(n.Notifications.Slack))
+					monitorCount := fmt.Sprintf("%d", len(n.Monitors))
+					table.Rows = append(table.Rows, []string{n.Name, n.Key, emailCount, slackCount, monitorCount})
+				}
+			}
+			notificationOutputToTarget(table.Render())
+			return
+		}
+
+		resp, err := client.GET("/notifications", params)
 		if err != nil {
 			Error(fmt.Sprintf("Failed to list notification lists: %s", err))
 			os.Exit(1)
@@ -72,12 +131,17 @@ var notificationListCmd = &cobra.Command{
 		}
 
 		var result struct {
-			NotificationLists []struct {
-				Key      string   `json:"key"`
-				Name     string   `json:"name"`
-				Emails   []string `json:"emails"`
-				Webhooks []string `json:"webhooks"`
-			} `json:"notification_lists"`
+			Templates []struct {
+				Key           string `json:"key"`
+				Name          string `json:"name"`
+				Notifications struct {
+					Emails   []string `json:"emails"`
+					Slack    []string `json:"slack"`
+					Webhooks []string `json:"webhooks"`
+					Phones   []string `json:"phones"`
+				} `json:"notifications"`
+				Monitors []string `json:"monitors"`
+			} `json:"templates"`
 		}
 		if err := json.Unmarshal(resp.Body, &result); err != nil {
 			Error(fmt.Sprintf("Failed to parse response: %s", err))
@@ -95,13 +159,14 @@ var notificationListCmd = &cobra.Command{
 		}
 
 		table := &UITable{
-			Headers: []string{"KEY", "NAME", "EMAILS", "WEBHOOKS"},
+			Headers: []string{"NAME", "KEY", "EMAILS", "SLACK", "MONITORS"},
 		}
 
-		for _, n := range result.NotificationLists {
-			emailCount := fmt.Sprintf("%d", len(n.Emails))
-			webhookCount := fmt.Sprintf("%d", len(n.Webhooks))
-			table.Rows = append(table.Rows, []string{n.Key, n.Name, emailCount, webhookCount})
+		for _, n := range result.Templates {
+			emailCount := fmt.Sprintf("%d", len(n.Notifications.Emails))
+			slackCount := fmt.Sprintf("%d", len(n.Notifications.Slack))
+			monitorCount := fmt.Sprintf("%d", len(n.Monitors))
+			table.Rows = append(table.Rows, []string{n.Name, n.Key, emailCount, slackCount, monitorCount})
 		}
 
 		notificationOutputToTarget(table.Render())
@@ -112,12 +177,18 @@ var notificationListCmd = &cobra.Command{
 var notificationGetCmd = &cobra.Command{
 	Use:   "get <key>",
 	Short: "Get a specific notification list",
-	Args:  cobra.ExactArgs(1),
+	Long: `Get details for a specific notification list.
+
+Examples:
+  cronitor notification get default
+  cronitor notification get devops-team
+  cronitor notification get my-list --format json`,
+	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
 		client := lib.NewAPIClient(dev, log)
 
-		resp, err := client.GET(fmt.Sprintf("/notification-lists/%s", key), nil)
+		resp, err := client.GET(fmt.Sprintf("/notifications/%s", key), nil)
 		if err != nil {
 			Error(fmt.Sprintf("Failed to get notification list: %s", err))
 			os.Exit(1)
@@ -141,19 +212,25 @@ var notificationGetCmd = &cobra.Command{
 var notificationCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new notification list",
+	Long: `Create a new notification list.
+
+Examples:
+  cronitor notification create --data '{"name":"DevOps Team","notifications":{"emails":["dev@example.com"]}}'
+  cronitor notification create --data '{"name":"Slack Alerts","notifications":{"slack":["#alerts"]}}'`,
 	Run: func(cmd *cobra.Command, args []string) {
-		body, err := getNotificationRequestBody()
-		if err != nil {
-			Error(err.Error())
+		if notificationData == "" {
+			Error("Create data required. Use --data '{...}'")
 			os.Exit(1)
 		}
-		if body == nil {
-			Error("JSON data required. Use --data or --file")
+
+		var js json.RawMessage
+		if err := json.Unmarshal([]byte(notificationData), &js); err != nil {
+			Error(fmt.Sprintf("Invalid JSON: %s", err))
 			os.Exit(1)
 		}
 
 		client := lib.NewAPIClient(dev, log)
-		resp, err := client.POST("/notification-lists", body, nil)
+		resp, err := client.POST("/notifications", []byte(notificationData), nil)
 		if err != nil {
 			Error(fmt.Sprintf("Failed to create notification list: %s", err))
 			os.Exit(1)
@@ -164,8 +241,19 @@ var notificationCreateCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		Success("Notification list created")
-		notificationOutputToTarget(FormatJSON(resp.Body))
+		var result struct {
+			Key  string `json:"key"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(resp.Body, &result); err == nil {
+			Success(fmt.Sprintf("Created notification list: %s (key: %s)", result.Name, result.Key))
+		} else {
+			Success("Notification list created")
+		}
+
+		if notificationFormat == "json" {
+			notificationOutputToTarget(FormatJSON(resp.Body))
+		}
 	},
 }
 
@@ -173,23 +261,35 @@ var notificationCreateCmd = &cobra.Command{
 var notificationUpdateCmd = &cobra.Command{
 	Use:   "update <key>",
 	Short: "Update a notification list",
-	Args:  cobra.ExactArgs(1),
+	Long: `Update an existing notification list.
+
+Examples:
+  cronitor notification update my-list --data '{"name":"New Name"}'
+  cronitor notification update my-list --data '{"notifications":{"emails":["new@example.com"]}}'`,
+	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
-		body, err := getNotificationRequestBody()
-		if err != nil {
-			Error(err.Error())
+
+		if notificationData == "" {
+			Error("Update data required. Use --data '{...}'")
 			os.Exit(1)
 		}
-		if body == nil {
-			Error("JSON data required. Use --data or --file")
+
+		var js json.RawMessage
+		if err := json.Unmarshal([]byte(notificationData), &js); err != nil {
+			Error(fmt.Sprintf("Invalid JSON: %s", err))
 			os.Exit(1)
 		}
 
 		client := lib.NewAPIClient(dev, log)
-		resp, err := client.PUT(fmt.Sprintf("/notification-lists/%s", key), body, nil)
+		resp, err := client.PUT(fmt.Sprintf("/notifications/%s", key), []byte(notificationData), nil)
 		if err != nil {
 			Error(fmt.Sprintf("Failed to update notification list: %s", err))
+			os.Exit(1)
+		}
+
+		if resp.IsNotFound() {
+			Error(fmt.Sprintf("Notification '%s' not found", key))
 			os.Exit(1)
 		}
 
@@ -199,7 +299,9 @@ var notificationUpdateCmd = &cobra.Command{
 		}
 
 		Success(fmt.Sprintf("Notification list '%s' updated", key))
-		notificationOutputToTarget(FormatJSON(resp.Body))
+		if notificationFormat == "json" {
+			notificationOutputToTarget(FormatJSON(resp.Body))
+		}
 	},
 }
 
@@ -207,12 +309,18 @@ var notificationUpdateCmd = &cobra.Command{
 var notificationDeleteCmd = &cobra.Command{
 	Use:   "delete <key>",
 	Short: "Delete a notification list",
-	Args:  cobra.ExactArgs(1),
+	Long: `Delete a notification list.
+
+Note: The default notification list cannot be deleted.
+
+Examples:
+  cronitor notification delete old-list`,
+	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
 		client := lib.NewAPIClient(dev, log)
 
-		resp, err := client.DELETE(fmt.Sprintf("/notification-lists/%s", key), nil, nil)
+		resp, err := client.DELETE(fmt.Sprintf("/notifications/%s", key), nil, nil)
 		if err != nil {
 			Error(fmt.Sprintf("Failed to delete notification list: %s", err))
 			os.Exit(1)
@@ -239,34 +347,14 @@ func init() {
 	notificationCmd.AddCommand(notificationUpdateCmd)
 	notificationCmd.AddCommand(notificationDeleteCmd)
 
-	notificationCreateCmd.Flags().StringVarP(&notificationData, "data", "d", "", "JSON data")
-	notificationCreateCmd.Flags().StringVarP(&notificationFile, "file", "f", "", "JSON file")
-	notificationUpdateCmd.Flags().StringVarP(&notificationData, "data", "d", "", "JSON data")
-	notificationUpdateCmd.Flags().StringVarP(&notificationFile, "file", "f", "", "JSON file")
-}
+	// List flags
+	notificationListCmd.Flags().BoolVar(&notificationFetchAll, "all", false, "Fetch all pages of results")
 
-func getNotificationRequestBody() ([]byte, error) {
-	if notificationData != "" && notificationFile != "" {
-		return nil, errors.New("cannot specify both --data and --file")
-	}
+	// Create command flags
+	notificationCreateCmd.Flags().StringVarP(&notificationData, "data", "d", "", "JSON payload")
 
-	if notificationData != "" {
-		var js json.RawMessage
-		if err := json.Unmarshal([]byte(notificationData), &js); err != nil {
-			return nil, fmt.Errorf("invalid JSON: %w", err)
-		}
-		return []byte(notificationData), nil
-	}
-
-	if notificationFile != "" {
-		data, err := os.ReadFile(notificationFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read file: %w", err)
-		}
-		return data, nil
-	}
-
-	return nil, nil
+	// Update command flags
+	notificationUpdateCmd.Flags().StringVarP(&notificationData, "data", "d", "", "JSON payload")
 }
 
 func notificationOutputToTarget(content string) {

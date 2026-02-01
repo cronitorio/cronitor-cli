@@ -1,0 +1,18 @@
+{
+  "environments": [
+    {
+      "key": "production",
+      "name": "Production",
+      "with_alerts": true,
+      "default": true,
+      "active_monitors": 42
+    },
+    {
+      "key": "staging",
+      "name": "Staging",
+      "with_alerts": false,
+      "default": false,
+      "active_monitors": 10
+    }
+  ]
+}

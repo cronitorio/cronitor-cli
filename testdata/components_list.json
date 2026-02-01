@@ -1,0 +1,18 @@
+{
+  "statuspage_components": [
+    {
+      "key": "comp-001",
+      "name": "API",
+      "type": "monitor",
+      "statuspage": "main-status",
+      "autopublish": true
+    },
+    {
+      "key": "comp-002",
+      "name": "Production Services",
+      "type": "group",
+      "statuspage": "main-status",
+      "autopublish": false
+    }
+  ]
+}

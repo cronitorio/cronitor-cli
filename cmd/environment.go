@@ -17,12 +17,18 @@ var environmentCmd = &cobra.Command{
 	Short:   "Manage environments",
 	Long: `Manage Cronitor environments.
 
+Environments allow you to separate monitors by deployment stage (production, staging, etc.)
+and control which environments trigger alerts.
+
 Examples:
   cronitor environment list
-  cronitor environment get <key>
-  cronitor environment create --data '{"name":"Production","key":"production"}'
-  cronitor environment update <key> --data '{"name":"Updated Name"}'
-  cronitor environment delete <key>`,
+  cronitor environment get production
+  cronitor environment create staging --name "Staging" --no-alerts
+  cronitor environment create production --name "Production" --with-alerts
+  cronitor environment update staging --name "QA Environment"
+  cronitor environment delete old-env
+
+For full API documentation, see https://cronitor.io/docs/environments-api.md`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(viper.GetString(varApiKey)) < 10 {
 			return errors.New("API key required. Run 'cronitor configure' or use --api-key flag")
@@ -35,11 +41,11 @@ Examples:
 }
 
 var (
-	environmentPage   int
-	environmentFormat string
-	environmentOutput string
-	environmentData   string
-	environmentFile   string
+	environmentPage     int
+	environmentFormat   string
+	environmentOutput   string
+	environmentData     string
+	environmentFetchAll bool
 )
 
 func init() {
@@ -53,11 +59,58 @@ func init() {
 var environmentListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all environments",
+	Long: `List all environments.
+
+Examples:
+  cronitor environment list
+  cronitor environment list --format json`,
 	Run: func(cmd *cobra.Command, args []string) {
 		client := lib.NewAPIClient(dev, log)
 		params := make(map[string]string)
 		if environmentPage > 1 {
 			params["page"] = fmt.Sprintf("%d", environmentPage)
+		}
+
+		if environmentFetchAll {
+			bodies, err := FetchAllPages(client, "/environments", params, "environments")
+			if err != nil {
+				Error(fmt.Sprintf("Failed to list environments: %s", err))
+				os.Exit(1)
+			}
+			if environmentFormat == "json" || environmentFormat == "" {
+				environmentOutputToTarget(FormatJSON(MergePagedJSON(bodies, "environments")))
+				return
+			}
+			// Table: accumulate rows from all pages
+			table := &UITable{
+				Headers: []string{"NAME", "KEY", "ALERTS", "MONITORS", "DEFAULT"},
+			}
+			for _, body := range bodies {
+				var result struct {
+					Environments []struct {
+						Key            string `json:"key"`
+						Name           string `json:"name"`
+						WithAlerts     bool   `json:"with_alerts"`
+						Default        bool   `json:"default"`
+						ActiveMonitors int    `json:"active_monitors"`
+					} `json:"environments"`
+				}
+				json.Unmarshal(body, &result)
+				for _, e := range result.Environments {
+					alerts := mutedStyle.Render("off")
+					if e.WithAlerts {
+						alerts = successStyle.Render("on")
+					}
+					isDefault := ""
+					if e.Default {
+						isDefault = "yes"
+					}
+					monitors := fmt.Sprintf("%d", e.ActiveMonitors)
+					table.Rows = append(table.Rows, []string{e.Name, e.Key, alerts, monitors, isDefault})
+				}
+			}
+			environmentOutputToTarget(table.Render())
+			return
 		}
 
 		resp, err := client.GET("/environments", params)
@@ -73,8 +126,11 @@ var environmentListCmd = &cobra.Command{
 
 		var result struct {
 			Environments []struct {
-				Key  string `json:"key"`
-				Name string `json:"name"`
+				Key            string `json:"key"`
+				Name           string `json:"name"`
+				WithAlerts     bool   `json:"with_alerts"`
+				Default        bool   `json:"default"`
+				ActiveMonitors int    `json:"active_monitors"`
 			} `json:"environments"`
 		}
 		if err := json.Unmarshal(resp.Body, &result); err != nil {
@@ -93,11 +149,20 @@ var environmentListCmd = &cobra.Command{
 		}
 
 		table := &UITable{
-			Headers: []string{"KEY", "NAME"},
+			Headers: []string{"NAME", "KEY", "ALERTS", "MONITORS", "DEFAULT"},
 		}
 
 		for _, e := range result.Environments {
-			table.Rows = append(table.Rows, []string{e.Key, e.Name})
+			alerts := mutedStyle.Render("off")
+			if e.WithAlerts {
+				alerts = successStyle.Render("on")
+			}
+			isDefault := ""
+			if e.Default {
+				isDefault = "yes"
+			}
+			monitors := fmt.Sprintf("%d", e.ActiveMonitors)
+			table.Rows = append(table.Rows, []string{e.Name, e.Key, alerts, monitors, isDefault})
 		}
 
 		environmentOutputToTarget(table.Render())
@@ -137,19 +202,25 @@ var environmentGetCmd = &cobra.Command{
 var environmentCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new environment",
+	Long: `Create a new environment.
+
+Examples:
+  cronitor environment create --data '{"key":"staging","name":"Staging Environment"}'
+  cronitor environment create --data '{"key":"production","name":"Production","with_alerts":true}'`,
 	Run: func(cmd *cobra.Command, args []string) {
-		body, err := getEnvironmentRequestBody()
-		if err != nil {
-			Error(err.Error())
+		if environmentData == "" {
+			Error("Create data required. Use --data '{...}'")
 			os.Exit(1)
 		}
-		if body == nil {
-			Error("JSON data required. Use --data or --file")
+
+		var js json.RawMessage
+		if err := json.Unmarshal([]byte(environmentData), &js); err != nil {
+			Error(fmt.Sprintf("Invalid JSON: %s", err))
 			os.Exit(1)
 		}
 
 		client := lib.NewAPIClient(dev, log)
-		resp, err := client.POST("/environments", body, nil)
+		resp, err := client.POST("/environments", []byte(environmentData), nil)
 		if err != nil {
 			Error(fmt.Sprintf("Failed to create environment: %s", err))
 			os.Exit(1)
@@ -160,8 +231,19 @@ var environmentCreateCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		Success("Environment created")
-		environmentOutputToTarget(FormatJSON(resp.Body))
+		var result struct {
+			Key  string `json:"key"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(resp.Body, &result); err == nil {
+			Success(fmt.Sprintf("Created environment: %s (key: %s)", result.Name, result.Key))
+		} else {
+			Success("Environment created")
+		}
+
+		if environmentFormat == "json" {
+			environmentOutputToTarget(FormatJSON(resp.Body))
+		}
 	},
 }
 
@@ -169,21 +251,29 @@ var environmentCreateCmd = &cobra.Command{
 var environmentUpdateCmd = &cobra.Command{
 	Use:   "update <key>",
 	Short: "Update an environment",
-	Args:  cobra.ExactArgs(1),
+	Long: `Update an existing environment.
+
+Examples:
+  cronitor environment update staging --data '{"name":"Staging Environment"}'
+  cronitor environment update production --data '{"with_alerts":true}'
+  cronitor environment update dev --data '{"with_alerts":false}'`,
+	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
-		body, err := getEnvironmentRequestBody()
-		if err != nil {
-			Error(err.Error())
+
+		if environmentData == "" {
+			Error("Update data required. Use --data '{...}'")
 			os.Exit(1)
 		}
-		if body == nil {
-			Error("JSON data required. Use --data or --file")
+
+		var js json.RawMessage
+		if err := json.Unmarshal([]byte(environmentData), &js); err != nil {
+			Error(fmt.Sprintf("Invalid JSON: %s", err))
 			os.Exit(1)
 		}
 
 		client := lib.NewAPIClient(dev, log)
-		resp, err := client.PUT(fmt.Sprintf("/environments/%s", key), body, nil)
+		resp, err := client.PUT(fmt.Sprintf("/environments/%s", key), []byte(environmentData), nil)
 		if err != nil {
 			Error(fmt.Sprintf("Failed to update environment: %s", err))
 			os.Exit(1)
@@ -195,7 +285,9 @@ var environmentUpdateCmd = &cobra.Command{
 		}
 
 		Success(fmt.Sprintf("Environment '%s' updated", key))
-		environmentOutputToTarget(FormatJSON(resp.Body))
+		if environmentFormat == "json" {
+			environmentOutputToTarget(FormatJSON(resp.Body))
+		}
 	},
 }
 
@@ -235,34 +327,14 @@ func init() {
 	environmentCmd.AddCommand(environmentUpdateCmd)
 	environmentCmd.AddCommand(environmentDeleteCmd)
 
-	environmentCreateCmd.Flags().StringVarP(&environmentData, "data", "d", "", "JSON data")
-	environmentCreateCmd.Flags().StringVarP(&environmentFile, "file", "f", "", "JSON file")
-	environmentUpdateCmd.Flags().StringVarP(&environmentData, "data", "d", "", "JSON data")
-	environmentUpdateCmd.Flags().StringVarP(&environmentFile, "file", "f", "", "JSON file")
-}
+	// List flags
+	environmentListCmd.Flags().BoolVar(&environmentFetchAll, "all", false, "Fetch all pages of results")
 
-func getEnvironmentRequestBody() ([]byte, error) {
-	if environmentData != "" && environmentFile != "" {
-		return nil, errors.New("cannot specify both --data and --file")
-	}
+	// Create flags
+	environmentCreateCmd.Flags().StringVarP(&environmentData, "data", "d", "", "JSON payload")
 
-	if environmentData != "" {
-		var js json.RawMessage
-		if err := json.Unmarshal([]byte(environmentData), &js); err != nil {
-			return nil, fmt.Errorf("invalid JSON: %w", err)
-		}
-		return []byte(environmentData), nil
-	}
-
-	if environmentFile != "" {
-		data, err := os.ReadFile(environmentFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read file: %w", err)
-		}
-		return data, nil
-	}
-
-	return nil, nil
+	// Update flags
+	environmentUpdateCmd.Flags().StringVarP(&environmentData, "data", "d", "", "JSON payload")
 }
 
 func environmentOutputToTarget(content string) {

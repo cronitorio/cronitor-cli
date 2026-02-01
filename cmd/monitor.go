@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/cronitorio/cronitor-cli/lib"
 	"github.com/spf13/cobra"
@@ -18,12 +19,18 @@ var monitorCmd = &cobra.Command{
 
 Examples:
   cronitor monitor list
+  cronitor monitor list --type job --state failing
   cronitor monitor get <key>
   cronitor monitor create --data '{"key":"my-job","type":"job"}'
   cronitor monitor update <key> --data '{"name":"New Name"}'
   cronitor monitor delete <key>
+  cronitor monitor delete key1 key2 key3
   cronitor monitor pause <key>
-  cronitor monitor unpause <key>`,
+  cronitor monitor unpause <key>
+  cronitor monitor clone <key> --name "Cloned Monitor"
+  cronitor monitor search "backup"
+
+For full API documentation, see https://cronitor.io/docs/monitors-api.md`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(viper.GetString(varApiKey)) < 10 {
 			return errors.New("API key required. Run 'cronitor configure' or use --api-key flag")
@@ -37,13 +44,23 @@ Examples:
 
 // Flags
 var (
-	monitorWithEvents bool
-	monitorPage       int
-	monitorEnv        string
-	monitorFormat     string
-	monitorOutput     string
-	monitorData       string
-	monitorFile       string
+	monitorWithEvents      bool
+	monitorWithInvocations bool
+	monitorPage            int
+	monitorPageSize        int
+	monitorEnv             string
+	monitorFormat          string
+	monitorOutput          string
+	monitorData            string
+	monitorFile            string
+	monitorFetchAll bool
+	// List filters
+	monitorType   []string
+	monitorGroup  string
+	monitorTag    []string
+	monitorState  []string
+	monitorSearch string
+	monitorSort   string
 )
 
 func init() {
@@ -52,7 +69,7 @@ func init() {
 	// Persistent flags for all monitor subcommands
 	monitorCmd.PersistentFlags().IntVar(&monitorPage, "page", 1, "Page number for paginated results")
 	monitorCmd.PersistentFlags().StringVar(&monitorEnv, "env", "", "Filter by environment")
-	monitorCmd.PersistentFlags().StringVar(&monitorFormat, "format", "", "Output format: json, table (default: table for list, json for get)")
+	monitorCmd.PersistentFlags().StringVar(&monitorFormat, "format", "", "Output format: json, table, yaml")
 	monitorCmd.PersistentFlags().StringVarP(&monitorOutput, "output", "o", "", "Write output to file")
 }
 
@@ -64,17 +81,111 @@ var monitorListCmd = &cobra.Command{
 
 Examples:
   cronitor monitor list
-  cronitor monitor list --page 2
-  cronitor monitor list --env production
-  cronitor monitor list --format json`,
+  cronitor monitor list --type job
+  cronitor monitor list --type job --type check
+  cronitor monitor list --group production
+  cronitor monitor list --tag critical --tag database
+  cronitor monitor list --state failing
+  cronitor monitor list --state failing --state paused
+  cronitor monitor list --search backup
+  cronitor monitor list --sort name
+  cronitor monitor list --sort -created
+  cronitor monitor list --page-size 100
+  cronitor monitor list --format yaml`,
 	Run: func(cmd *cobra.Command, args []string) {
 		client := lib.NewAPIClient(dev, log)
 		params := make(map[string]string)
+
 		if monitorPage > 1 {
 			params["page"] = fmt.Sprintf("%d", monitorPage)
 		}
+		if monitorPageSize > 0 {
+			params["pageSize"] = fmt.Sprintf("%d", monitorPageSize)
+		}
 		if monitorEnv != "" {
 			params["env"] = monitorEnv
+		}
+		if monitorGroup != "" {
+			params["group"] = monitorGroup
+		}
+		if monitorSearch != "" {
+			params["search"] = monitorSearch
+		}
+		if monitorSort != "" {
+			params["sort"] = monitorSort
+		}
+
+		// Handle array params by joining with comma (API may need multiple params)
+		if len(monitorType) > 0 {
+			params["type"] = strings.Join(monitorType, ",")
+		}
+		if len(monitorTag) > 0 {
+			params["tag"] = strings.Join(monitorTag, ",")
+		}
+		if len(monitorState) > 0 {
+			params["state"] = strings.Join(monitorState, ",")
+		}
+		if monitorWithEvents {
+			params["withEvents"] = "true"
+		}
+		if monitorWithInvocations {
+			params["withInvocations"] = "true"
+		}
+
+		// Check for YAML format
+		format := monitorFormat
+		if format == "yaml" {
+			params["format"] = "yaml"
+		}
+
+		if monitorFetchAll {
+			bodies, err := FetchAllPages(client, "/monitors", params, "monitors")
+			if err != nil {
+				Error(fmt.Sprintf("Failed to list monitors: %s", err))
+				os.Exit(1)
+			}
+			if format == "json" || format == "" {
+				outputToTarget(FormatJSON(MergePagedJSON(bodies, "monitors")))
+				return
+			}
+			if format == "yaml" {
+				for _, body := range bodies {
+					outputToTarget(string(body))
+				}
+				return
+			}
+			// Table format: parse all pages and accumulate rows
+			table := &UITable{
+				Headers: []string{"NAME", "KEY", "TYPE", "STATUS"},
+			}
+			for _, body := range bodies {
+				var result struct {
+					Monitors []struct {
+						Key     string `json:"key"`
+						Name    string `json:"name"`
+						Type    string `json:"type"`
+						Passing bool   `json:"passing"`
+						Paused  bool   `json:"paused"`
+					} `json:"monitors"`
+				}
+				json.Unmarshal(body, &result)
+				for _, m := range result.Monitors {
+					name := m.Name
+					if name == "" {
+						name = m.Key
+					}
+					status := successStyle.Render("passing")
+					if m.Paused {
+						status = warningStyle.Render("paused")
+					} else if !m.Passing {
+						status = errorStyle.Render("failing")
+					}
+					table.Rows = append(table.Rows, []string{name, m.Key, m.Type, status})
+				}
+			}
+			output := table.Render()
+			outputToTarget(output)
+			return
 		}
 
 		resp, err := client.GET("/monitors", params)
@@ -88,6 +199,12 @@ Examples:
 			os.Exit(1)
 		}
 
+		// YAML format - output directly
+		if format == "yaml" {
+			outputToTarget(string(resp.Body))
+			return
+		}
+
 		// Parse response
 		var result struct {
 			Monitors []struct {
@@ -96,6 +213,7 @@ Examples:
 				Type    string `json:"type"`
 				Passing bool   `json:"passing"`
 				Paused  bool   `json:"paused"`
+				Group   string `json:"group"`
 			} `json:"monitors"`
 			PageInfo struct {
 				Page       int `json:"page"`
@@ -108,7 +226,6 @@ Examples:
 			os.Exit(1)
 		}
 
-		format := monitorFormat
 		if format == "" {
 			format = "table"
 		}
@@ -120,7 +237,7 @@ Examples:
 
 		// Table output
 		table := &UITable{
-			Headers: []string{"KEY", "NAME", "TYPE", "STATUS"},
+			Headers: []string{"NAME", "KEY", "TYPE", "STATUS"},
 		}
 
 		for _, m := range result.Monitors {
@@ -134,7 +251,7 @@ Examples:
 			} else if !m.Passing {
 				status = errorStyle.Render("failing")
 			}
-			table.Rows = append(table.Rows, []string{m.Key, name, m.Type, status})
+			table.Rows = append(table.Rows, []string{name, m.Key, m.Type, status})
 		}
 
 		output := table.Render()
@@ -146,6 +263,99 @@ Examples:
 	},
 }
 
+// --- SEARCH ---
+var monitorSearchCmd = &cobra.Command{
+	Use:   "search <query>",
+	Short: "Search monitors",
+	Long: `Search monitors using advanced query syntax.
+
+Supported search scopes (use quotes when using colons):
+  job:        Search job-type monitors (e.g., "job:backup")
+  check:      Search check-type monitors
+  heartbeat:  Search heartbeat-type monitors
+  group:      Search by group name (e.g., "group:production")
+  tag:        Search by tag (e.g., "tag:critical")
+  ungrouped:  Find monitors without a group (no value needed)
+
+Examples:
+  cronitor monitor search backup                   # Simple text search
+  cronitor monitor search "job:backup"             # Search job monitors for "backup"
+  cronitor monitor search "group:production"       # Search monitors in "production" group
+  cronitor monitor search "tag:critical"           # Search monitors with "critical" tag
+  cronitor monitor search "ungrouped:"             # Find all ungrouped monitors
+  cronitor monitor search backup --format yaml     # Output results as YAML`,
+	Args: cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		query := args[0]
+		client := lib.NewAPIClient(dev, log)
+
+		params := map[string]string{"query": query}
+		if monitorPage > 1 {
+			params["page"] = fmt.Sprintf("%d", monitorPage)
+		}
+
+		format := monitorFormat
+		if format == "yaml" {
+			params["format"] = "yaml"
+		}
+
+		resp, err := client.GET("/search", params)
+		if err != nil {
+			Error(fmt.Sprintf("Failed to search: %s", err))
+			os.Exit(1)
+		}
+
+		if !resp.IsSuccess() {
+			Error(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+			os.Exit(1)
+		}
+
+		// YAML format - output directly
+		if format == "yaml" {
+			outputToTarget(string(resp.Body))
+			return
+		}
+
+		if format == "json" || format == "" {
+			outputToTarget(FormatJSON(resp.Body))
+			return
+		}
+
+		// Parse for table output
+		var result struct {
+			Monitors []struct {
+				Key     string `json:"key"`
+				Name    string `json:"name"`
+				Type    string `json:"type"`
+				Passing bool   `json:"passing"`
+				Paused  bool   `json:"paused"`
+			} `json:"monitors"`
+		}
+		if err := json.Unmarshal(resp.Body, &result); err != nil {
+			outputToTarget(FormatJSON(resp.Body))
+			return
+		}
+
+		table := &UITable{
+			Headers: []string{"NAME", "KEY", "TYPE", "STATUS"},
+		}
+		for _, m := range result.Monitors {
+			name := m.Name
+			if name == "" {
+				name = m.Key
+			}
+			status := successStyle.Render("passing")
+			if m.Paused {
+				status = warningStyle.Render("paused")
+			} else if !m.Passing {
+				status = errorStyle.Render("failing")
+			}
+			table.Rows = append(table.Rows, []string{name, m.Key, m.Type, status})
+		}
+		outputToTarget(table.Render())
+	},
+}
+
 // --- GET ---
 var monitorGetCmd = &cobra.Command{
 	Use:   "get <key>",
@@ -154,7 +364,8 @@ var monitorGetCmd = &cobra.Command{
 
 Examples:
   cronitor monitor get my-job
-  cronitor monitor get my-job --with-events`,
+  cronitor monitor get my-job --with-events
+  cronitor monitor get my-job --with-invocations`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
@@ -162,7 +373,10 @@ Examples:
 
 		params := make(map[string]string)
 		if monitorWithEvents {
-			params["withLatestEvents"] = "true"
+			params["withEvents"] = "true"
+		}
+		if monitorWithInvocations {
+			params["withInvocations"] = "true"
 		}
 
 		resp, err := client.GET(fmt.Sprintf("/monitors/%s", key), params)
@@ -193,7 +407,9 @@ var monitorCreateCmd = &cobra.Command{
 
 Examples:
   cronitor monitor create --data '{"key":"my-job","type":"job"}'
+  cronitor monitor create --data '{"key":"my-job","type":"job","schedule":"0 0 * * *"}'
   cronitor monitor create --file monitor.json
+  cronitor monitor create --file monitors.yaml
   cat monitor.json | cronitor monitor create`,
 	Run: func(cmd *cobra.Command, args []string) {
 		body, err := getMonitorRequestBody()
@@ -202,18 +418,28 @@ Examples:
 			os.Exit(1)
 		}
 		if body == nil {
-			Error("JSON data required. Use --data, --file, or pipe JSON to stdin")
+			Error("JSON/YAML data required. Use --data, --file, or pipe to stdin")
 			os.Exit(1)
 		}
 
 		client := lib.NewAPIClient(dev, log)
 
-		// Check if bulk create (array)
+		// Check if bulk create (array) or YAML
 		var testArray []json.RawMessage
 		isBulk := json.Unmarshal(body, &testArray) == nil && len(testArray) > 0
 
+		// Check if YAML (starts with jobs:, checks:, heartbeats:, or sites:)
+		bodyStr := strings.TrimSpace(string(body))
+		isYAML := strings.HasPrefix(bodyStr, "jobs:") ||
+			strings.HasPrefix(bodyStr, "checks:") ||
+			strings.HasPrefix(bodyStr, "heartbeats:") ||
+			strings.HasPrefix(bodyStr, "sites:")
+
 		var resp *lib.APIResponse
-		if isBulk {
+		if isYAML {
+			headers := map[string]string{"Content-Type": "application/yaml"}
+			resp, err = client.PUT("/monitors", body, headers)
+		} else if isBulk {
 			resp, err = client.PUT("/monitors", body, nil)
 		} else {
 			resp, err = client.POST("/monitors", body, nil)
@@ -242,6 +468,7 @@ var monitorUpdateCmd = &cobra.Command{
 
 Examples:
   cronitor monitor update my-job --data '{"name":"New Name"}'
+  cronitor monitor update my-job --data '{"schedule":"0 0 * * *","assertions":["metric.duration < 5min"]}'
   cronitor monitor update my-job --file updates.json`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
@@ -273,6 +500,11 @@ Examples:
 			os.Exit(1)
 		}
 
+		if resp.IsNotFound() {
+			Error(fmt.Sprintf("Monitor '%s' not found", key))
+			os.Exit(1)
+		}
+
 		if !resp.IsSuccess() {
 			Error(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
 			os.Exit(1)
@@ -285,20 +517,95 @@ Examples:
 
 // --- DELETE ---
 var monitorDeleteCmd = &cobra.Command{
-	Use:   "delete <key>",
-	Short: "Delete a monitor",
-	Long: `Delete a monitor.
+	Use:   "delete <key> [keys...]",
+	Short: "Delete one or more monitors",
+	Long: `Delete one or more monitors.
 
 Examples:
-  cronitor monitor delete my-job`,
+  cronitor monitor delete my-job
+  cronitor monitor delete job1 job2 job3`,
+	Args: cobra.MinimumNArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		client := lib.NewAPIClient(dev, log)
+
+		if len(args) == 1 {
+			// Single delete
+			key := args[0]
+			resp, err := client.DELETE(fmt.Sprintf("/monitors/%s", key), nil, nil)
+			if err != nil {
+				Error(fmt.Sprintf("Failed to delete monitor: %s", err))
+				os.Exit(1)
+			}
+
+			if resp.IsNotFound() {
+				Error(fmt.Sprintf("Monitor '%s' not found", key))
+				os.Exit(1)
+			}
+
+			if resp.IsSuccess() {
+				Success(fmt.Sprintf("Monitor '%s' deleted", key))
+			} else {
+				Error(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+				os.Exit(1)
+			}
+		} else {
+			// Bulk delete
+			body := map[string][]string{"monitors": args}
+			bodyJSON, _ := json.Marshal(body)
+
+			resp, err := client.DELETE("/monitors", bodyJSON, nil)
+			if err != nil {
+				Error(fmt.Sprintf("Failed to delete monitors: %s", err))
+				os.Exit(1)
+			}
+
+			if !resp.IsSuccess() {
+				Error(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+				os.Exit(1)
+			}
+
+			var result struct {
+				DeletedCount   int `json:"deleted_count"`
+				RequestedCount int `json:"requested_count"`
+				Errors         struct {
+					Missing []string `json:"missing"`
+				} `json:"errors"`
+			}
+			json.Unmarshal(resp.Body, &result)
+
+			Success(fmt.Sprintf("Deleted %d of %d monitors", result.DeletedCount, result.RequestedCount))
+			if len(result.Errors.Missing) > 0 {
+				Warning(fmt.Sprintf("Not found: %s", strings.Join(result.Errors.Missing, ", ")))
+			}
+		}
+	},
+}
+
+// --- CLONE ---
+var monitorCloneName string
+
+var monitorCloneCmd = &cobra.Command{
+	Use:   "clone <key>",
+	Short: "Clone an existing monitor",
+	Long: `Create a copy of an existing monitor.
+
+Examples:
+  cronitor monitor clone my-job
+  cronitor monitor clone my-job --name "My Job Copy"`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
 		client := lib.NewAPIClient(dev, log)
 
-		resp, err := client.DELETE(fmt.Sprintf("/monitors/%s", key), nil, nil)
+		body := map[string]string{"key": key}
+		if monitorCloneName != "" {
+			body["name"] = monitorCloneName
+		}
+		bodyJSON, _ := json.Marshal(body)
+
+		resp, err := client.POST("/monitors/clone", bodyJSON, nil)
 		if err != nil {
-			Error(fmt.Sprintf("Failed to delete monitor: %s", err))
+			Error(fmt.Sprintf("Failed to clone monitor: %s", err))
 			os.Exit(1)
 		}
 
@@ -307,12 +614,19 @@ Examples:
 			os.Exit(1)
 		}
 
-		if resp.IsSuccess() {
-			Success(fmt.Sprintf("Monitor '%s' deleted", key))
-		} else {
+		if !resp.IsSuccess() {
 			Error(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
 			os.Exit(1)
 		}
+
+		var result struct {
+			Key  string `json:"key"`
+			Name string `json:"name"`
+		}
+		json.Unmarshal(resp.Body, &result)
+
+		Success(fmt.Sprintf("Monitor cloned as '%s'", result.Key))
+		outputToTarget(FormatJSON(resp.Body))
 	},
 }
 
@@ -324,9 +638,13 @@ var monitorPauseCmd = &cobra.Command{
 	Short: "Pause a monitor",
 	Long: `Pause a monitor to stop receiving alerts.
 
+For job, heartbeat & site monitors: telemetry is still recorded but no alerts are sent.
+For check monitors: outbound requests stop entirely.
+
 Examples:
   cronitor monitor pause my-job            # Pause indefinitely
-  cronitor monitor pause my-job --hours 24 # Pause for 24 hours`,
+  cronitor monitor pause my-job --hours 24 # Pause for 24 hours
+  cronitor monitor pause my-job --hours 2  # Pause for 2 hours`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
@@ -396,21 +714,39 @@ Examples:
 
 func init() {
 	monitorCmd.AddCommand(monitorListCmd)
+	monitorCmd.AddCommand(monitorSearchCmd)
 	monitorCmd.AddCommand(monitorGetCmd)
 	monitorCmd.AddCommand(monitorCreateCmd)
 	monitorCmd.AddCommand(monitorUpdateCmd)
 	monitorCmd.AddCommand(monitorDeleteCmd)
+	monitorCmd.AddCommand(monitorCloneCmd)
 	monitorCmd.AddCommand(monitorPauseCmd)
 	monitorCmd.AddCommand(monitorUnpauseCmd)
 
+	// List filters
+	monitorListCmd.Flags().StringArrayVar(&monitorType, "type", nil, "Filter by type: job, check, heartbeat, site (can specify multiple)")
+	monitorListCmd.Flags().StringVar(&monitorGroup, "group", "", "Filter by group key")
+	monitorListCmd.Flags().StringArrayVar(&monitorTag, "tag", nil, "Filter by tag (can specify multiple)")
+	monitorListCmd.Flags().StringArrayVar(&monitorState, "state", nil, "Filter by state: passing, failing, paused (can specify multiple)")
+	monitorListCmd.Flags().StringVar(&monitorSearch, "search", "", "Search across monitor names and keys")
+	monitorListCmd.Flags().IntVar(&monitorPageSize, "page-size", 0, "Number of results per page (default 50)")
+	monitorListCmd.Flags().StringVar(&monitorSort, "sort", "", "Sort order: created, -created, name, -name")
+	monitorListCmd.Flags().BoolVar(&monitorWithEvents, "with-events", false, "Include latest events for each monitor")
+	monitorListCmd.Flags().BoolVar(&monitorWithInvocations, "with-invocations", false, "Include recent invocations for each monitor")
+	monitorListCmd.Flags().BoolVar(&monitorFetchAll, "all", false, "Fetch all pages of results")
+
 	// Get flags
 	monitorGetCmd.Flags().BoolVar(&monitorWithEvents, "with-events", false, "Include latest events")
+	monitorGetCmd.Flags().BoolVar(&monitorWithInvocations, "with-invocations", false, "Include recent invocations")
 
 	// Create/Update flags
-	monitorCreateCmd.Flags().StringVarP(&monitorData, "data", "d", "", "JSON data")
-	monitorCreateCmd.Flags().StringVarP(&monitorFile, "file", "f", "", "JSON file")
+	monitorCreateCmd.Flags().StringVarP(&monitorData, "data", "d", "", "JSON or YAML data")
+	monitorCreateCmd.Flags().StringVarP(&monitorFile, "file", "f", "", "JSON or YAML file")
 	monitorUpdateCmd.Flags().StringVarP(&monitorData, "data", "d", "", "JSON data")
 	monitorUpdateCmd.Flags().StringVarP(&monitorFile, "file", "f", "", "JSON file")
+
+	// Clone flags
+	monitorCloneCmd.Flags().StringVar(&monitorCloneName, "name", "", "Name for the cloned monitor")
 
 	// Pause flags
 	monitorPauseCmd.Flags().StringVar(&monitorPauseHours, "hours", "", "Hours to pause (default: indefinite)")
@@ -423,9 +759,11 @@ func getMonitorRequestBody() ([]byte, error) {
 	}
 
 	if monitorData != "" {
+		// Try JSON first
 		var js json.RawMessage
 		if err := json.Unmarshal([]byte(monitorData), &js); err != nil {
-			return nil, fmt.Errorf("invalid JSON: %w", err)
+			// Might be YAML, return as-is
+			return []byte(monitorData), nil
 		}
 		return []byte(monitorData), nil
 	}
@@ -434,10 +772,6 @@ func getMonitorRequestBody() ([]byte, error) {
 		data, err := os.ReadFile(monitorFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read file: %w", err)
-		}
-		var js json.RawMessage
-		if err := json.Unmarshal(data, &js); err != nil {
-			return nil, fmt.Errorf("invalid JSON in file: %w", err)
 		}
 		return data, nil
 	}
@@ -450,10 +784,6 @@ func getMonitorRequestBody() ([]byte, error) {
 			return nil, fmt.Errorf("failed to read stdin: %w", err)
 		}
 		if len(data) > 0 {
-			var js json.RawMessage
-			if err := json.Unmarshal(data, &js); err != nil {
-				return nil, fmt.Errorf("invalid JSON from stdin: %w", err)
-			}
 			return data, nil
 		}
 	}

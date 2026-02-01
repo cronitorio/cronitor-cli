@@ -1,0 +1,16 @@
+{
+  "statuspages": [
+    {
+      "key": "main-status",
+      "name": "Main Status Page",
+      "subdomain": "status",
+      "status": "operational"
+    },
+    {
+      "key": "internal",
+      "name": "Internal Status",
+      "subdomain": "internal-status",
+      "status": "degraded_performance"
+    }
+  ]
+}

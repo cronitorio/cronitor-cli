@@ -1,0 +1,13 @@
+{
+  "key": "abc123",
+  "name": "Nightly Backup",
+  "type": "job",
+  "passing": true,
+  "paused": false,
+  "schedule": "0 0 * * *",
+  "group": "production",
+  "tags": ["critical", "database"],
+  "assertions": ["metric.duration < 5min"],
+  "notify": ["default"],
+  "created": "2024-01-15T10:00:00Z"
+}

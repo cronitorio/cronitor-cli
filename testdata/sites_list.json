@@ -1,0 +1,12 @@
+{
+  "sites": [
+    {
+      "key": "my-site",
+      "name": "My Website",
+      "client_key": "ck_abc123",
+      "webvitals_enabled": true,
+      "errors_enabled": true,
+      "sampling": 100
+    }
+  ]
+}

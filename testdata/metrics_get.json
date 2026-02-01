@@ -1,0 +1,18 @@
+{
+  "monitors": {
+    "abc123": {
+      "production": [
+        {
+          "stamp": 1710500000,
+          "duration_p50": 1200.5,
+          "success_rate": 99.8
+        },
+        {
+          "stamp": 1710503600,
+          "duration_p50": 1150.0,
+          "success_rate": 100.0
+        }
+      ]
+    }
+  }
+}

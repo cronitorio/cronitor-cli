@@ -23,6 +23,7 @@ type ConfigFile struct {
 	AllowedIPs         string                       `json:"CRONITOR_ALLOWED_IPS"`
 	CorsAllowedOrigins string                       `json:"CRONITOR_CORS_ALLOWED_ORIGINS"`
 	Users              string                       `json:"CRONITOR_USERS"`
+	ApiVersion         string                       `json:"CRONITOR_API_VERSION,omitempty"`
 	MCPEnabled         bool                         `json:"CRONITOR_MCP_ENABLED,omitempty"`
 	MCPInstances       map[string]MCPInstanceConfig `json:"mcp_instances,omitempty"`
 }
@@ -76,6 +77,7 @@ Example setting common exclude text for use with 'cronitor discover':
 		configData.AllowedIPs = viper.GetString(varAllowedIPs)
 		configData.CorsAllowedOrigins = viper.GetString("CRONITOR_CORS_ALLOWED_ORIGINS")
 		configData.Users = viper.GetString(varUsers)
+		configData.ApiVersion = viper.GetString(varApiVersion)
 		configData.MCPEnabled = viper.GetBool(varMCPEnabled)
 
 		// Load MCP instances if configured
@@ -167,6 +169,13 @@ Example setting common exclude text for use with 'cronitor discover':
 			fmt.Println("Current user only")
 		} else {
 			fmt.Println(configData.Users)
+		}
+
+		fmt.Println("\nAPI Version:")
+		if configData.ApiVersion == "" {
+			fmt.Println("Not Set (API default)")
+		} else {
+			fmt.Println(configData.ApiVersion)
 		}
 
 		fmt.Println("\nMCP Enabled:")
