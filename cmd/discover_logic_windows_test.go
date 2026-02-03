@@ -951,7 +951,7 @@ func TestCompleteScenario_StartupTask(t *testing.T) {
 	}
 
 	// Should mention boot and delay in description
-	if len(info.Description) < 13 || info.Description[:13] != "Runs on system boot" {
+	if len(info.Description) < 19 || info.Description[:19] != "Runs on system boot" {
 		t.Errorf("Description = %v, expected to mention boot", info.Description)
 	}
 }

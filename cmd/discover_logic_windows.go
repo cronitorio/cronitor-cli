@@ -155,30 +155,39 @@ func convertMonthDays(days taskmaster.DayOfMonth) string {
 func convertWeekOfMonth(weeks taskmaster.Week, days taskmaster.DayOfWeek) string {
 	var dayList []string
 
-	// Convert days
-	dayStrings := make(map[taskmaster.DayOfWeek]string)
-	dayStrings[taskmaster.Monday] = "MO"
-	dayStrings[taskmaster.Tuesday] = "TU"
-	dayStrings[taskmaster.Wednesday] = "WE"
-	dayStrings[taskmaster.Thursday] = "TH"
-	dayStrings[taskmaster.Friday] = "FR"
-	dayStrings[taskmaster.Saturday] = "SA"
-	dayStrings[taskmaster.Sunday] = "SU"
+	// Use ordered slices instead of maps to ensure deterministic output
+	type weekEntry struct {
+		week   taskmaster.Week
+		prefix string
+	}
+	weekOrder := []weekEntry{
+		{taskmaster.First, "1"},
+		{taskmaster.Second, "2"},
+		{taskmaster.Third, "3"},
+		{taskmaster.Fourth, "4"},
+		{taskmaster.LastWeek, "-1"},
+	}
 
-	// Convert weeks
-	weekNumbers := make(map[taskmaster.Week]string)
-	weekNumbers[taskmaster.First] = "1"
-	weekNumbers[taskmaster.Second] = "2"
-	weekNumbers[taskmaster.Third] = "3"
-	weekNumbers[taskmaster.Fourth] = "4"
-	weekNumbers[taskmaster.LastWeek] = "-1"
+	type dayEntry struct {
+		day    taskmaster.DayOfWeek
+		suffix string
+	}
+	dayOrder := []dayEntry{
+		{taskmaster.Monday, "MO"},
+		{taskmaster.Tuesday, "TU"},
+		{taskmaster.Wednesday, "WE"},
+		{taskmaster.Thursday, "TH"},
+		{taskmaster.Friday, "FR"},
+		{taskmaster.Saturday, "SA"},
+		{taskmaster.Sunday, "SU"},
+	}
 
-	// Build combinations
-	for week, weekNum := range weekNumbers {
-		if weeks&week != 0 {
-			for day, dayStr := range dayStrings {
-				if days&day != 0 {
-					dayList = append(dayList, weekNum+dayStr)
+	// Build combinations in deterministic order
+	for _, w := range weekOrder {
+		if weeks&w.week != 0 {
+			for _, d := range dayOrder {
+				if days&d.day != 0 {
+					dayList = append(dayList, w.prefix+d.suffix)
 				}
 			}
 		}
@@ -283,7 +292,8 @@ func convertTriggerToRRULE(trigger taskmaster.Trigger) TriggerInfo {
 		}
 
 	case taskmaster.TimeTrigger:
-		// One-time trigger - skip
+		// One-time trigger - no RRULE, but provide a description
+		info.Description = fmt.Sprintf("Runs once at %s", startBoundary.Format("2006-01-02 15:04"))
 		return info
 
 	case taskmaster.BootTrigger:
