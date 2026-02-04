@@ -18,40 +18,92 @@ For the latest installation details, see https://cronitor.io/docs/using-cronitor
 ## Usage
 
 ```
-CronitorCLI version 31.4
-
-Command line tools for Cronitor.io. See https://cronitor.io/docs/using-cronitor-cli for details.
-
-Usage:
-  cronitor [command]
-
-Available Commands:
-  completion  generate the autocompletion script for the specified shell
-  configure   Save configuration variables to the config file
-  dash        Start the web dashboard
-  exec        Execute a command with monitoring
-  help        Help about any command
-  list        Search for and list all cron jobs
-  ping        Send a telemetry ping to Cronitor
-  shell       Run commands from a cron-like shell
-  signup      Sign up for a Cronitor account
-  status      View monitor status
-  sync        Add monitoring to new cron jobs and sync changes to existing jobs
-  update      Update to the latest version
-
-Flags:
-  -k, --api-key string        Cronitor API Key
-  -c, --config string         Config file
-      --env string            Cronitor Environment
-  -h, --help                  help for cronitor
-  -n, --hostname string       A unique identifier for this host (default: system hostname)
-  -l, --log string            Write debug logs to supplied file
-  -p, --ping-api-key string   Ping API Key
-  -u, --users string          Comma-separated list of users whose crontabs to include (default: current user only)
-  -v, --verbose               Verbose output
-
-Use "cronitor [command] --help" for more information about a command.
+cronitor [command]
 ```
+
+### Cron Management
+| Command | Description |
+|---------|-------------|
+| `cronitor sync` | Sync cron jobs to Cronitor |
+| `cronitor exec <key> <cmd>` | Run a command with monitoring |
+| `cronitor list` | List all cron jobs |
+| `cronitor status` | View monitor status |
+| `cronitor dash` | Start the web dashboard |
+
+### API Resources
+
+Manage Cronitor resources directly from the command line. Each resource supports `list`, `get`, `create`, `update`, and `delete` subcommands.
+
+#### Monitors
+
+```bash
+cronitor monitor list                                        # List all monitors
+cronitor monitor list --page 2 --env production              # Paginate, filter by env
+cronitor monitor get <key>                                   # Get a monitor
+cronitor monitor get <key> --with-events                     # Include latest events
+cronitor monitor create --data '{"key":"my-job","type":"job"}'
+cronitor monitor update <key> --data '{"name":"New Name"}'
+cronitor monitor delete <key>
+cronitor monitor pause <key>                                 # Pause indefinitely
+cronitor monitor pause <key> --hours 24                      # Pause for 24 hours
+cronitor monitor unpause <key>
+```
+
+#### Status Pages
+
+```bash
+cronitor statuspage list
+cronitor statuspage get <key>
+cronitor statuspage create --data '{"name":"My Status Page"}'
+cronitor statuspage update <key> --data '{"name":"Updated"}'
+cronitor statuspage delete <key>
+```
+
+#### Issues
+
+```bash
+cronitor issue list                                          # List all issues
+cronitor issue list --state open --severity high             # Filter by state/severity
+cronitor issue list --monitor my-job                         # Filter by monitor
+cronitor issue get <key>
+cronitor issue create --data '{"monitor":"my-job","summary":"Issue title"}'
+cronitor issue update <key> --data '{"state":"resolved"}'
+cronitor issue resolve <key>                                 # Shorthand for resolving
+cronitor issue delete <key>
+```
+
+#### Notifications
+
+```bash
+cronitor notification list
+cronitor notification get <key>
+cronitor notification create --data '{"name":"DevOps","emails":["team@co.com"]}'
+cronitor notification update <key> --data '{"name":"Updated"}'
+cronitor notification delete <key>
+```
+
+#### Environments
+
+```bash
+cronitor environment list
+cronitor environment get <key>
+cronitor environment create --data '{"name":"Production","key":"production"}'
+cronitor environment update <key> --data '{"name":"Updated"}'
+cronitor environment delete <key>
+```
+
+**Aliases:** `cronitor env` → `environment`, `cronitor notifications` → `notification`
+
+### Common Flags
+
+| Flag | Description |
+|------|-------------|
+| `--format json\|table` | Output format (default: `table` for list, `json` for get) |
+| `-o, --output <file>` | Write output to a file |
+| `--page <n>` | Page number for paginated results |
+| `-d, --data <json>` | JSON data for create/update |
+| `-f, --file <path>` | Read JSON data from a file |
+| `-k, --api-key <key>` | Cronitor API key |
 
 ## Crontab Guru Dashboard
 
