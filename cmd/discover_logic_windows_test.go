@@ -531,6 +531,26 @@ func TestConvertTriggerToRRULE_EventDrivenTriggers(t *testing.T) {
 	}
 }
 
+func TestConvertTriggerToRRULE_TimeTrigger(t *testing.T) {
+	trigger := taskmaster.TimeTrigger{
+		TaskTrigger: taskmaster.TaskTrigger{
+			Enabled:       true,
+			StartBoundary: time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
+		},
+		RandomDelay: period.Period{},
+	}
+
+	info := convertTriggerToRRULE(trigger)
+
+	if info.RRULE != "" {
+		t.Errorf("TimeTrigger should have no RRULE, got %v", info.RRULE)
+	}
+
+	if info.Description != "" {
+		t.Errorf("TimeTrigger should have no description, got %v", info.Description)
+	}
+}
+
 func TestConvertTriggerToRRULE_WithBoundaries(t *testing.T) {
 	expectedStart := time.Date(2025, 1, 1, 9, 0, 0, 0, time.UTC)
 	expectedEnd := time.Date(2025, 12, 31, 23, 59, 59, 0, time.UTC)
