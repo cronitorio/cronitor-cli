@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/user"
 
@@ -10,11 +12,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var printJSON bool
+
 var listCmd = &cobra.Command{
 	Use:   "list <optional path>",
 	Short: "Search for and list all cron jobs",
 	Long: `
-Cronitor list scans for cron jobs and displays them in an easy to read table
+Cronitor list scans for cron jobs and displays them in an easy to read format.
 
 Example:
   $ cronitor list
@@ -22,78 +26,121 @@ Example:
 
   $ cronitor list /path/to/crontab
       > Instead of the user crontab, list the jobs in a provided a crontab file (or directory of crontabs)
+
+  $ cronitor list --json
+      > Output all discovered cron jobs as JSON
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
-
 		return nil
 	},
 
 	Run: func(cmd *cobra.Command, args []string) {
-		var username string
-		if u, err := user.Current(); err == nil {
-			username = u.Username
-		}
-
-		crontabs := []*lib.Crontab{}
-		commands := []string{}
-
-		if len(args) > 0 {
-			// A supplied argument can be a specific file or a directory
-			if isPathToDirectory(args[0]) {
-				crontabs = lib.ReadCrontabsInDirectory(username, args[0], crontabs)
-			} else {
-				crontabs = lib.ReadCrontabFromFile(username, args[0], crontabs)
-			}
-		} else {
-			// Without a supplied argument look at user crontabs, system crontab, and the system drop-in directory
-			// Process crontabs for all configured users
-			users := parseUsers()
-			if len(users) == 0 {
-				// Default to current user if no users configured
-				users = []string{username}
-			}
-
-			for _, user := range users {
-				crontabs = lib.ReadCrontabFromFile(user, fmt.Sprintf("user:%s", user), crontabs)
-			}
-			crontabs = lib.ReadCrontabFromFile(username, lib.SYSTEM_CRONTAB, crontabs)
-			crontabs = lib.ReadCrontabsInDirectory(username, lib.DROP_IN_DIRECTORY, crontabs)
-		}
-
+		crontabs := gatherCrontabs(args)
 		if len(crontabs) == 0 {
 			printWarningText("No crontab files found", false)
 			return
 		}
 
-		fmt.Println()
-		for _, crontab := range crontabs {
-			if len(crontab.Lines) == 0 {
-				continue
-			}
-
-			table := tablewriter.NewWriter(os.Stdout)
-			table.SetHeader([]string{"Schedule", "Command"})
-			table.SetAutoWrapText(true)
-			table.SetHeaderAlignment(3)
-			table.SetColMinWidth(0, 17)
-			table.SetColMinWidth(1, 100)
-
-			for _, line := range crontab.Lines {
-				if len(line.CommandToRun) == 0 {
-					continue
-				}
-
-				table.Append([]string{line.CronExpression, line.CommandToRun})
-				commands = append(commands, line.CommandToRun)
-			}
-
-			printSuccessText(fmt.Sprintf("Checking %s", crontab.DisplayName()), false)
-			table.Render()
-			fmt.Println()
+		if printJSON {
+			printListAsJSON(os.Stdout, crontabs)
+		} else {
+			printListAsTable(os.Stdout, crontabs)
 		}
 	},
 }
 
 func init() {
 	RootCmd.AddCommand(listCmd)
+	listCmd.Flags().BoolVarP(&printJSON, "json", "j", false, "Output as JSON")
+}
+
+// gatherCrontabs collects crontabs from the specified args or the default locations.
+func gatherCrontabs(args []string) []*lib.Crontab {
+	var username string
+	if u, err := user.Current(); err == nil {
+		username = u.Username
+	}
+
+	crontabs := []*lib.Crontab{}
+
+	if len(args) > 0 {
+		if isPathToDirectory(args[0]) {
+			crontabs = lib.ReadCrontabsInDirectory(username, args[0], crontabs)
+		} else {
+			crontabs = lib.ReadCrontabFromFile(username, args[0], crontabs)
+		}
+	} else {
+		users := parseUsers()
+		if len(users) == 0 {
+			users = []string{username}
+		}
+
+		for _, user := range users {
+			crontabs = lib.ReadCrontabFromFile(user, fmt.Sprintf("user:%s", user), crontabs)
+		}
+		crontabs = lib.ReadCrontabFromFile(username, lib.SYSTEM_CRONTAB, crontabs)
+		crontabs = lib.ReadCrontabsInDirectory(username, lib.DROP_IN_DIRECTORY, crontabs)
+	}
+
+	return crontabs
+}
+
+// jobLines returns only the lines that have a command to run.
+func jobLines(crontab *lib.Crontab) []*lib.Line {
+	var lines []*lib.Line
+	for _, line := range crontab.Lines {
+		if len(line.CommandToRun) > 0 {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+// printListAsTable renders crontabs as human-readable tables.
+func printListAsTable(w io.Writer, crontabs []*lib.Crontab) {
+	fmt.Fprintln(w)
+	for _, crontab := range crontabs {
+		lines := jobLines(crontab)
+		if len(lines) == 0 {
+			continue
+		}
+
+		table := tablewriter.NewWriter(w)
+		table.SetHeader([]string{"Schedule", "Command"})
+		table.SetAutoWrapText(true)
+		table.SetHeaderAlignment(3)
+		table.SetColMinWidth(0, 17)
+		table.SetColMinWidth(1, 100)
+
+		for _, line := range lines {
+			table.Append([]string{line.CronExpression, line.CommandToRun})
+		}
+
+		printSuccessText(fmt.Sprintf("Checking %s", crontab.DisplayName()), false)
+		table.Render()
+		fmt.Fprintln(w)
+	}
+}
+
+// printListAsJSON marshals crontabs to JSON and writes to w.
+// Only crontabs with job lines are included.
+func printListAsJSON(w io.Writer, crontabs []*lib.Crontab) {
+	var output []*lib.Crontab
+	for _, crontab := range crontabs {
+		if len(jobLines(crontab)) > 0 {
+			output = append(output, crontab)
+		}
+	}
+
+	if output == nil {
+		output = []*lib.Crontab{}
+	}
+
+	data, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error encoding JSON: %s\n", err)
+		os.Exit(1)
+	}
+	data = append(data, '\n')
+	w.Write(data)
 }
