@@ -272,7 +272,7 @@ func (c Crontab) Write() string {
 	return result
 }
 
-func (c Crontab) Save(crontabLines string) error {
+func (c *Crontab) Save(crontabLines string) error {
 	if c.IsUserCrontab {
 		cmd := c.buildCrontabCommand("-")
 
