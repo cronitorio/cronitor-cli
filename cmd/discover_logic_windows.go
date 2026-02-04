@@ -292,8 +292,7 @@ func convertTriggerToRRULE(trigger taskmaster.Trigger) TriggerInfo {
 		}
 
 	case taskmaster.TimeTrigger:
-		// One-time trigger - no RRULE, but provide a description
-		info.Description = fmt.Sprintf("Runs once at %s", startBoundary.Format("2006-01-02 15:04"))
+		// One-time trigger - skip
 		return info
 
 	case taskmaster.BootTrigger:

@@ -509,18 +509,6 @@ func TestConvertTriggerToRRULE_EventDrivenTriggers(t *testing.T) {
 			expectedRule:       "",
 			expectedDescPrefix: "Runs when task is registered",
 		},
-		{
-			name: "Time trigger (one-time)",
-			trigger: taskmaster.TimeTrigger{
-				TaskTrigger: taskmaster.TaskTrigger{
-					Enabled:       true,
-					StartBoundary: time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
-				},
-				RandomDelay: period.Period{},
-			},
-			expectedRule:       "",
-			expectedDescPrefix: "Runs once at",
-		},
 	}
 
 	for _, tt := range tests {
