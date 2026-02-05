@@ -32,7 +32,6 @@ var (
 	// Data flags
 	maintenanceData        string
 	maintenanceFile        string
-	maintenanceFetchAll    bool
 )
 
 var maintenanceCmd = &cobra.Command{
@@ -102,57 +101,6 @@ Examples:
 		}
 		if maintenanceWithMonitors {
 			params["withAllAffectedMonitors"] = "true"
-		}
-
-		if maintenanceFetchAll {
-			bodies, err := FetchAllPages(client, "/maintenance_windows", params, "data")
-			if err != nil {
-				Error(fmt.Sprintf("Failed to list maintenance windows: %s", err))
-				os.Exit(1)
-			}
-			if maintenanceFormat == "json" || maintenanceFormat == "" {
-				maintenanceOutputToTarget(FormatJSON(MergePagedJSON(bodies, "data")))
-				return
-			}
-			// Table: accumulate rows from all pages
-			table := &UITable{
-				Headers: []string{"NAME", "KEY", "START", "END", "STATE"},
-			}
-			for _, body := range bodies {
-				var result struct {
-					Windows []struct {
-						Key      string `json:"key"`
-						Name     string `json:"name"`
-						Start    string `json:"start"`
-						End      string `json:"end"`
-						State    string `json:"state"`
-						Duration int    `json:"duration"`
-					} `json:"data"`
-				}
-				json.Unmarshal(body, &result)
-				for _, w := range result.Windows {
-					state := w.State
-					switch state {
-					case "ongoing":
-						state = warningStyle.Render("ongoing")
-					case "upcoming":
-						state = mutedStyle.Render("upcoming")
-					case "past":
-						state = successStyle.Render("completed")
-					}
-					start := ""
-					if len(w.Start) >= 16 {
-						start = w.Start[:16]
-					}
-					end := ""
-					if len(w.End) >= 16 {
-						end = w.End[:16]
-					}
-					table.Rows = append(table.Rows, []string{w.Name, w.Key, start, end, state})
-				}
-			}
-			maintenanceOutputToTarget(table.Render())
-			return
 		}
 
 		resp, err := client.GET("/maintenance_windows", params)
@@ -413,7 +361,6 @@ func init() {
 	maintenanceListCmd.Flags().StringVar(&maintenanceStatuspage, "statuspage", "", "Filter by status page key")
 	maintenanceListCmd.Flags().StringVar(&maintenanceEnv, "env", "", "Filter by environment")
 	maintenanceListCmd.Flags().BoolVar(&maintenanceWithMonitors, "with-monitors", false, "Include affected monitor details")
-	maintenanceListCmd.Flags().BoolVar(&maintenanceFetchAll, "all", false, "Fetch all pages of results")
 
 	// Get flags
 	maintenanceGetCmd.Flags().BoolVar(&maintenanceWithMonitors, "with-monitors", false, "Include affected monitor details")

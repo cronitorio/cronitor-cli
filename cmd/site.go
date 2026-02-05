@@ -17,7 +17,6 @@ var (
 	siteOutput      string
 	siteWithSnippet bool
 	siteData        string
-	siteFetchAll    bool
 	// Create/Update flags
 	siteName        string
 	siteWebVitals   bool
@@ -94,49 +93,6 @@ Examples:
 		}
 		if sitePageSize > 0 {
 			params["pageSize"] = fmt.Sprintf("%d", sitePageSize)
-		}
-
-		if siteFetchAll {
-			bodies, err := FetchAllPages(client, "/sites", params, "data")
-			if err != nil {
-				Error(fmt.Sprintf("Failed to list sites: %s", err))
-				os.Exit(1)
-			}
-			if siteFormat == "json" || siteFormat == "" {
-				siteOutputToTarget(FormatJSON(MergePagedJSON(bodies, "data")))
-				return
-			}
-			// Table: accumulate rows from all pages
-			table := &UITable{
-				Headers: []string{"NAME", "KEY", "WEB VITALS", "ERRORS", "SAMPLING"},
-			}
-			for _, body := range bodies {
-				var result struct {
-					Sites []struct {
-						Key              string `json:"key"`
-						Name             string `json:"name"`
-						ClientKey        string `json:"client_key"`
-						WebVitalsEnabled bool   `json:"webvitals_enabled"`
-						ErrorsEnabled    bool   `json:"errors_enabled"`
-						Sampling         int    `json:"sampling"`
-					} `json:"data"`
-				}
-				json.Unmarshal(body, &result)
-				for _, s := range result.Sites {
-					webVitals := "off"
-					if s.WebVitalsEnabled {
-						webVitals = successStyle.Render("on")
-					}
-					errors := "off"
-					if s.ErrorsEnabled {
-						errors = successStyle.Render("on")
-					}
-					sampling := fmt.Sprintf("%d%%", s.Sampling)
-					table.Rows = append(table.Rows, []string{s.Name, s.Key, webVitals, errors, sampling})
-				}
-			}
-			siteOutputToTarget(table.Render())
-			return
 		}
 
 		resp, err := client.GET("/sites", params)
@@ -634,7 +590,6 @@ func init() {
 	siteCmd.AddCommand(siteErrorsCmd)
 
 	// List flags
-	siteListCmd.Flags().BoolVar(&siteFetchAll, "all", false, "Fetch all pages of results")
 
 	// Get flags
 	siteGetCmd.Flags().BoolVar(&siteWithSnippet, "with-snippet", false, "Include JavaScript installation snippet")

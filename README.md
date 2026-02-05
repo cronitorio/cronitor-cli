@@ -40,7 +40,8 @@ Manage Cronitor resources directly from the command line.
 cronitor monitor list                                    # List all monitors
 cronitor monitor list --type job --state failing         # Filter by type and state
 cronitor monitor list --tag critical --env production    # Filter by tag and environment
-cronitor monitor list --format yaml                      # Export as YAML config
+cronitor monitor export -o monitors.yaml                  # Export full YAML config
+cronitor monitor export --type job                       # Export only jobs
 cronitor monitor search "backup"                         # Search monitors
 cronitor monitor get <key>                               # Get monitor details
 cronitor monitor get <key> --with-events                 # Include latest events
@@ -95,6 +96,20 @@ cronitor notification get <key>
 cronitor notification create -d '{"name":"DevOps","notifications":{"emails":["team@co.com"]}}'
 cronitor notification update <key> -d '{"name":"Updated"}'
 cronitor notification delete <key>
+```
+
+#### Groups
+
+```bash
+cronitor group list
+cronitor group list --with-status                       # Include group status
+cronitor group get <key>
+cronitor group create -d '{"name":"Production Jobs"}'
+cronitor group update <key> -d '{"monitors":["job1","job2"]}'
+cronitor group delete <key>
+cronitor group pause <key> 24                            # Pause all monitors for 24 hours
+cronitor group resume <key>                              # Resume all monitors
+cronitor group export -o groups.json                     # Export all groups
 ```
 
 #### Environments

@@ -22,6 +22,7 @@ setup() {
   ../cronitor monitor --help | grep -q "delete"
   ../cronitor monitor --help | grep -q "pause"
   ../cronitor monitor --help | grep -q "unpause"
+  ../cronitor monitor --help | grep -q "export"
 }
 
 @test "monitor list shows help" {
@@ -75,6 +76,18 @@ setup() {
 @test "monitor unpause requires key" {
   run ../cronitor monitor unpause 2>&1
   [ "$status" -eq 1 ]
+}
+
+@test "monitor export shows help" {
+  ../cronitor monitor export --help | grep -qi "export all monitors"
+}
+
+@test "monitor export has --type flag" {
+  ../cronitor monitor export --help | grep -q "\-\-type"
+}
+
+@test "monitor export has --group flag" {
+  ../cronitor monitor export --help | grep -q "\-\-group"
 }
 
 #################

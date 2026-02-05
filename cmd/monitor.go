@@ -212,6 +212,91 @@ Examples:
 	},
 }
 
+// --- EXPORT ---
+var monitorExportCmd = &cobra.Command{
+	Use:   "export",
+	Short: "Export all monitors as YAML config",
+	Long: `Export all monitors as a complete YAML configuration file.
+
+Fetches all pages of monitors and outputs a single YAML document
+suitable for backup or re-import with 'cronitor monitor create'.
+
+Examples:
+  cronitor monitor export                              # Print to stdout
+  cronitor monitor export -o monitors.yaml             # Save to file
+  cronitor monitor export --type job                   # Export only jobs
+  cronitor monitor export --group production           # Export one group
+  cronitor monitor export -o backup.yaml && cronitor monitor create -f backup.yaml`,
+	Run: func(cmd *cobra.Command, args []string) {
+		client := lib.NewAPIClient(dev, log)
+		params := make(map[string]string)
+
+		if monitorEnv != "" {
+			params["env"] = monitorEnv
+		}
+		if monitorGroup != "" {
+			params["group"] = monitorGroup
+		}
+		if len(monitorType) > 0 {
+			params["type"] = strings.Join(monitorType, ",")
+		}
+		if len(monitorTag) > 0 {
+			params["tag"] = strings.Join(monitorTag, ",")
+		}
+
+		// First, get page 1 as JSON to determine total page count
+		resp, err := client.GET("/monitors", params)
+		if err != nil {
+			Error(fmt.Sprintf("Failed to export monitors: %s", err))
+			os.Exit(1)
+		}
+		if !resp.IsSuccess() {
+			Error(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+			os.Exit(1)
+		}
+
+		var pageInfo struct {
+			PageInfo struct {
+				Page       int `json:"page"`
+				PageSize   int `json:"pageSize"`
+				TotalCount int `json:"totalMonitorCount"`
+			} `json:"page_info"`
+		}
+		json.Unmarshal(resp.Body, &pageInfo)
+
+		totalPages := 1
+		if pageInfo.PageInfo.PageSize > 0 && pageInfo.PageInfo.TotalCount > 0 {
+			totalPages = (pageInfo.PageInfo.TotalCount + pageInfo.PageInfo.PageSize - 1) / pageInfo.PageInfo.PageSize
+		}
+
+		// Now fetch all pages as YAML
+		params["format"] = "yaml"
+		var combined string
+		for page := 1; page <= totalPages; page++ {
+			params["page"] = fmt.Sprintf("%d", page)
+			resp, err := client.GET("/monitors", params)
+			if err != nil {
+				Error(fmt.Sprintf("Failed to export monitors (page %d): %s", page, err))
+				os.Exit(1)
+			}
+			if !resp.IsSuccess() {
+				Error(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+				os.Exit(1)
+			}
+			body := strings.TrimSpace(string(resp.Body))
+			if body == "" {
+				break
+			}
+			if combined != "" {
+				combined += "\n"
+			}
+			combined += body
+		}
+
+		outputToTarget(combined)
+	},
+}
+
 // --- SEARCH ---
 var monitorSearchCmd = &cobra.Command{
 	Use:   "search <query>",
@@ -663,6 +748,7 @@ Examples:
 
 func init() {
 	monitorCmd.AddCommand(monitorListCmd)
+	monitorCmd.AddCommand(monitorExportCmd)
 	monitorCmd.AddCommand(monitorSearchCmd)
 	monitorCmd.AddCommand(monitorGetCmd)
 	monitorCmd.AddCommand(monitorCreateCmd)
@@ -692,6 +778,11 @@ func init() {
 	monitorCreateCmd.Flags().StringVarP(&monitorFile, "file", "f", "", "JSON or YAML file")
 	monitorUpdateCmd.Flags().StringVarP(&monitorData, "data", "d", "", "JSON data")
 	monitorUpdateCmd.Flags().StringVarP(&monitorFile, "file", "f", "", "JSON file")
+
+	// Export filters
+	monitorExportCmd.Flags().StringArrayVar(&monitorType, "type", nil, "Filter by type: job, check, heartbeat, site")
+	monitorExportCmd.Flags().StringVar(&monitorGroup, "group", "", "Filter by group key")
+	monitorExportCmd.Flags().StringArrayVar(&monitorTag, "tag", nil, "Filter by tag")
 
 	// Clone flags
 	monitorCloneCmd.Flags().StringVar(&monitorCloneName, "name", "", "Name for the cloned monitor")

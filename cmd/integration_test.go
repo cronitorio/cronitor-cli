@@ -57,7 +57,6 @@ func TestIntegration_MonitorList_TableOutput(t *testing.T) {
 	// Reset flag state
 	monitorFormat = ""
 	monitorOutput = ""
-	monitorFetchAll = false
 	monitorPage = 1
 
 	output, err := executeCmd("monitor", "list")
@@ -98,7 +97,6 @@ func TestIntegration_IssueList_TableOutput(t *testing.T) {
 	// Reset flag state
 	issueFormat = ""
 	issueOutput = ""
-	issueFetchAll = false
 	issuePage = 1
 
 	output, err := executeCmd("issue", "list", "--format", "table")
@@ -136,7 +134,6 @@ func TestIntegration_MonitorList_JSONOutput(t *testing.T) {
 
 	monitorFormat = ""
 	monitorOutput = ""
-	monitorFetchAll = false
 	monitorPage = 1
 
 	output, err := executeCmd("monitor", "list", "--format", "json")
@@ -201,7 +198,6 @@ func TestIntegration_MonitorList_YAMLOutput(t *testing.T) {
 
 	monitorFormat = ""
 	monitorOutput = ""
-	monitorFetchAll = false
 	monitorPage = 1
 
 	output, err := executeCmd("monitor", "list", "--format", "yaml")
@@ -242,7 +238,6 @@ func TestIntegration_MonitorList_OutputToFile(t *testing.T) {
 
 	monitorFormat = ""
 	monitorOutput = ""
-	monitorFetchAll = false
 	monitorPage = 1
 
 	output, err := executeCmd("monitor", "list", "--format", "json", "--output", outFile)
@@ -287,7 +282,6 @@ func TestIntegration_MonitorList_PaginationMetadata(t *testing.T) {
 
 	monitorFormat = ""
 	monitorOutput = ""
-	monitorFetchAll = false
 	monitorPage = 1
 
 	output, err := executeCmd("monitor", "list")
@@ -305,27 +299,31 @@ func TestIntegration_MonitorList_PaginationMetadata(t *testing.T) {
 	}
 }
 
-// --- Step 12: --all Flag Test ---
+// --- Step 12: Export Test ---
 
-func TestIntegration_MonitorList_AllFlag(t *testing.T) {
-	// Custom server that returns different items per page
-	page1 := `{"monitors":[{"key":"mon-1","name":"Monitor 1","type":"job","passing":true,"paused":false}],"page_info":{"page":1,"pageSize":1,"totalMonitorCount":2}}`
-	page2 := `{"monitors":[{"key":"mon-2","name":"Monitor 2","type":"check","passing":true,"paused":false}],"page_info":{"page":2,"pageSize":1,"totalMonitorCount":2}}`
-	page3 := `{"monitors":[],"page_info":{"page":3,"pageSize":1,"totalMonitorCount":2}}`
+func TestIntegration_MonitorExport(t *testing.T) {
+	// First request (no format param) returns JSON with page_info for total count
+	jsonPage := `{"monitors":[{"key":"mon-1","name":"Monitor 1","type":"job"}],"page_info":{"page":1,"pageSize":1,"totalMonitorCount":2}}`
+	yamlPage1 := "jobs:\n  - key: mon-1\n    name: Monitor 1\n"
+	yamlPage2 := "jobs:\n  - key: mon-2\n    name: Monitor 2\n"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		format := r.URL.Query().Get("format")
 		page := r.URL.Query().Get("page")
-		switch page {
-		case "1", "":
+		if format == "yaml" {
+			w.Header().Set("Content-Type", "application/yaml")
+			switch page {
+			case "2":
+				w.WriteHeader(200)
+				fmt.Fprint(w, yamlPage2)
+			default:
+				w.WriteHeader(200)
+				fmt.Fprint(w, yamlPage1)
+			}
+		} else {
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(200)
-			fmt.Fprint(w, page1)
-		case "2":
-			w.WriteHeader(200)
-			fmt.Fprint(w, page2)
-		default:
-			w.WriteHeader(200)
-			fmt.Fprint(w, page3)
+			fmt.Fprint(w, jsonPage)
 		}
 	}))
 	defer server.Close()
@@ -335,34 +333,20 @@ func TestIntegration_MonitorList_AllFlag(t *testing.T) {
 
 	monitorFormat = ""
 	monitorOutput = ""
-	monitorFetchAll = false
 	monitorPage = 1
 
-	output, err := executeCmd("monitor", "list", "--all", "--format", "json")
+	output, err := executeCmd("monitor", "export")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	trimmed := strings.TrimSpace(output)
-	if !json.Valid([]byte(trimmed)) {
-		t.Errorf("expected valid JSON output, got:\n%s", output)
-	}
 
-	// Should be a merged array with items from both pages
-	var items []map[string]interface{}
-	if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
-		t.Fatalf("expected JSON array, got parse error: %v\noutput:\n%s", err, trimmed)
-	}
-
-	if len(items) != 2 {
-		t.Errorf("expected 2 items from merged pages, got %d", len(items))
-	}
-
-	// Verify both monitors are present
+	// Verify both pages were fetched and combined
 	if !strings.Contains(trimmed, "mon-1") {
-		t.Error("expected merged output to contain 'mon-1'")
+		t.Error("expected export output to contain 'mon-1'")
 	}
 	if !strings.Contains(trimmed, "mon-2") {
-		t.Error("expected merged output to contain 'mon-2'")
+		t.Error("expected export output to contain 'mon-2'")
 	}
 }

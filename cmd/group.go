@@ -16,7 +16,6 @@ var (
 	groupFormat     string
 	groupOutput     string
 	groupWithStatus bool
-	groupFetchAll   bool
 	groupSort       string
 	groupData       string
 )
@@ -40,6 +39,7 @@ func init() {
 	groupCmd.AddCommand(groupDeleteCmd)
 	groupCmd.AddCommand(groupPauseCmd)
 	groupCmd.AddCommand(groupResumeCmd)
+	groupCmd.AddCommand(groupExportCmd)
 
 	// Persistent flags for all group subcommands
 	groupCmd.PersistentFlags().IntVar(&groupPage, "page", 1, "Page number for paginated results")
@@ -75,43 +75,6 @@ Examples:
 		}
 		if groupWithStatus {
 			params["withStatus"] = "true"
-		}
-
-		if groupFetchAll {
-			bodies, err := FetchAllPages(client, "/groups", params, "groups")
-			if err != nil {
-				Error(fmt.Sprintf("Failed to list groups: %s", err))
-				os.Exit(1)
-			}
-			if groupFormat == "json" || groupFormat == "" {
-				outputGroupToTarget(FormatJSON(MergePagedJSON(bodies, "groups")))
-				return
-			}
-			// Table: accumulate rows from all pages
-			table := &UITable{
-				Headers: []string{"NAME", "KEY", "MONITORS", "CREATED"},
-			}
-			for _, body := range bodies {
-				var result struct {
-					Groups []struct {
-						Key      string   `json:"key"`
-						Name     string   `json:"name"`
-						Monitors []string `json:"monitors"`
-						Created  string   `json:"created"`
-					} `json:"groups"`
-				}
-				json.Unmarshal(body, &result)
-				for _, g := range result.Groups {
-					monitorCount := fmt.Sprintf("%d", len(g.Monitors))
-					created := ""
-					if g.Created != "" {
-						created = g.Created[:10]
-					}
-					table.Rows = append(table.Rows, []string{g.Name, g.Key, monitorCount, created})
-				}
-			}
-			outputGroupToTarget(table.Render())
-			return
 		}
 
 		resp, err := client.GET("/groups", params)
@@ -444,12 +407,37 @@ Examples:
 	},
 }
 
+// --- EXPORT ---
+var groupExportCmd = &cobra.Command{
+	Use:   "export",
+	Short: "Export all groups as JSON",
+	Long: `Export all groups by fetching all pages into a single JSON array.
+
+Examples:
+  cronitor group export                    # Print to stdout
+  cronitor group export -o groups.json     # Save to file`,
+	Run: func(cmd *cobra.Command, args []string) {
+		client := lib.NewAPIClient(dev, log)
+		params := make(map[string]string)
+
+		if groupEnv != "" {
+			params["env"] = groupEnv
+		}
+
+		bodies, err := FetchAllPages(client, "/groups", params, "groups")
+		if err != nil {
+			Error(fmt.Sprintf("Failed to export groups: %s", err))
+			os.Exit(1)
+		}
+
+		outputGroupToTarget(FormatJSON(MergePagedJSON(bodies, "groups")))
+	},
+}
+
 func init() {
 	// List command flags
 	groupListCmd.Flags().IntVar(&groupPageSize, "page-size", 0, "Number of results per page")
 	groupListCmd.Flags().BoolVar(&groupWithStatus, "with-status", false, "Include status information")
-	groupListCmd.Flags().BoolVar(&groupFetchAll, "all", false, "Fetch all pages of results")
-
 	// Get command flags
 	groupGetCmd.Flags().BoolVar(&groupWithStatus, "with-status", false, "Include status information")
 	groupGetCmd.Flags().StringVar(&groupSort, "sort", "", "Sort order for monitors")
