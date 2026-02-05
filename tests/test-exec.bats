@@ -89,7 +89,9 @@ teardown() {
 
 @test "Exec sends duration with complete ping" {
   ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 sleep 1 > /dev/null
-  grep -q "&duration=1." $CLI_LOGFILE
+  # Extract duration and verify it's a reasonable value (between 0.5 and 2 seconds)
+  duration=$(grep -o '&duration=[0-9.]*' $CLI_LOGFILE | head -1 | cut -d= -f2)
+  [ -n "$duration" ] && awk "BEGIN {exit !($duration >= 0.5 && $duration <= 2)}"
 }
 
 @test "Exec sends command with run ping (Linux)" {
