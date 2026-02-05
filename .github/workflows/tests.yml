@@ -1,4 +1,4 @@
-name: "Run CronitorCLI tests"
+name: "CronitorCLI Tests"
 
 on:
   - push
