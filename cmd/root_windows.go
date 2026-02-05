@@ -13,14 +13,6 @@ import (
 // Task Scheduler. Since each `cronitor ping` call is run independently,
 // this call can't be memoized, regardless of how expensive it is.
 func GetNextRunFromMonitorKey(key string) string {
-	// Use recover to catch panics from taskmaster library
-	// The library can panic when Task Scheduler is unavailable (e.g., in CI)
-	defer func() {
-		if r := recover(); r != nil {
-			log(fmt.Sprintf("recovered from taskmaster panic: %v", r))
-		}
-	}()
-
 	taskService, err := taskmaster.Connect()
 	if err != nil {
 		log(fmt.Sprintf("err: %v", err))
