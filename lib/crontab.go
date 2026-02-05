@@ -28,7 +28,6 @@ type TimezoneLocationName struct {
 type Crontab struct {
 	User                    string                `json:"-"`
 	IsUserCrontab           bool                  `json:"isUserCrontab"`
-	IsSaved                 bool                  `json:"-"`
 	Filename                string                `json:"filename"`
 	Lines                   []*Line               `json:"-"`
 	TimezoneLocationName    *TimezoneLocationName `json:"timezone,omitempty"`
@@ -272,7 +271,7 @@ func (c Crontab) Write() string {
 	return result
 }
 
-func (c Crontab) Save(crontabLines string) error {
+func (c *Crontab) Save(crontabLines string) error {
 	if c.IsUserCrontab {
 		cmd := c.buildCrontabCommand("-")
 
@@ -290,7 +289,6 @@ func (c Crontab) Save(crontabLines string) error {
 		}
 	}
 
-	c.IsSaved = true
 	return nil
 }
 
@@ -920,7 +918,6 @@ func (c *Crontab) lightweightCopy() Crontab {
 	return Crontab{
 		User:                    c.User,
 		IsUserCrontab:           c.IsUserCrontab,
-		IsSaved:                 c.IsSaved,
 		Filename:                c.Filename,
 		Lines:                   nil, // Explicitly nil to break circular reference
 		TimezoneLocationName:    c.TimezoneLocationName,

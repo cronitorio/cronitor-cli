@@ -242,6 +242,7 @@ func TestLineWriteWithEnvFlag(t *testing.T) {
 	viper.Set("CRONITOR_ENV", originalEnv)
 }
 
+
 func TestLineWriteWithNoStdoutAndEnv(t *testing.T) {
 	// Save original viper value
 	originalEnv := viper.GetString("CRONITOR_ENV")
