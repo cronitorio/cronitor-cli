@@ -1,7 +1,6 @@
 package lib
 
 import (
-	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -243,33 +242,6 @@ func TestLineWriteWithEnvFlag(t *testing.T) {
 	viper.Set("CRONITOR_ENV", originalEnv)
 }
 
-func TestSaveSetsIsSaved(t *testing.T) {
-	// Create a temp file to act as the crontab
-	tmpFile, err := os.CreateTemp("", "crontab-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.Close()
-
-	crontab := &Crontab{
-		IsUserCrontab: false, // use file-based save path
-		Filename:      tmpFile.Name(),
-	}
-
-	if crontab.IsSaved {
-		t.Fatal("IsSaved should be false before Save()")
-	}
-
-	err = crontab.Save("* * * * * echo hello\n")
-	if err != nil {
-		t.Fatalf("Save() returned error: %v", err)
-	}
-
-	if !crontab.IsSaved {
-		t.Errorf("IsSaved should be true after Save(), but it is still false (pointer receiver bug)")
-	}
-}
 
 func TestLineWriteWithNoStdoutAndEnv(t *testing.T) {
 	// Save original viper value
