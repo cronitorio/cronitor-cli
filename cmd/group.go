@@ -39,7 +39,6 @@ func init() {
 	groupCmd.AddCommand(groupDeleteCmd)
 	groupCmd.AddCommand(groupPauseCmd)
 	groupCmd.AddCommand(groupResumeCmd)
-	groupCmd.AddCommand(groupExportCmd)
 
 	// Persistent flags for all group subcommands
 	groupCmd.PersistentFlags().IntVar(&groupPage, "page", 1, "Page number for paginated results")
@@ -404,33 +403,6 @@ Examples:
 		}
 
 		Success(fmt.Sprintf("Resumed all monitors in group '%s'", key))
-	},
-}
-
-// --- EXPORT ---
-var groupExportCmd = &cobra.Command{
-	Use:   "export",
-	Short: "Export all groups as JSON",
-	Long: `Export all groups by fetching all pages into a single JSON array.
-
-Examples:
-  cronitor group export                    # Print to stdout
-  cronitor group export -o groups.json     # Save to file`,
-	Run: func(cmd *cobra.Command, args []string) {
-		client := lib.NewAPIClient(dev, log)
-		params := make(map[string]string)
-
-		if groupEnv != "" {
-			params["env"] = groupEnv
-		}
-
-		bodies, err := FetchAllPages(client, "/groups", params, "groups")
-		if err != nil {
-			Error(fmt.Sprintf("Failed to export groups: %s", err))
-			os.Exit(1)
-		}
-
-		outputGroupToTarget(FormatJSON(MergePagedJSON(bodies, "groups")))
 	},
 }
 

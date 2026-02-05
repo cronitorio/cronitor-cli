@@ -109,7 +109,6 @@ cronitor group update <key> -d '{"monitors":["job1","job2"]}'
 cronitor group delete <key>
 cronitor group pause <key> 24                            # Pause all monitors for 24 hours
 cronitor group resume <key>                              # Resume all monitors
-cronitor group export -o groups.json                     # Export all groups
 ```
 
 #### Environments
