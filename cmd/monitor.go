@@ -53,7 +53,6 @@ var (
 	monitorOutput          string
 	monitorData            string
 	monitorFile            string
-	monitorFetchAll bool
 	// List filters
 	monitorType   []string
 	monitorGroup  string
@@ -136,56 +135,6 @@ Examples:
 		format := monitorFormat
 		if format == "yaml" {
 			params["format"] = "yaml"
-		}
-
-		if monitorFetchAll {
-			bodies, err := FetchAllPages(client, "/monitors", params, "monitors")
-			if err != nil {
-				Error(fmt.Sprintf("Failed to list monitors: %s", err))
-				os.Exit(1)
-			}
-			if format == "json" || format == "" {
-				outputToTarget(FormatJSON(MergePagedJSON(bodies, "monitors")))
-				return
-			}
-			if format == "yaml" {
-				for _, body := range bodies {
-					outputToTarget(string(body))
-				}
-				return
-			}
-			// Table format: parse all pages and accumulate rows
-			table := &UITable{
-				Headers: []string{"NAME", "KEY", "TYPE", "STATUS"},
-			}
-			for _, body := range bodies {
-				var result struct {
-					Monitors []struct {
-						Key     string `json:"key"`
-						Name    string `json:"name"`
-						Type    string `json:"type"`
-						Passing bool   `json:"passing"`
-						Paused  bool   `json:"paused"`
-					} `json:"monitors"`
-				}
-				json.Unmarshal(body, &result)
-				for _, m := range result.Monitors {
-					name := m.Name
-					if name == "" {
-						name = m.Key
-					}
-					status := successStyle.Render("passing")
-					if m.Paused {
-						status = warningStyle.Render("paused")
-					} else if !m.Passing {
-						status = errorStyle.Render("failing")
-					}
-					table.Rows = append(table.Rows, []string{name, m.Key, m.Type, status})
-				}
-			}
-			output := table.Render()
-			outputToTarget(output)
-			return
 		}
 
 		resp, err := client.GET("/monitors", params)
@@ -733,7 +682,6 @@ func init() {
 	monitorListCmd.Flags().StringVar(&monitorSort, "sort", "", "Sort order: created, -created, name, -name")
 	monitorListCmd.Flags().BoolVar(&monitorWithEvents, "with-events", false, "Include latest events for each monitor")
 	monitorListCmd.Flags().BoolVar(&monitorWithInvocations, "with-invocations", false, "Include recent invocations for each monitor")
-	monitorListCmd.Flags().BoolVar(&monitorFetchAll, "all", false, "Fetch all pages of results")
 
 	// Get flags
 	monitorGetCmd.Flags().BoolVar(&monitorWithEvents, "with-events", false, "Include latest events")

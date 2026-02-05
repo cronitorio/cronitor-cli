@@ -40,7 +40,7 @@ Manage Cronitor resources directly from the command line.
 cronitor monitor list                                    # List all monitors
 cronitor monitor list --type job --state failing         # Filter by type and state
 cronitor monitor list --tag critical --env production    # Filter by tag and environment
-cronitor monitor list --all                              # Fetch all pages
+cronitor monitor list --format yaml                      # Export as YAML config
 cronitor monitor search "backup"                         # Search monitors
 cronitor monitor get <key>                               # Get monitor details
 cronitor monitor get <key> --with-events                 # Include latest events
@@ -116,7 +116,6 @@ cronitor environment delete <key>
 | `--format json\|table\|yaml` | Output format (default: `table` for list, `json` for get) |
 | `-o, --output <file>` | Write output to a file |
 | `--page <n>` | Page number for paginated results |
-| `--all` | Fetch all pages of results (monitors only) |
 | `-d, --data <json>` | JSON data for create/update |
 | `-f, --file <path>` | Read JSON or YAML from a file |
 | `-k, --api-key <key>` | Cronitor API key |

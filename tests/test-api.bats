@@ -250,37 +250,19 @@ setup() {
 # INTEGRATION TESTS (SKIPPED BY DEFAULT)
 #################
 
-@test "monitor list returns results" {
+@test "monitor list integration test" {
   if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
   run ../cronitor monitor list --format json
   [ "$status" -eq 0 ]
 }
 
-@test "monitor list --all fetches all pages" {
-  if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
-  run ../cronitor monitor list --all --format json
-  [ "$status" -eq 0 ]
-  # Verify we got a JSON array with monitors
-  echo "$output" | head -1 | grep -q '^\['
-}
-
-@test "monitor list --all returns more results than single page" {
-  if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
-  single_page=$(../cronitor monitor list --format json)
-  all_pages=$(../cronitor monitor list --all --format json)
-  # Count items: all pages should have >= single page
-  single_count=$(echo "$single_page" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d) if isinstance(d,list) else len(d.get('monitors',d.get('data',[]))))" 2>/dev/null || echo "0")
-  all_count=$(echo "$all_pages" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
-  [ "$all_count" -ge "$single_count" ]
-}
-
-@test "issue list returns results" {
+@test "issue list integration test" {
   if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
   run ../cronitor issue list --format json
   [ "$status" -eq 0 ]
 }
 
-@test "statuspage list returns results" {
+@test "statuspage list integration test" {
   if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
   run ../cronitor statuspage list --format json
   [ "$status" -eq 0 ]
