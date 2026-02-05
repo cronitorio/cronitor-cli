@@ -20,13 +20,27 @@ setup() {
 }
 
 
-@test "Exec runs command check" {
+@test "Exec runs command check (Linux)" {
+  skip_if_windows "no .sh support in PowerShell"
   ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/write-to-log-success.sh $CLI_LOGFILE "$TEST" > /dev/null
   grep -q "$TEST" $CLI_LOGFILE
 }
 
-@test "Exec runs command with complex args" {
+@test "Exec runs command check (Windows)" {
+  skip_if_linux
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/write-to-log-success.ps1 $CLI_LOGFILE "$TEST" > /dev/null
+  grep -q "$TEST" $CLI_LOGFILE
+}
+
+@test "Exec runs command with complex args (Linux)" {
+  skip_if_windows "no .sh support in PowerShell"
   ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/success.sh "arg with space" anotherArg > /dev/null
+  grep -q "arg with space" $CLI_LOGFILE
+}
+
+@test "Exec runs command with complex args (Windows)" {
+  skip_if_linux
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/success.ps1 "arg with space" anotherArg > /dev/null
   grep -q "arg with space" $CLI_LOGFILE
 }
 
@@ -67,23 +81,50 @@ setup() {
   grep -q "&duration=1." $CLI_LOGFILE
 }
 
-@test "Exec sends command with run ping" {
+@test "Exec sends command with run ping (Linux)" {
+  skip_if_windows "no .sh support in PowerShell"
   ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec --no-stdout d3x0c1 $PROJECT_DIR/bin/success.sh xyz > /dev/null
   grep "state=run" $CLI_LOGFILE | grep "&msg=" | grep -q "success.sh+xyz"
 }
 
-@test "Exec sends stdout with complete ping" {
+@test "Exec sends command with run ping (Windows)" {
+  skip_if_linux
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec --no-stdout d3x0c1 $PROJECT_DIR/bin/success.ps1 xyz > /dev/null
+  grep "state=run" $CLI_LOGFILE | grep "&msg=" | grep -q "success.ps1+xyz"
+}
+
+@test "Exec sends stdout with complete ping (Linux)" {
+  skip_if_windows "no .sh support in PowerShell"
   ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/success.sh xyz > /dev/null
   grep "&msg=" $CLI_LOGFILE | grep -q "xyz"
 }
 
-@test "Exec does not send stdout when suppressed" {
+@test "Exec sends stdout with complete ping (Windows)" {
+  skip_if_linux
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/success.ps1 xyz > /dev/null
+  grep "&msg=" $CLI_LOGFILE | grep -q "xyz"
+}
+
+@test "Exec does not send stdout when suppressed (Linux)" {
+  skip_if_windows "no .sh support in PowerShell"
   ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec --no-stdout d3x0c1 $PROJECT_DIR/bin/success.sh xyz > /dev/null
   run -1 bash -c 'grep "/complete" $CLI_LOGFILE | grep "&msg=" | grep -q "xyz"'
 }
 
-@test "Exec passes stdout through to caller" {
-  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/success.sh xyz | grep -q xyz
+@test "Exec does not send stdout when suppressed (Windows)" {
+  skip_if_linux
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec --no-stdout d3x0c1 $PROJECT_DIR/bin/success.ps1 xyz > /dev/null
+  run -1 bash -c 'grep "/complete" $CLI_LOGFILE | grep "&msg=" | grep -q "xyz"'
+}
+
+@test "Exec passes stdout through to caller (Linux)" {
+  skip_if_windows "no .sh support in PowerShell"
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 bash $PROJECT_DIR/bin/success.sh xyz | grep -q xyz
+}
+
+@test "Exec passes stdout through to caller (Windows)" {
+  skip_if_linux
+  ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 $PROJECT_DIR/bin/success.ps1 xyz | grep -q xyz
 }
 
 @test "Exec passes stdout through to caller with newline chars intact" {
