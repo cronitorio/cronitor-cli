@@ -83,7 +83,9 @@ func TestPrintListAsJSONValidOutput(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printListAsJSON(&buf, crontabs)
+	if err := printListAsJSON(&buf, crontabs); err != nil {
+		t.Fatalf("printListAsJSON returned error: %v", err)
+	}
 
 	if buf.Len() == 0 {
 		t.Fatal("printListAsJSON produced no output")
@@ -102,7 +104,9 @@ func TestPrintListAsJSONStructure(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printListAsJSON(&buf, crontabs)
+	if err := printListAsJSON(&buf, crontabs); err != nil {
+		t.Fatalf("printListAsJSON returned error: %v", err)
+	}
 
 	var parsed []json.RawMessage
 	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
@@ -137,7 +141,9 @@ func TestPrintListAsJSONStructure(t *testing.T) {
 
 func TestPrintListAsJSONEmptyCrontabs(t *testing.T) {
 	var buf bytes.Buffer
-	printListAsJSON(&buf, []*lib.Crontab{})
+	if err := printListAsJSON(&buf, []*lib.Crontab{}); err != nil {
+		t.Fatalf("printListAsJSON returned error: %v", err)
+	}
 
 	var parsed []json.RawMessage
 	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
@@ -150,7 +156,9 @@ func TestPrintListAsJSONEmptyCrontabs(t *testing.T) {
 
 func TestPrintListAsJSONNilCrontabs(t *testing.T) {
 	var buf bytes.Buffer
-	printListAsJSON(&buf, nil)
+	if err := printListAsJSON(&buf, nil); err != nil {
+		t.Fatalf("printListAsJSON returned error: %v", err)
+	}
 
 	var parsed []json.RawMessage
 	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
@@ -175,7 +183,9 @@ func TestPrintListAsJSONSkipsEmptyCrontabs(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printListAsJSON(&buf, crontabs)
+	if err := printListAsJSON(&buf, crontabs); err != nil {
+		t.Fatalf("printListAsJSON returned error: %v", err)
+	}
 
 	var parsed []json.RawMessage
 	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
@@ -183,6 +193,38 @@ func TestPrintListAsJSONSkipsEmptyCrontabs(t *testing.T) {
 	}
 	if len(parsed) != 1 {
 		t.Errorf("expected 1 crontab (skipping 2 empty ones), got %d", len(parsed))
+	}
+}
+
+func TestPrintListAsJSONExcludesNonJobLines(t *testing.T) {
+	crontabs := []*lib.Crontab{
+		makeCrontab("/etc/crontab", false, []*lib.Line{
+			makeLine("0 * * * *", "/usr/bin/backup"),
+			// Comment line (no command)
+			{IsComment: true, FullLine: "# this is a comment", LineNumber: 2},
+			// Env var line (no command)
+			{FullLine: "SHELL=/bin/bash", LineNumber: 3},
+			makeLine("30 2 * * *", "/usr/bin/cleanup"),
+		}),
+	}
+
+	var buf bytes.Buffer
+	if err := printListAsJSON(&buf, crontabs); err != nil {
+		t.Fatalf("printListAsJSON returned error: %v", err)
+	}
+
+	var parsed []struct {
+		Lines []json.RawMessage `json:"lines"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	if len(parsed) != 1 {
+		t.Fatalf("expected 1 crontab, got %d", len(parsed))
+	}
+	if len(parsed[0].Lines) != 2 {
+		t.Errorf("expected 2 job lines (excluding comment and env var), got %d", len(parsed[0].Lines))
 	}
 }
 
@@ -194,7 +236,9 @@ func TestPrintListAsJSONContainsCommandText(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printListAsJSON(&buf, crontabs)
+	if err := printListAsJSON(&buf, crontabs); err != nil {
+		t.Fatalf("printListAsJSON returned error: %v", err)
+	}
 
 	if !bytes.Contains(buf.Bytes(), []byte("/usr/bin/test arg1 arg2")) {
 		t.Errorf("expected command in JSON output, got: %s", buf.String())

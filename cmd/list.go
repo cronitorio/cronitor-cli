@@ -42,7 +42,10 @@ Example:
 		}
 
 		if printJSON {
-			printListAsJSON(os.Stdout, crontabs)
+			if err := printListAsJSON(os.Stdout, crontabs); err != nil {
+				fmt.Fprintf(os.Stderr, "Error encoding JSON: %s\n", err)
+				os.Exit(1)
+			}
 		} else {
 			printListAsTable(os.Stdout, crontabs)
 		}
@@ -123,24 +126,30 @@ func printListAsTable(w io.Writer, crontabs []*lib.Crontab) {
 }
 
 // printListAsJSON marshals crontabs to JSON and writes to w.
-// Only crontabs with job lines are included.
-func printListAsJSON(w io.Writer, crontabs []*lib.Crontab) {
-	var output []*lib.Crontab
+// Only crontabs with job lines are included, and within each crontab
+// only job lines are emitted (matching the table output behavior).
+func printListAsJSON(w io.Writer, crontabs []*lib.Crontab) error {
+	var output []lib.Crontab
 	for _, crontab := range crontabs {
-		if len(jobLines(crontab)) > 0 {
-			output = append(output, crontab)
+		jobs := jobLines(crontab)
+		if len(jobs) == 0 {
+			continue
 		}
+		// Shallow copy with only job lines so comments/env vars are excluded
+		filtered := *crontab
+		filtered.Lines = jobs
+		output = append(output, filtered)
 	}
 
 	if output == nil {
-		output = []*lib.Crontab{}
+		output = []lib.Crontab{}
 	}
 
 	data, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error encoding JSON: %s\n", err)
-		os.Exit(1)
+		return err
 	}
 	data = append(data, '\n')
-	w.Write(data)
+	_, err = w.Write(data)
+	return err
 }
