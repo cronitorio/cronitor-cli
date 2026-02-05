@@ -21,7 +21,8 @@ var pingDuration float64
 var pingMetrics string
 
 var pingCmd = &cobra.Command{
-	Use:   "ping <key>",
+	GroupID: GroupCron,
+	Use:     "ping <key>",
 	Short: "Send a telemetry ping to Cronitor",
 	Long: `Send telemetry events to Cronitor monitors.
 

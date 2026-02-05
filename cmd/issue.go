@@ -13,7 +13,8 @@ import (
 )
 
 var issueCmd = &cobra.Command{
-	Use:   "issue",
+	GroupID: GroupAPI,
+	Use:     "issue",
 	Short: "Manage issues",
 	Long: `Manage Cronitor issues and incidents.
 

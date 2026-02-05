@@ -600,7 +600,8 @@ const (
 )
 
 var dashCmd = &cobra.Command{
-	Use:   "dash",
+	GroupID: GroupCron,
+	Use:     "dash",
 	Short: "Start the web dashboard",
 	Long: `Start the Crontab Guru web dashboard.
 The dashboard provides a web interface for managing your cron jobs and crontab files.

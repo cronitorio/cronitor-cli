@@ -21,7 +21,8 @@ var (
 )
 
 var groupCmd = &cobra.Command{
-	Use:   "group",
+	GroupID: GroupAPI,
+	Use:     "group",
 	Short: "Manage monitor groups",
 	Long: `Create, list, update, and delete monitor groups.
 

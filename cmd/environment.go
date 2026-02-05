@@ -12,6 +12,7 @@ import (
 )
 
 var environmentCmd = &cobra.Command{
+	GroupID: GroupAPI,
 	Use:     "environment",
 	Aliases: []string{"env"},
 	Short:   "Manage environments",

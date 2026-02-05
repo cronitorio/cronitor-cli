@@ -9,7 +9,8 @@ import (
 )
 
 var shellCmd = &cobra.Command{
-	Use:   "shell",
+	GroupID: GroupCron,
+	Use:     "shell",
 	Short: "Run commands from a cron-like shell",
 	Long: `
 Cronitor shell allows you to run commands like cron does. Commands run from the prompt start from your home directory, with reduced shell functionality and no shared environment variables.

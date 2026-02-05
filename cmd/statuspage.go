@@ -12,7 +12,8 @@ import (
 )
 
 var statuspageCmd = &cobra.Command{
-	Use:   "statuspage",
+	GroupID: GroupAPI,
+	Use:     "statuspage",
 	Short: "Manage status pages",
 	Long: `Manage Cronitor status pages and their components.
 

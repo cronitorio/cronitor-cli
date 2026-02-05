@@ -45,7 +45,8 @@ func initialModel() model {
 }
 
 var signupCmd = &cobra.Command{
-	Use:   "signup",
+	GroupID: GroupCron,
+	Use:     "signup",
 	Short: "Sign up for a Cronitor account",
 	Long:  `Create a new Cronitor account by providing your name, email, and password.`,
 	Run: func(cmd *cobra.Command, args []string) {

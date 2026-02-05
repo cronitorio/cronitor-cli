@@ -27,6 +27,7 @@ var (
 )
 
 var metricCmd = &cobra.Command{
+	GroupID: GroupAPI,
 	Use:     "metric",
 	Aliases: []string{"metrics"},
 	Short:   "Query monitor metrics and aggregates",

@@ -10,7 +10,7 @@ require (
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
 	github.com/manifoldco/promptui v0.8.0
 	github.com/olekukonko/tablewriter v0.0.4
-	github.com/spf13/cobra v1.2.1
+	github.com/spf13/cobra v1.8.1
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.9.0
 )
@@ -37,7 +37,7 @@ require (
 	github.com/go-ole/go-ole v1.2.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
-	github.com/inconshreveable/mousetrap v1.0.0 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/juju/ansiterm v0.0.0-20180109212912-720a0952cc2a // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/lunixbochs/vtclean v0.0.0-20180621232353-2d01aacdc34a // indirect

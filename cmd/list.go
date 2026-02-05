@@ -15,7 +15,8 @@ import (
 var printJSON bool
 
 var listCmd = &cobra.Command{
-	Use:   "list <optional path>",
+	GroupID: GroupCron,
+	Use:     "list <optional path>",
 	Short: "Search for and list all cron jobs",
 	Long: `
 Cronitor list scans for cron jobs and displays them in an easy to read format.

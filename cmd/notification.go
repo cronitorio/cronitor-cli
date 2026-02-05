@@ -12,6 +12,7 @@ import (
 )
 
 var notificationCmd = &cobra.Command{
+	GroupID: GroupAPI,
 	Use:     "notification",
 	Aliases: []string{"notifications"},
 	Short:   "Manage notification lists",

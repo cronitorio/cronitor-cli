@@ -43,8 +43,9 @@ const (
 )
 
 var updateCmd = &cobra.Command{
-	Use:   "update",
-	Short: "Update to the latest version",
+	GroupID: GroupCron,
+	Use:     "update",
+	Short:   "Update to the latest version",
 	Run:   runUpdate,
 }
 

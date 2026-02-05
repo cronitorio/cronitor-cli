@@ -13,7 +13,8 @@ import (
 )
 
 var monitorCmd = &cobra.Command{
-	Use:   "monitor",
+	GroupID: GroupAPI,
+	Use:     "monitor",
 	Short: "Manage monitors",
 	Long: `Manage Cronitor monitors (jobs, checks, heartbeats, sites).
 

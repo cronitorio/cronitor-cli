@@ -36,7 +36,8 @@ type MCPInstanceConfig struct {
 
 // configureCmd represents the configure command
 var configureCmd = &cobra.Command{
-	Use:   "configure",
+	GroupID: GroupCron,
+	Use:     "configure",
 	Short: "Save configuration variables to the config file",
 	Long: `
 Optionally write configuration options to a JSON file.

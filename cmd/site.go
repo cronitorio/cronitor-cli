@@ -41,7 +41,8 @@ var (
 )
 
 var siteCmd = &cobra.Command{
-	Use:   "site",
+	GroupID: GroupAPI,
+	Use:     "site",
 	Short: "Manage RUM sites",
 	Long: `Manage Real User Monitoring (RUM) sites.
 

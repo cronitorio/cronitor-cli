@@ -24,7 +24,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var Version string = "32.0"
+var Version string = "33.0"
 
 var cfgFile string
 var userAgent string
@@ -57,6 +57,11 @@ func Execute() {
 	}
 }
 
+const (
+	GroupCron = "cron"
+	GroupAPI  = "api"
+)
+
 var varApiKey = "CRONITOR_API_KEY"
 var varEnv = "CRONITOR_ENV"
 var varHostname = "CRONITOR_HOSTNAME"
@@ -73,6 +78,12 @@ var varApiVersion = "CRONITOR_API_VERSION"
 func init() {
 	userAgent = fmt.Sprintf("CronitorCLI/%s", Version)
 	cobra.OnInitialize(initConfig)
+
+	// Define command groups for organized help output
+	RootCmd.AddGroup(
+		&cobra.Group{ID: GroupCron, Title: "Cron Monitoring Commands:"},
+		&cobra.Group{ID: GroupAPI, Title: "API Resource Commands:"},
+	)
 
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,

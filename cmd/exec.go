@@ -26,7 +26,8 @@ import (
 var monitorCode string
 var commandParts []string
 var execCmd = &cobra.Command{
-	Use:   "exec",
+	GroupID: GroupCron,
+	Use:     "exec",
 	Short: "Execute a command with monitoring",
 	Long: `
 The supplied command will be executed and Cronitor will be notified of success or failure.

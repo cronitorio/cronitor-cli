@@ -118,6 +118,7 @@ var syncFile string         // Path to YAML/JSON file for bulk monitor import
 var noAutoDiscover = true
 
 var discoverCmd = &cobra.Command{
+	GroupID: GroupCron,
 	Use:     "sync <optional path>",
 	Aliases: []string{"discover"},
 	Short:   "Add monitoring to new cron jobs and sync changes to existing jobs",

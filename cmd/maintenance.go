@@ -35,6 +35,7 @@ var (
 )
 
 var maintenanceCmd = &cobra.Command{
+	GroupID: GroupAPI,
 	Use:     "maintenance",
 	Aliases: []string{"maint"},
 	Short:   "Manage maintenance windows",

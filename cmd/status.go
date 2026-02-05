@@ -24,7 +24,8 @@ type StatusMonitors struct {
 }
 
 var statusCmd = &cobra.Command{
-	Use:   "status",
+	GroupID: GroupCron,
+	Use:     "status",
 	Short: "View monitor status",
 	Long: `
 View monitor status
