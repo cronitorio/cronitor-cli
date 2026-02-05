@@ -48,7 +48,9 @@ Examples:
   cronitor metric aggregate --monitor my-job --time 30d
   cronitor metric aggregate --tag critical --env production
 
-For full API documentation, see https://cronitor.io/docs/metrics-api.md`,
+For full API documentation:
+  Humans: https://cronitor.io/docs/metrics-api
+  Agents: https://cronitor.io/docs/metrics-api.md`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},

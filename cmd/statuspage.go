@@ -31,7 +31,9 @@ Examples:
   cronitor statuspage component update <key> --data '{"name":"New Name"}'
   cronitor statuspage component delete <component-key>
 
-For full API documentation, see https://cronitor.io/docs/statuspages-api.md`,
+For full API documentation:
+  Humans: https://cronitor.io/docs/statuspages-api
+  Agents: https://cronitor.io/docs/statuspages-api.md`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(viper.GetString(varApiKey)) < 10 {
 			return errors.New("API key required. Run 'cronitor configure' or use --api-key flag")

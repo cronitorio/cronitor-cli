@@ -60,7 +60,9 @@ Examples:
   Send heartbeat:
     cronitor ping d3x0c1 --tick
 
-For full API documentation, see https://cronitor.io/docs/telemetry-api.md`,
+For full API documentation:
+  Humans: https://cronitor.io/docs/telemetry-api
+  Agents: https://cronitor.io/docs/telemetry-api.md`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
 			return errors.New("a unique monitor key is required")

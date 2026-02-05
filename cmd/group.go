@@ -25,7 +25,9 @@ var groupCmd = &cobra.Command{
 	Short: "Manage monitor groups",
 	Long: `Create, list, update, and delete monitor groups.
 
-For full API documentation, see https://cronitor.io/docs/groups-api.md`,
+For full API documentation:
+  Humans: https://cronitor.io/docs/groups-api
+  Agents: https://cronitor.io/docs/groups-api.md`,
 }
 
 func init() {

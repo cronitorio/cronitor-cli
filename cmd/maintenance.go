@@ -51,7 +51,9 @@ Examples:
   cronitor maintenance create "DB Migration" --start "2024-01-20T00:00:00Z" --end "2024-01-20T02:00:00Z" --monitors "db-job,db-check"
   cronitor maintenance delete <key>
 
-For full API documentation, see https://cronitor.io/docs/maintenance-windows-api.md`,
+For full API documentation:
+  Humans: https://cronitor.io/docs/maintenance-windows-api
+  Agents: https://cronitor.io/docs/maintenance-windows-api.md`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},

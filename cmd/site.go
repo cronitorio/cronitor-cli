@@ -61,7 +61,9 @@ Examples:
   cronitor site query --site my-site --type breakdown --metric lcp_p50 --group-by country_code
   cronitor site query --site my-site --type timeseries --metric session_count --bucket hour
 
-For full API documentation, see https://cronitor.io/docs/sites-api.md`,
+For full API documentation:
+  Humans: https://cronitor.io/docs/sites-api
+  Agents: https://cronitor.io/docs/sites-api.md`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},
