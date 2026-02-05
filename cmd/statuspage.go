@@ -50,7 +50,6 @@ var (
 	statuspageData           string
 	statuspageWithStatus     bool
 	statuspageWithComponents bool
-	statuspageFetchAll       bool
 	// Component flags
 	componentStatuspage string
 	componentData       string
@@ -84,42 +83,6 @@ Examples:
 		}
 		if statuspageWithComponents {
 			params["withComponents"] = "true"
-		}
-
-		if statuspageFetchAll {
-			bodies, err := FetchAllPages(client, "/statuspages", params, "data")
-			if err != nil {
-				Error(fmt.Sprintf("Failed to list status pages: %s", err))
-				os.Exit(1)
-			}
-			if statuspageFormat == "json" || statuspageFormat == "" {
-				statuspageOutputToTarget(FormatJSON(MergePagedJSON(bodies, "data")))
-				return
-			}
-			// Table: accumulate rows from all pages
-			table := &UITable{
-				Headers: []string{"NAME", "KEY", "SUBDOMAIN", "STATUS"},
-			}
-			for _, body := range bodies {
-				var result struct {
-					StatusPages []struct {
-						Key       string `json:"key"`
-						Name      string `json:"name"`
-						Subdomain string `json:"hosted_subdomain"`
-						Status    string `json:"status"`
-					} `json:"data"`
-				}
-				json.Unmarshal(body, &result)
-				for _, sp := range result.StatusPages {
-					status := successStyle.Render(sp.Status)
-					if sp.Status != "operational" {
-						status = warningStyle.Render(sp.Status)
-					}
-					table.Rows = append(table.Rows, []string{sp.Name, sp.Key, sp.Subdomain, status})
-				}
-			}
-			statuspageOutputToTarget(table.Render())
-			return
 		}
 
 		resp, err := client.GET("/statuspages", params)
@@ -336,7 +299,6 @@ func init() {
 	// List flags
 	statuspageListCmd.Flags().BoolVar(&statuspageWithStatus, "with-status", false, "Include current status")
 	statuspageListCmd.Flags().BoolVar(&statuspageWithComponents, "with-components", false, "Include component details")
-	statuspageListCmd.Flags().BoolVar(&statuspageFetchAll, "all", false, "Fetch all pages of results")
 
 	// Get flags
 	statuspageGetCmd.Flags().BoolVar(&statuspageWithStatus, "with-status", false, "Include current status")

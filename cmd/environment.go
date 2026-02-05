@@ -45,7 +45,6 @@ var (
 	environmentFormat   string
 	environmentOutput   string
 	environmentData     string
-	environmentFetchAll bool
 )
 
 func init() {
@@ -69,48 +68,6 @@ Examples:
 		params := make(map[string]string)
 		if environmentPage > 1 {
 			params["page"] = fmt.Sprintf("%d", environmentPage)
-		}
-
-		if environmentFetchAll {
-			bodies, err := FetchAllPages(client, "/environments", params, "environments")
-			if err != nil {
-				Error(fmt.Sprintf("Failed to list environments: %s", err))
-				os.Exit(1)
-			}
-			if environmentFormat == "json" || environmentFormat == "" {
-				environmentOutputToTarget(FormatJSON(MergePagedJSON(bodies, "environments")))
-				return
-			}
-			// Table: accumulate rows from all pages
-			table := &UITable{
-				Headers: []string{"NAME", "KEY", "ALERTS", "MONITORS", "DEFAULT"},
-			}
-			for _, body := range bodies {
-				var result struct {
-					Environments []struct {
-						Key            string `json:"key"`
-						Name           string `json:"name"`
-						WithAlerts     bool   `json:"with_alerts"`
-						Default        bool   `json:"default"`
-						ActiveMonitors int    `json:"active_monitors"`
-					} `json:"environments"`
-				}
-				json.Unmarshal(body, &result)
-				for _, e := range result.Environments {
-					alerts := mutedStyle.Render("off")
-					if e.WithAlerts {
-						alerts = successStyle.Render("on")
-					}
-					isDefault := ""
-					if e.Default {
-						isDefault = "yes"
-					}
-					monitors := fmt.Sprintf("%d", e.ActiveMonitors)
-					table.Rows = append(table.Rows, []string{e.Name, e.Key, alerts, monitors, isDefault})
-				}
-			}
-			environmentOutputToTarget(table.Render())
-			return
 		}
 
 		resp, err := client.GET("/environments", params)
@@ -328,9 +285,6 @@ func init() {
 	environmentCmd.AddCommand(environmentCreateCmd)
 	environmentCmd.AddCommand(environmentUpdateCmd)
 	environmentCmd.AddCommand(environmentDeleteCmd)
-
-	// List flags
-	environmentListCmd.Flags().BoolVar(&environmentFetchAll, "all", false, "Fetch all pages of results")
 
 	// Create flags
 	environmentCreateCmd.Flags().StringVarP(&environmentData, "data", "d", "", "JSON payload")

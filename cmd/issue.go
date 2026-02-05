@@ -67,8 +67,6 @@ var (
 	issueBulkIssues   string
 	issueBulkState    string
 	issueBulkAssignTo string
-	// Pagination flags
-	issueFetchAll bool
 )
 
 func init() {
@@ -141,48 +139,6 @@ Examples:
 		}
 		if issueWithComponentDetails {
 			params["withComponentDetails"] = "true"
-		}
-
-		if issueFetchAll {
-			bodies, err := FetchAllPages(client, "/issues", params, "data")
-			if err != nil {
-				Error(fmt.Sprintf("Failed to list issues: %s", err))
-				os.Exit(1)
-			}
-			if issueFormat == "json" || issueFormat == "" {
-				issueOutputToTarget(FormatJSON(MergePagedJSON(bodies, "data")))
-				return
-			}
-			// Table: accumulate rows from all pages
-			table := &UITable{
-				Headers: []string{"NAME", "KEY", "STATE", "SEVERITY", "STARTED"},
-			}
-			for _, body := range bodies {
-				var result struct {
-					Issues []struct {
-						Key      string `json:"key"`
-						Name     string `json:"name"`
-						State    string `json:"state"`
-						Severity string `json:"severity"`
-						Started  string `json:"started"`
-					} `json:"data"`
-				}
-				json.Unmarshal(body, &result)
-				for _, issue := range result.Issues {
-					state := issue.State
-					switch state {
-					case "resolved":
-						state = successStyle.Render(state)
-					case "unresolved":
-						state = errorStyle.Render(state)
-					default:
-						state = warningStyle.Render(state)
-					}
-					table.Rows = append(table.Rows, []string{issue.Name, issue.Key, state, issue.Severity, issue.Started})
-				}
-			}
-			issueOutputToTarget(table.Render())
-			return
 		}
 
 		resp, err := client.GET("/issues", params)
@@ -581,7 +537,6 @@ func init() {
 	issueListCmd.Flags().BoolVar(&issueWithMonitorDetails, "with-monitor-details", false, "Include monitor details")
 	issueListCmd.Flags().BoolVar(&issueWithAlertDetails, "with-alert-details", false, "Include alert details")
 	issueListCmd.Flags().BoolVar(&issueWithComponentDetails, "with-component-details", false, "Include component details")
-	issueListCmd.Flags().BoolVar(&issueFetchAll, "all", false, "Fetch all pages of results")
 
 	// Get expansion flags
 	issueGetCmd.Flags().BoolVar(&issueWithStatuspageDetails, "with-statuspage-details", false, "Include status page details")

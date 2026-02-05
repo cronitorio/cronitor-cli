@@ -47,7 +47,6 @@ var (
 	notificationFormat   string
 	notificationOutput   string
 	notificationData     string
-	notificationFetchAll bool
 )
 
 func init() {
@@ -77,46 +76,6 @@ Examples:
 		}
 		if notificationPageSize > 0 {
 			params["pageSize"] = fmt.Sprintf("%d", notificationPageSize)
-		}
-
-		if notificationFetchAll {
-			bodies, err := FetchAllPages(client, "/notifications", params, "templates")
-			if err != nil {
-				Error(fmt.Sprintf("Failed to list notification lists: %s", err))
-				os.Exit(1)
-			}
-			if notificationFormat == "json" || notificationFormat == "" {
-				notificationOutputToTarget(FormatJSON(MergePagedJSON(bodies, "templates")))
-				return
-			}
-			// Table: accumulate rows from all pages
-			table := &UITable{
-				Headers: []string{"NAME", "KEY", "EMAILS", "SLACK", "MONITORS"},
-			}
-			for _, body := range bodies {
-				var result struct {
-					Templates []struct {
-						Key           string `json:"key"`
-						Name          string `json:"name"`
-						Notifications struct {
-							Emails   []string `json:"emails"`
-							Slack    []string `json:"slack"`
-							Webhooks []string `json:"webhooks"`
-							Phones   []string `json:"phones"`
-						} `json:"notifications"`
-						Monitors []string `json:"monitors"`
-					} `json:"templates"`
-				}
-				json.Unmarshal(body, &result)
-				for _, n := range result.Templates {
-					emailCount := fmt.Sprintf("%d", len(n.Notifications.Emails))
-					slackCount := fmt.Sprintf("%d", len(n.Notifications.Slack))
-					monitorCount := fmt.Sprintf("%d", len(n.Monitors))
-					table.Rows = append(table.Rows, []string{n.Name, n.Key, emailCount, slackCount, monitorCount})
-				}
-			}
-			notificationOutputToTarget(table.Render())
-			return
 		}
 
 		resp, err := client.GET("/notifications", params)
@@ -348,9 +307,6 @@ func init() {
 	notificationCmd.AddCommand(notificationCreateCmd)
 	notificationCmd.AddCommand(notificationUpdateCmd)
 	notificationCmd.AddCommand(notificationDeleteCmd)
-
-	// List flags
-	notificationListCmd.Flags().BoolVar(&notificationFetchAll, "all", false, "Fetch all pages of results")
 
 	// Create command flags
 	notificationCreateCmd.Flags().StringVarP(&notificationData, "data", "d", "", "JSON payload")

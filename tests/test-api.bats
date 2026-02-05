@@ -250,27 +250,38 @@ setup() {
 # INTEGRATION TESTS (SKIPPED BY DEFAULT)
 #################
 
-@test "monitor list integration test" {
-  skip "Integration test requires valid API key"
-  # ../cronitor monitor list -k $CRONITOR_API_KEY
+@test "monitor list returns results" {
+  if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
+  run ../cronitor monitor list --format json
+  [ "$status" -eq 0 ]
 }
 
-@test "monitor get integration test" {
-  skip "Integration test requires valid API key"
-  # ../cronitor monitor get test-monitor -k $CRONITOR_API_KEY
+@test "monitor list --all fetches all pages" {
+  if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
+  run ../cronitor monitor list --all --format json
+  [ "$status" -eq 0 ]
+  # Verify we got a JSON array with monitors
+  echo "$output" | head -1 | grep -q '^\['
 }
 
-@test "monitor create integration test" {
-  skip "Integration test requires valid API key"
-  # ../cronitor monitor create --data '{"key":"test-cli-monitor","type":"job"}' -k $CRONITOR_API_KEY
+@test "monitor list --all returns more results than single page" {
+  if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
+  single_page=$(../cronitor monitor list --format json)
+  all_pages=$(../cronitor monitor list --all --format json)
+  # Count items: all pages should have >= single page
+  single_count=$(echo "$single_page" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d) if isinstance(d,list) else len(d.get('monitors',d.get('data',[]))))" 2>/dev/null || echo "0")
+  all_count=$(echo "$all_pages" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+  [ "$all_count" -ge "$single_count" ]
 }
 
-@test "issue list integration test" {
-  skip "Integration test requires valid API key"
-  # ../cronitor issue list -k $CRONITOR_API_KEY
+@test "issue list returns results" {
+  if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
+  run ../cronitor issue list --format json
+  [ "$status" -eq 0 ]
 }
 
-@test "statuspage list integration test" {
-  skip "Integration test requires valid API key"
-  # ../cronitor statuspage list -k $CRONITOR_API_KEY
+@test "statuspage list returns results" {
+  if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
+  run ../cronitor statuspage list --format json
+  [ "$status" -eq 0 ]
 }

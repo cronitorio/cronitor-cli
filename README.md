@@ -116,7 +116,7 @@ cronitor environment delete <key>
 | `--format json\|table\|yaml` | Output format (default: `table` for list, `json` for get) |
 | `-o, --output <file>` | Write output to a file |
 | `--page <n>` | Page number for paginated results |
-| `--all` | Fetch all pages of results |
+| `--all` | Fetch all pages of results (monitors only) |
 | `-d, --data <json>` | JSON data for create/update |
 | `-f, --file <path>` | Read JSON or YAML from a file |
 | `-k, --api-key <key>` | Cronitor API key |
