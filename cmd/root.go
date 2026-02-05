@@ -81,7 +81,7 @@ func init() {
 
 	// Define command groups for organized help output
 	RootCmd.AddGroup(
-		&cobra.Group{ID: GroupCron, Title: "Cron Monitoring Commands:"},
+		&cobra.Group{ID: GroupCron, Title: "Job/Task Monitoring Commands:"},
 		&cobra.Group{ID: GroupAPI, Title: "API Resource Commands:"},
 	)
 
