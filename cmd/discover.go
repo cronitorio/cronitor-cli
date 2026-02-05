@@ -1,20 +1,34 @@
 package cmd
 
 import (
-	"github.com/cronitorio/cronitor-cli/lib"
 	"errors"
 	"fmt"
 	"os"
 	"os/user"
+	"runtime"
 	"strings"
 
-	"github.com/manifoldco/promptui"
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
+// getJobLabel returns the appropriate term for a job based on the platform
+// Returns "scheduled task" on Windows, "cron job" on other platforms
+func getJobLabel() string {
+	if runtime.GOOS == "windows" {
+		return "scheduled task"
+	}
+	return "cron job"
+}
+
 type ExistingMonitors struct {
-	Monitors    []lib.MonitorSummary
+	Monitors    []lib.Monitor
 	Names       []string
 	CurrentKey  string
 	CurrentCode string
@@ -23,11 +37,11 @@ type ExistingMonitors struct {
 func (em ExistingMonitors) HasMonitorByName(name string) bool {
 	for _, value := range em.Monitors {
 		if em.CurrentCode != "" {
-			if value.Code == em.CurrentCode {
+			if value.Attributes.Code == em.CurrentCode {
 				continue
 			}
 		} else {
-			if value.Key == em.CurrentKey {
+			if value.Attributes.Key == em.CurrentKey {
 				continue
 			}
 		}
@@ -47,14 +61,31 @@ func (em ExistingMonitors) HasMonitorByName(name string) bool {
 	return false
 }
 
+func (em ExistingMonitors) Get(key string, code string) lib.Monitor {
+	for _, value := range em.Monitors {
+		if code != "" {
+			if value.Attributes.Code == code {
+				return value
+			}
+		}
+
+		if key != "" {
+			if value.Attributes.Key == key {
+				return value
+			}
+		}
+	}
+	return lib.Monitor{}
+}
+
 func (em ExistingMonitors) GetNameForCurrent() (string, error) {
 	for _, value := range em.Monitors {
 		if em.CurrentCode != "" {
-			if value.Code == em.CurrentCode {
+			if value.Attributes.Code == em.CurrentCode {
 				return value.Name, nil
 			}
 		} else {
-			if value.Key == em.CurrentKey {
+			if value.Attributes.Key == em.CurrentKey {
 				return value.Name, nil
 			}
 		}
@@ -62,7 +93,7 @@ func (em ExistingMonitors) GetNameForCurrent() (string, error) {
 	return "", errors.New("does not exist")
 }
 
-func (em ExistingMonitors) AddName(name string) {
+func (em *ExistingMonitors) AddName(name string) {
 	em.Names = append(em.Names, name)
 }
 
@@ -76,41 +107,44 @@ var timezone lib.TimezoneLocationName
 var maxNameLen = 75
 var notificationList string
 var existingMonitors = ExistingMonitors{}
+var processingMultipleCrontabs = false
+var userAbortedSync = false // Set to true when user presses Ctrl+D to abort sync entirely
 
 // To deprecate this feature we are hijacking this flag that will trigger removal of auto-discover lines from existing user's crontabs.
 var noAutoDiscover = true
 
 var discoverCmd = &cobra.Command{
-	Use:   "discover <optional path>",
-	Short: "Attach monitoring to new cron jobs and watch for schedule updates",
+	Use:     "sync <optional path>",
+	Aliases: []string{"discover"},
+	Short:   "Add monitoring to new cron jobs and sync changes to existing jobs",
 	Long: `
-Cronitor discover will parse your crontab and create or update monitors using the Cronitor API.
+Cronitor sync will parse your crontab and create or update monitors using the Cronitor API.
 
 Note: You must supply your Cronitor API key. This can be passed as a flag, environment variable, or saved in your Cronitor configuration file. See 'help configure' for more details.
 
 Example:
-  $ cronitor discover
+  $ cronitor sync
       > Read user crontab and step through line by line
       > Creates monitors on your Cronitor dashboard for each entry in the crontab. The command string will be used as the monitor name.
       > Adds Cronitor integration to your crontab
 
-  $ cronitor discover /path/to/crontab
+  $ cronitor sync /path/to/crontab
       > Instead of the user crontab, provide a crontab file (or directory of crontabs) to use
 
 Example that does not use an interactive shell:
-  $ cronitor discover --auto
+  $ cronitor sync --auto
       > The only output to stdout will be your updated crontab file, suitable for piplines or writing to another crontab.
 
 Example excluding secrets or common text from monitor names:
-  $ cronitor discover /path/to/crontab -e "secret-token" -e "/var/common/app/path/"
+  $ cronitor sync /path/to/crontab -e "secret-token" -e "/var/common/app/path/"
       > Updates previously discovered monitors or creates new monitors, excluding the provided snippets from the monitor name.
       > Adds Cronitor integration to your crontab and outputs to stdout
-      > Names you create yourself in "discover" or from the dashboard are unchanged.
+      > Names you create yourself in "sync" or from the dashboard are unchanged.
 
   You can run the command as many times as you need, accumulating exclusion params until the job names on your Cronitor dashboard are clear and readable.
 
 Example where you perform a dry-run without any crontab modifications:
-  $ cronitor discover /path/to/crontab --dry-run
+  $ cronitor sync /path/to/crontab --dry-run
       > Steps line by line, creates or updates monitors
       > Checks permissions to ensure integration can be applied later
 	`,
@@ -122,27 +156,41 @@ Example where you perform a dry-run without any crontab modifications:
 			isSilent = true
 		}
 
-		if len(viper.GetString(varApiKey)) < 10 {
-			return errors.New("you must provide a valid API key with this command or save a key using 'cronitor configure'")
-		}
-
 		return nil
 	},
 
 	Run: func(cmd *cobra.Command, args []string) {
+
+		// Reset the flag for each command execution
+		processingMultipleCrontabs = false
+
+		if len(viper.GetString(varApiKey)) < 10 {
+			fatal(fmt.Sprintf("\n%s\n\n%s Run %s to create an account.\n\n%s Copy an SDK key from https://cronitor.io/app/settings/api and save it with %s\n\n",
+				color.New(color.FgRed, color.Bold).Sprint("Add your API key before running sync."),
+				lipgloss.NewStyle().Bold(true).Render("New user?"),
+				lipgloss.NewStyle().Italic(true).Render("cronitor signup"),
+				lipgloss.NewStyle().Bold(true).Render("Existing user?"),
+				lipgloss.NewStyle().Italic(true).Render("cronitor configure --api-key <key>")), 1)
+		}
+
 		var username string
 		if u, err := user.Current(); err == nil {
 			username = u.Username
 		}
 
-		printSuccessText("Scanning for cron jobs... (Use Ctrl-C to skip)", false)
+		printSuccessText(fmt.Sprintf("Scanning for %ss...", getJobLabel()), false)
 
 		// Fetch list of existing monitor names for easy unique name validation and prompt prefill later on
 		existingMonitors.Monitors, _ = getCronitorApi().GetMonitors()
 
-		if len(args) > 0 {
+		if runtime.GOOS == "windows" {
+			if processWindowsTaskScheduler() {
+				importedCrontabs++
+			}
+		} else if len(args) > 0 {
 			// A supplied argument can be a specific file or a directory
 			if isPathToDirectory(args[0]) {
+				processingMultipleCrontabs = true
 				processDirectory(username, args[0])
 			} else {
 				if processCrontab(lib.CrontabFactory(username, args[0])) {
@@ -150,21 +198,44 @@ Example where you perform a dry-run without any crontab modifications:
 				}
 			}
 		} else {
-			// Without a supplied argument look at the user crontab, the system crontab and the system drop-in directory
-			if processCrontab(lib.CrontabFactory(username, "")) {
-				importedCrontabs++
+			// Without a supplied argument look at user crontabs, the system crontab and the system drop-in directory
+			processingMultipleCrontabs = true
+
+			// Process crontabs for all configured users
+			users := parseUsers()
+			if len(users) == 0 {
+				// Default to current user if no users configured
+				users = []string{username}
 			}
 
-			if systemCrontab := lib.CrontabFactory(username, lib.SYSTEM_CRONTAB); systemCrontab.Exists() {
-				if processCrontab(systemCrontab) {
+			for _, user := range users {
+				if userAbortedSync {
+					break
+				}
+				if processCrontab(lib.CrontabFactory(user, fmt.Sprintf("user:%s", user))) {
 					importedCrontabs++
 				}
 			}
 
-			processDirectory(username, lib.DROP_IN_DIRECTORY)
+			if !userAbortedSync {
+				if systemCrontab := lib.CrontabFactory(username, lib.SYSTEM_CRONTAB); systemCrontab.Exists() {
+					if processCrontab(systemCrontab) {
+						importedCrontabs++
+					}
+				}
+			}
+
+			if !userAbortedSync {
+				processDirectory(username, lib.DROP_IN_DIRECTORY)
+			}
 		}
 
-		printDoneText("Discover complete", false)
+		if userAbortedSync {
+			printWarningText("Sync aborted", false)
+		} else {
+			printDoneText("Sync complete", false)
+			printSuccessText("View your dashboard https://cronitor.io/app/dashboard", false)
+		}
 		if dryRun {
 			saveCommand := strings.Join(os.Args, " ")
 			saveCommand = strings.Replace(saveCommand, " --dry-run", "", -1)
@@ -181,7 +252,7 @@ Example where you perform a dry-run without any crontab modifications:
 func processDirectory(username, directory string) {
 	// Look for crontab files in the system drop-in directory but only prompt to import them
 	// if the directory is writable for this user.
-	files := lib.EnumerateCrontabFiles(directory)
+	files := lib.EnumerateFiles(directory)
 	if len(files) > 0 {
 		testCrontab := lib.CrontabFactory(username, files[0])
 		if !testCrontab.IsWritable() {
@@ -190,6 +261,9 @@ func processDirectory(username, directory string) {
 		}
 
 		for _, crontabFile := range files {
+			if userAbortedSync {
+				break
+			}
 			if importedCrontabs > 0 {
 				printLn()
 			}
@@ -203,7 +277,6 @@ func processDirectory(username, directory string) {
 
 func processCrontab(crontab *lib.Crontab) bool {
 	defer printLn()
-	printSuccessText(fmt.Sprintf("Checking %s", crontab.DisplayName()), false)
 
 	if !crontab.Exists() {
 		printWarningText("This crontab does not exist. Skipping.", true)
@@ -243,54 +316,78 @@ func processCrontab(crontab *lib.Crontab) bool {
 		if count == 1 {
 			label = "job"
 		}
-		printSuccessText(fmt.Sprintf("Found %d cron %s:", count, label), true)
+		printSuccessText(fmt.Sprintf("Found %d %s in %s", count, label, crontab.DisplayName()), true)
 	}
 
 	// Read crontab into map of Monitor structs
 	monitors := map[string]*lib.Monitor{}
 	allNameCandidates := map[string]bool{}
+	userExited := false
 
 	for _, line := range crontab.Lines {
 		if !line.IsMonitorable() {
 			continue
 		}
 
-		rules := []lib.Rule{createRule(line.CronExpression)}
+		// Automatically skip jobs marked with "# cronitor: ignore"
+		if line.Ignored {
+			continue
+		}
+
+		// Automatically skip jobs that are commented out (disabled)
+		if line.IsComment {
+			continue
+		}
+
 		defaultName := createDefaultName(line, crontab, effectiveHostname(), excludeFromName, allNameCandidates)
 		tags := createTags()
 		key := line.Key(crontab.CanonicalName())
 		name := defaultName
 		skip := false
 
-		// If we know this monitor exists already, return the name
-		existingMonitors.CurrentKey = key
-		existingMonitors.CurrentCode = line.Code
-		if existingName, err := existingMonitors.GetNameForCurrent(); err == nil {
-			name = existingName
+		// Priority order for name selection:
+		// 1. Use Line.Name if it exists (from "# Name: <name>" comment)
+		// 2. Use existing monitor name if available
+		// 3. Use default generated name or prompt user
+
+		if line.Name != "" {
+			// Use the name from the crontab comment
+			name = line.Name
+		} else {
+			// If we know this monitor exists already, return the name
+			existingMonitors.CurrentKey = key
+			existingMonitors.CurrentCode = line.Code
+			if existingName, err := existingMonitors.GetNameForCurrent(); err == nil {
+				name = existingName
+			}
 		}
 
 		if !isAutoDiscover && !line.IsAutoDiscoverCommand() {
-			fmt.Println(fmt.Sprintf("\n    %s  %s", line.CronExpression, line.CommandToRun))
-			for {
-				prompt := promptui.Prompt{
-					Label:     "Job name",
-					Default:   name,
-					Validate:  validateName,
-					AllowEdit: name != defaultName,
-					Templates: promptTemplates(),
-				}
+			isMonitored := line.Code != ""
 
-				if result, err := prompt.Run(); err == nil {
-					name = result
-				} else if err == promptui.ErrInterrupt {
+			printSuccessText(fmt.Sprintf("Line %d:", line.LineNumber), true)
+			fmt.Println(renderJobInfoBox(name, line.CronExpression, line.CommandToRun, isMonitored))
+
+			model := initialNameInputModel(name)
+			p := tea.NewProgram(model)
+
+			if result, err := p.Run(); err != nil {
+				printErrorText("Error: "+err.Error()+"\n", false)
+				skip = true
+			} else {
+				finalModel := result.(nameInputModel)
+				if finalModel.exited {
+					printWarningText("Exiting", true)
+					userExited = true
+					userAbortedSync = true
+					break
+				}
+				if !finalModel.done {
 					printWarningText("Skipped", true)
 					skip = true
-					break
 				} else {
-					printErrorText("Error: "+err.Error()+"\n", false)
+					name = finalModel.textInput.Value()
 				}
-
-				break
 			}
 		}
 
@@ -300,33 +397,48 @@ func processCrontab(crontab *lib.Crontab) bool {
 
 		existingMonitors.AddName(name)
 
-		if name == defaultName {
+		// Only clear the name if it was the auto-generated default name
+		// Preserve Line.Name (from "# Name:" comments) and existing monitor names
+		if name == defaultName && line.Name == "" {
 			name = ""
 		}
 
-		notificationListMap := map[string][]string{}
+		var notifications []string
 		if notificationList != "" {
-			notificationListMap = map[string][]string{"templates": {notificationList}}
+			notifications = []string{notificationList}
+		} else {
+			notifications = []string{"default"}
 		}
 
 		line.Mon = lib.Monitor{
 			Name:             name,
 			DefaultName:      defaultName,
-			Key:              key,
-			Rules:            rules,
+			Key:              line.Code,
 			Tags:             tags,
-			Type:             "heartbeat",
+			Schedules:        &[]string{line.CronExpression},
+			Type:             "job",
+			Platform:         lib.CRON,
 			Code:             line.Code,
 			Timezone:         timezone.Name,
 			Note:             createNote(line, crontab),
-			Notifications:    notificationListMap,
+			Notify:           notifications,
 			NoStdoutPassthru: noStdoutPassthru,
+		}
+
+		// If we're enabling monitoring for the first time, we won't have a code yet, use the key instead
+		if line.Code == "" {
+			line.Mon.Key = key
 		}
 
 		monitors[key] = &line.Mon
 	}
 
 	printLn()
+
+	// If user pressed Ctrl+D, exit without posting anything
+	if userExited {
+		return false
+	}
 
 	if len(monitors) > 0 {
 		printDoneText("Sending to Cronitor", true)
@@ -338,11 +450,28 @@ func processCrontab(crontab *lib.Crontab) bool {
 		fatal(err.Error(), 1)
 	}
 
+	// Update the line objects with the returned monitor codes
+	for _, line := range crontab.Lines {
+		if !line.IsMonitorable() {
+			continue
+		}
+
+		key := line.Key(crontab.CanonicalName())
+		if updatedMonitor, exists := monitors[key]; exists {
+			line.Mon = *updatedMonitor
+			line.Code = updatedMonitor.Attributes.Code
+			// Ensure the line name is set so it gets written as a comment
+			if updatedMonitor.Name != "" {
+				line.Name = updatedMonitor.Name
+			}
+		}
+	}
+
 	// Re-write crontab lines with new/updated monitoring
 	updatedCrontabLines := crontab.Write()
 
-	if !isSilent && isAutoDiscover {
-		// When running --auto mode, you should be able to pipe or redirect crontab output elsewhere. Skip status-related messages.
+	if !isSilent && isAutoDiscover && !processingMultipleCrontabs {
+		// When running --auto mode with a single crontab, you should be able to pipe or redirect crontab output elsewhere. Skip status-related messages.
 		fmt.Println(strings.TrimSpace(updatedCrontabLines))
 	}
 
@@ -450,10 +579,6 @@ func createTags() []string {
 	return tags
 }
 
-func createRule(cronExpression string) lib.Rule {
-	return lib.Rule{"not_on_schedule", lib.RuleValue(cronExpression), "", 0}
-}
-
 func validateName(candidateName string) error {
 	candidateName = strings.TrimSpace(candidateName)
 	if candidateName == "" {
@@ -471,23 +596,198 @@ func validateName(candidateName string) error {
 	return nil
 }
 
-func promptTemplates() *promptui.PromptTemplates {
-	bold := promptui.Styler(promptui.FGBold)
-	faint := promptui.Styler(promptui.FGFaint)
-	return &promptui.PromptTemplates{
-		Prompt:          fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconInitial), bold(":")),
-		Valid:           fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconGood), bold(":")),
-		Invalid:         fmt.Sprintf("    %s {{ . | bold }}%s ", bold(promptui.IconBad), bold(":")),
-		Success:         fmt.Sprintf("    {{ . | faint }}%s ", faint(":")),
-		ValidationError: `    {{ ">>" | red }} {{ . | red }}`,
+type item struct {
+	title, desc string
+}
+
+func (i item) Title() string       { return i.title }
+func (i item) Description() string { return i.desc }
+func (i item) FilterValue() string { return i.title }
+
+// renderJobInfoBox renders job information in a styled box for interactive sync mode
+func renderJobInfoBox(name string, schedule string, command string, monitored bool) string {
+	// Define styles - use full terminal width minus margin
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Padding(0, 1).
+		MarginLeft(2).
+		Width(100)
+
+	nameStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("15")) // Bright white - readable on blue PowerShell backgrounds
+
+	labelStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")).
+		Width(12)
+
+	yesStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("10")) // Green
+
+	noStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")) // Gray
+
+	// Build content lines
+	var lines []string
+
+	lines = append(lines, nameStyle.Render(name))
+	lines = append(lines, "")
+
+	if schedule != "" {
+		lines = append(lines, labelStyle.Render("Schedule:")+"  "+schedule)
+	}
+
+	// Show full command - box width will accommodate long names/commands
+	lines = append(lines, labelStyle.Render("Command:")+"  "+command)
+
+	// Show monitoring status
+	monitoredStr := noStyle.Render("No")
+	if monitored {
+		monitoredStr = yesStyle.Render("Yes")
+	}
+	lines = append(lines, labelStyle.Render("Monitored:")+"  "+monitoredStr)
+
+	content := strings.Join(lines, "\n")
+	return boxStyle.Render(content)
+}
+
+type nameInputModel struct {
+	list        list.Model
+	textInput   textinput.Model
+	defaultName string
+	err         error
+	done        bool
+	exited      bool   // True if user pressed Ctrl+D to exit entirely
+	state       string // "choosing" or "naming"
+	width       int    // Add width field to store terminal width
+}
+
+func initialNameInputModel(defaultName string) nameInputModel {
+	// Setup list items
+	items := []list.Item{
+		item{title: UseDefaultName, desc: defaultName},
+		item{title: EnterCustomName, desc: "Add a friendly, unique name for this job"},
+		item{title: SkipJob, desc: fmt.Sprintf("Do not monitor this %s", getJobLabel())},
+	}
+
+	// Setup list with height of 3 to show all items
+	l := list.New(items, list.NewDefaultDelegate(), 0, 3)
+	l.Title = "What would you like to do with this job?"
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+	l.Styles.Title = lipgloss.NewStyle().MarginLeft(1).Bold(false)
+	l.Styles.TitleBar = lipgloss.NewStyle().MarginLeft(2)
+
+	// Update the style names to match the current API
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.NormalTitle = delegate.Styles.NormalTitle.MarginLeft(1)
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.MarginLeft(1)
+	delegate.Styles.NormalDesc = delegate.Styles.NormalDesc.MarginLeft(1).Italic(true)
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.MarginLeft(1).Italic(true)
+
+	l.SetDelegate(delegate)
+
+	// Setup text input
+	ti := textinput.New()
+	ti.Placeholder = "Enter monitor name"
+	ti.Focus()
+	ti.CharLimit = maxNameLen
+
+	return nameInputModel{
+		list:        l,
+		textInput:   ti,
+		defaultName: defaultName,
+		state:       "choosing",
+		width:       80, // Default width if we don't get window size
 	}
 }
 
+func (m nameInputModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m nameInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyCtrlC:
+			// Skip this job
+			return m, tea.Quit
+		case tea.KeyCtrlD:
+			// Exit interactive sync entirely
+			m.exited = true
+			return m, tea.Quit
+		case tea.KeyEnter:
+			if m.state == "choosing" {
+				// Handle selection based on list choice
+				switch m.list.SelectedItem().(item).title {
+				case EnterCustomName:
+					m.state = "naming"
+					m.textInput.SetValue("")
+					return m, textinput.Blink
+				case UseDefaultName:
+					m.textInput.SetValue(m.defaultName)
+					m.done = true
+					return m, tea.Quit
+				case SkipJob:
+					m.done = false
+					return m, tea.Quit
+				}
+			} else if m.state == "naming" {
+				if err := validateName(m.textInput.Value()); err != nil {
+					m.err = err
+					return m, nil
+				}
+				m.done = true
+
+				// Empty line for more legibile output
+				printLn()
+
+				return m, tea.Quit
+			}
+		}
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.textInput.Width = msg.Width - 8 // Subtract some padding for the margin
+		m.list.SetWidth(msg.Width)        // Fixed: Use SetWidth method instead of direct assignment
+	}
+
+	if m.state == "choosing" {
+		m.list, cmd = m.list.Update(msg)
+	} else {
+		m.textInput, cmd = m.textInput.Update(msg)
+	}
+	return m, cmd
+}
+
+func (m nameInputModel) View() string {
+	if m.state == "choosing" {
+		return "\n" + m.list.View()
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n    " + m.textInput.View() + "\n")
+	if m.err != nil {
+		sb.WriteString(fmt.Sprintf("    Error: %s\n", m.err))
+	}
+	return sb.String()
+}
+
+const (
+	UseDefaultName  = "Monitor this job - Use this name:"
+	EnterCustomName = "Monitor this job - Change the name"
+	SkipJob         = "Skip this job"
+)
+
 func init() {
 	RootCmd.AddCommand(discoverCmd)
+
 	discoverCmd.Flags().BoolVar(&saveCrontabFile, "save", saveCrontabFile, "Save the updated crontab file")
 	discoverCmd.Flags().BoolVar(&dryRun, "dry-run", dryRun, "Import crontab into Cronitor without applying necessary integration")
-	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from auto-generated monitor name e.g. $ cronitor discover -e '> /dev/null' -e '/path/to/app'")
+	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from auto-generated monitor name e.g. $ cronitor sync -e '> /dev/null' -e '/path/to/app'")
 	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")

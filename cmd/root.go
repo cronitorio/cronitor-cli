@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"github.com/cronitorio/cronitor-cli/lib"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -17,13 +16,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cronitorio/cronitor-cli/lib"
+
 	"github.com/fatih/color"
 	"github.com/getsentry/raven-go"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-var Version string = "30.4"
+var Version string = "32.0"
 
 var cfgFile string
 var userAgent string
@@ -37,6 +38,7 @@ var hostname string
 var pingApiKey string
 var verbose bool
 var noStdoutPassthru bool
+var users string
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
@@ -62,6 +64,10 @@ var varLog = "CRONITOR_LOG"
 var varPingApiKey = "CRONITOR_PING_API_KEY"
 var varExcludeText = "CRONITOR_EXCLUDE_TEXT"
 var varConfig = "CRONITOR_CONFIG"
+var varDashUsername = "CRONITOR_DASH_USER"
+var varDashPassword = "CRONITOR_DASH_PASS"
+var varAllowedIPs = "CRONITOR_ALLOWED_IPS"
+var varUsers = "CRONITOR_USERS"
 
 func init() {
 	userAgent = fmt.Sprintf("CronitorCLI/%s", Version)
@@ -77,21 +83,25 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&hostname, "hostname", "n", hostname, "A unique identifier for this host (default: system hostname)")
 	RootCmd.PersistentFlags().StringVarP(&debugLog, "log", "l", debugLog, "Write debug logs to supplied file")
 	RootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", verbose, "Verbose output")
+	RootCmd.PersistentFlags().StringVarP(&users, "users", "u", users, "Comma-separated list of users whose crontabs to include (default: current user only)")
 
 	RootCmd.PersistentFlags().BoolVar(&dev, "use-dev", dev, "Dev mode")
 	RootCmd.PersistentFlags().MarkHidden("use-dev")
 
+	// Bind flags to viper
 	viper.BindPFlag(varApiKey, RootCmd.PersistentFlags().Lookup("api-key"))
 	viper.BindPFlag(varEnv, RootCmd.PersistentFlags().Lookup("env"))
 	viper.BindPFlag(varHostname, RootCmd.PersistentFlags().Lookup("hostname"))
 	viper.BindPFlag(varLog, RootCmd.PersistentFlags().Lookup("log"))
 	viper.BindPFlag(varPingApiKey, RootCmd.PersistentFlags().Lookup("ping-api-key"))
 	viper.BindPFlag(varConfig, RootCmd.PersistentFlags().Lookup("config"))
+	viper.BindPFlag(varDashUsername, RootCmd.PersistentFlags().Lookup("dash-username"))
+	viper.BindPFlag(varDashPassword, RootCmd.PersistentFlags().Lookup("dash-password"))
+	viper.BindPFlag(varUsers, RootCmd.PersistentFlags().Lookup("users"))
 }
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
-
 	viper.AutomaticEnv() // read in environment variables that match
 	configFile := viper.GetString(varConfig)
 
@@ -112,8 +122,10 @@ func initConfig() {
 	}
 }
 
-func sendPing(endpoint string, uniqueIdentifier string, message string, series string, timestamp float64, duration *float64, exitCode *int, metrics map[string]int, group *sync.WaitGroup) {
-	defer group.Done()
+func sendPing(endpoint string, uniqueIdentifier string, message string, series string, timestamp float64, duration *float64, exitCode *int, metrics map[string]int, schedule string, group *sync.WaitGroup) {
+	if group != nil {
+		defer group.Done()
+	}
 
 	Client := &http.Client{
 		Timeout: time.Second * 10,
@@ -129,6 +141,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	formattedDuration := ""
 	formattedStatusCode := ""
 	formattedMetrics := ""
+	formattedSchedule := ""
 
 	if timestamp > 0 {
 		formattedStamp = fmt.Sprintf("&stamp=%s", formatStamp(timestamp))
@@ -149,6 +162,10 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	// By passing duration up, we save the computation on the server side
 	if duration != nil {
 		formattedDuration = fmt.Sprintf("&duration=%s", formatStamp(*duration))
+	}
+
+	if schedule != "" {
+		formattedSchedule = fmt.Sprintf("&schedule=%s", schedule)
 	}
 
 	// We aren't using exit code at time of writing, but we have the field available for healthcheck monitors.
@@ -204,10 +221,10 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 
 		if len(authenticationKey) > 0 {
 			// Authenticated pings when available
-			uri = fmt.Sprintf("%s/ping/%s/%s?state=%s&try=%d%s%s%s%s%s%s%s%s", pingApiHost, authenticationKey, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode, formattedMetrics, env)
+			uri = fmt.Sprintf("%s/ping/%s/%s?state=%s&try=%d%s%s%s%s%s%s%s%s%s", pingApiHost, authenticationKey, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode, formattedMetrics, env, formattedSchedule)
 		} else {
 			// Fallback to sending an unauthenticated ping
-			uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode, formattedMetrics, env)
+			uri = fmt.Sprintf("%s/%s/%s?try=%d%s%s%s%s%s%s%s%s%s", pingApiHost, uniqueIdentifier, endpoint, i, formattedStamp, message, hostname, formattedDuration, series, formattedStatusCode, formattedMetrics, env, formattedSchedule)
 		}
 
 		log("Sending ping " + uri)
@@ -252,6 +269,14 @@ func effectiveHostname() string {
 }
 
 func effectiveTimezoneLocationName() lib.TimezoneLocationName {
+
+	if runtime.GOOS == "windows" {
+		out, err := exec.Command("powershell", "-NoProfile", "-c", "(Get-TimeZone | Select-Object -First 1 -Property Id).Id | Write-Output").CombinedOutput()
+		if err == nil {
+			return lib.TimezoneLocationName{strings.TrimSpace(fmt.Sprintf("%s", out))}
+		}
+	}
+
 	// First, check if a TZ or CRON_TZ environemnt variable is set -- Diff var used by diff distros
 	if locale, isSetFlag := os.LookupEnv("TZ"); isSetFlag {
 		return lib.TimezoneLocationName{locale}
@@ -413,8 +438,38 @@ func getCronitorApi() *lib.CronitorApi {
 	return &lib.CronitorApi{
 		IsDev:          dev,
 		IsAutoDiscover: isAutoDiscover,
-		ApiKey:         varApiKey,
+		ApiKey:         viper.GetString(varApiKey),
 		UserAgent:      userAgent,
 		Logger:         log,
 	}
+}
+
+func configFilePath() string {
+	// First check if there's a config file path from viper (which includes env vars and flags)
+	if configPath := viper.GetString(varConfig); len(configPath) > 0 {
+		return configPath
+	}
+
+	// Fall back to default location if no custom path specified
+	return fmt.Sprintf("%s/cronitor.json", defaultConfigFileDirectory())
+}
+
+// parseUsers parses the CRONITOR_USERS config value into a slice of usernames
+func parseUsers() []string {
+	usersConfig := viper.GetString(varUsers)
+	if usersConfig == "" {
+		return []string{} // Return empty slice for default behavior
+	}
+
+	// Split by comma and clean up each username
+	users := strings.Split(usersConfig, ",")
+	var cleanUsers []string
+	for _, user := range users {
+		user = strings.TrimSpace(user)
+		if user != "" {
+			cleanUsers = append(cleanUsers, user)
+		}
+	}
+
+	return cleanUsers
 }

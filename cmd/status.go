@@ -5,17 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"os"
 )
 
 type StatusMonitor struct {
 	Name    string `json:"name"`
-	Code    string `json:"code"`
+	Key     string `json:"key"`
 	Passing bool   `json:"passing"`
-	Status  string `json:"status"`
+	Paused  bool   `json:"paused"`
 }
 
 type StatusMonitors struct {
@@ -79,7 +80,7 @@ Examples:
 
 		fmt.Println(url)
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Health", "Name", "Code", "Status"})
+		table.SetHeader([]string{"Health", "Name", "Code", "Alerts"})
 		table.SetAutoWrapText(false)
 		table.SetHeaderAlignment(3)
 
@@ -88,7 +89,12 @@ Examples:
 			if !v.Passing {
 				state = "Failing"
 			}
-			table.Append([]string{state, v.Name, v.Code, v.Status})
+
+			alertStatus := "On"
+			if v.Paused {
+				alertStatus = "Muted"
+			}
+			table.Append([]string{state, v.Name, v.Key, alertStatus})
 		}
 
 		table.Render()

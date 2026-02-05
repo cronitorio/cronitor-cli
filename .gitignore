@@ -70,7 +70,19 @@ cronitor
 *.key
 ctab
 cronitor-cli
+cronitor.exe
 
 local.md
 TODO.md
 *.exe
+
+# Dashboard
+node_modules/
+web/static/
+cronitor-linux
+
+Claude.md
+
+
+TEST_COVERAGE.md
+
