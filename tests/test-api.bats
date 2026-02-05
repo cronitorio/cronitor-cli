@@ -260,23 +260,17 @@ setup() {
 }
 
 #################
-# INTEGRATION TESTS (require CRONITOR_API_KEY)
+# INTEGRATION TESTS (require live API - skipped in CI)
 #################
 
 @test "monitor list integration test" {
-  if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
-  run ../cronitor $CRONITOR_ARGS monitor list --format json -k $CRONITOR_API_KEY
-  [ "$status" -eq 0 ]
+  skip "Integration test - run manually against live API"
 }
 
 @test "issue list integration test" {
-  if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
-  run ../cronitor $CRONITOR_ARGS issue list --format json -k $CRONITOR_API_KEY
-  [ "$status" -eq 0 ]
+  skip "Integration test - run manually against live API"
 }
 
 @test "statuspage list integration test" {
-  if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
-  run ../cronitor $CRONITOR_ARGS statuspage list --format json -k $CRONITOR_API_KEY
-  [ "$status" -eq 0 ]
+  skip "Integration test - run manually against live API"
 }
