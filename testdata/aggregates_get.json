@@ -1,0 +1,14 @@
+{
+  "monitors": {
+    "abc123": {
+      "production": {
+        "success_rate": 99.5,
+        "duration_mean": 1180.25,
+        "duration_p50": 1100.0,
+        "duration_p90": 2500.0,
+        "total_runs": 720,
+        "total_failures": 4
+      }
+    }
+  }
+}

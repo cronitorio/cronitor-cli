@@ -1,0 +1,33 @@
+{
+  "monitors": [
+    {
+      "key": "abc123",
+      "name": "Nightly Backup",
+      "type": "job",
+      "passing": true,
+      "paused": false,
+      "group": "production"
+    },
+    {
+      "key": "def456",
+      "name": "Health Check",
+      "type": "check",
+      "passing": false,
+      "paused": false,
+      "group": ""
+    },
+    {
+      "key": "ghi789",
+      "name": "Paused Monitor",
+      "type": "heartbeat",
+      "passing": true,
+      "paused": true,
+      "group": "staging"
+    }
+  ],
+  "page_info": {
+    "page": 1,
+    "pageSize": 50,
+    "totalMonitorCount": 3
+  }
+}

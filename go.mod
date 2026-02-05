@@ -21,7 +21,9 @@ require (
 	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/mark3labs/mcp-go v0.32.0
 	github.com/pkg/errors v0.8.1
+	github.com/rickb777/date v1.14.2
 	golang.org/x/time v0.11.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -49,7 +51,6 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.15.2 // indirect
 	github.com/pelletier/go-toml v1.9.4 // indirect
-	github.com/rickb777/date v1.14.2 // indirect
 	github.com/rickb777/plural v1.2.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.1 // indirect

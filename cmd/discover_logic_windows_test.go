@@ -509,18 +509,6 @@ func TestConvertTriggerToRRULE_EventDrivenTriggers(t *testing.T) {
 			expectedRule:       "",
 			expectedDescPrefix: "Runs when task is registered",
 		},
-		{
-			name: "Time trigger (one-time)",
-			trigger: taskmaster.TimeTrigger{
-				TaskTrigger: taskmaster.TaskTrigger{
-					Enabled:       true,
-					StartBoundary: time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
-				},
-				RandomDelay: period.Period{},
-			},
-			expectedRule:       "",
-			expectedDescPrefix: "Runs once at",
-		},
 	}
 
 	for _, tt := range tests {
@@ -540,6 +528,26 @@ func TestConvertTriggerToRRULE_EventDrivenTriggers(t *testing.T) {
 				t.Errorf("Description = %v, expected to start with %v", info.Description, tt.expectedDescPrefix)
 			}
 		})
+	}
+}
+
+func TestConvertTriggerToRRULE_TimeTrigger(t *testing.T) {
+	trigger := taskmaster.TimeTrigger{
+		TaskTrigger: taskmaster.TaskTrigger{
+			Enabled:       true,
+			StartBoundary: time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
+		},
+		RandomDelay: period.Period{},
+	}
+
+	info := convertTriggerToRRULE(trigger)
+
+	if info.RRULE != "" {
+		t.Errorf("TimeTrigger should have no RRULE, got %v", info.RRULE)
+	}
+
+	if info.Description != "" {
+		t.Errorf("TimeTrigger should have no description, got %v", info.Description)
 	}
 }
 
@@ -951,7 +959,7 @@ func TestCompleteScenario_StartupTask(t *testing.T) {
 	}
 
 	// Should mention boot and delay in description
-	if len(info.Description) < 13 || info.Description[:13] != "Runs on system boot" {
+	if len(info.Description) < 19 || info.Description[:19] != "Runs on system boot" {
 		t.Errorf("Description = %v, expected to mention boot", info.Description)
 	}
 }

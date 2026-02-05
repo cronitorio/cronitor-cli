@@ -1,0 +1,26 @@
+{
+  "templates": [
+    {
+      "key": "default",
+      "name": "Default",
+      "notifications": {
+        "emails": ["admin@example.com"],
+        "slack": ["#alerts"],
+        "webhooks": [],
+        "phones": []
+      },
+      "monitors": ["abc123", "def456"]
+    },
+    {
+      "key": "devops",
+      "name": "DevOps Team",
+      "notifications": {
+        "emails": ["dev@example.com", "ops@example.com"],
+        "slack": [],
+        "webhooks": ["https://hooks.example.com/alert"],
+        "phones": []
+      },
+      "monitors": ["ghi789"]
+    }
+  ]
+}

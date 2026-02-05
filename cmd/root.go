@@ -68,6 +68,7 @@ var varDashUsername = "CRONITOR_DASH_USER"
 var varDashPassword = "CRONITOR_DASH_PASS"
 var varAllowedIPs = "CRONITOR_ALLOWED_IPS"
 var varUsers = "CRONITOR_USERS"
+var varApiVersion = "CRONITOR_API_VERSION"
 
 func init() {
 	userAgent = fmt.Sprintf("CronitorCLI/%s", Version)
@@ -85,6 +86,7 @@ func init() {
 	RootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", verbose, "Verbose output")
 	RootCmd.PersistentFlags().StringVarP(&users, "users", "u", users, "Comma-separated list of users whose crontabs to include (default: current user only)")
 
+	RootCmd.PersistentFlags().String("api-version", "", "Cronitor API version (e.g. 2025-11-28)")
 	RootCmd.PersistentFlags().BoolVar(&dev, "use-dev", dev, "Dev mode")
 	RootCmd.PersistentFlags().MarkHidden("use-dev")
 
@@ -95,6 +97,7 @@ func init() {
 	viper.BindPFlag(varLog, RootCmd.PersistentFlags().Lookup("log"))
 	viper.BindPFlag(varPingApiKey, RootCmd.PersistentFlags().Lookup("ping-api-key"))
 	viper.BindPFlag(varConfig, RootCmd.PersistentFlags().Lookup("config"))
+	viper.BindPFlag(varApiVersion, RootCmd.PersistentFlags().Lookup("api-version"))
 	viper.BindPFlag(varDashUsername, RootCmd.PersistentFlags().Lookup("dash-username"))
 	viper.BindPFlag(varDashPassword, RootCmd.PersistentFlags().Lookup("dash-password"))
 	viper.BindPFlag(varUsers, RootCmd.PersistentFlags().Lookup("users"))

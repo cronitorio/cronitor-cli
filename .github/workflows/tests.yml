@@ -48,6 +48,10 @@ jobs:
         shell: bash
         run: go build -o cronitor main.go
 
+      - name: Run Go tests
+        shell: bash
+        run: go test ./...
+
       - name: Run tests
         working-directory: tests
         shell: bash
@@ -92,6 +96,9 @@ jobs:
 
       - name: Build binary
         run: go build -o cronitor main.go
+
+      - name: Run Go tests
+        run: go test ./...
 
       - name: Run tests
         working-directory: tests

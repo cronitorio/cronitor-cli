@@ -69,13 +69,18 @@ type Monitor struct {
 	NoStdoutPassthru bool      `json:"-"`
 }
 
-// UnmarshalJSON implements custom unmarshaling for the Monitor struct
+// UnmarshalJSON implements custom unmarshaling for the Monitor struct.
+// Handles flexible parsing for:
+//   - notify: can be a string, []string, or []interface{} depending on API version
+//   - schedule/schedules: older API versions return singular "schedule" (string),
+//     newer versions return "schedules" ([]string). This normalizes both into Schedules.
 func (m *Monitor) UnmarshalJSON(data []byte) error {
-	// Create an auxiliary struct to handle the raw notify field
+	// Create an auxiliary struct to handle the raw notify and schedule fields
 	type AuxMonitor Monitor
 	aux := &struct {
 		*AuxMonitor
-		Notify interface{} `json:"notify,omitempty"`
+		Notify   interface{} `json:"notify,omitempty"`
+		Schedule interface{} `json:"schedule,omitempty"`
 	}{
 		AuxMonitor: (*AuxMonitor)(m),
 	}
@@ -99,6 +104,26 @@ func (m *Monitor) UnmarshalJSON(data []byte) error {
 			m.Notify = v
 		case string:
 			m.Notify = []string{v}
+		}
+	}
+
+	// Handle the schedule field: normalize singular "schedule" into "schedules" []string.
+	// If "schedules" was already populated by the standard unmarshal, leave it alone.
+	if m.Schedules == nil && aux.Schedule != nil {
+		switch v := aux.Schedule.(type) {
+		case string:
+			if v != "" {
+				s := []string{v}
+				m.Schedules = &s
+			}
+		case []interface{}:
+			s := make([]string, 0, len(v))
+			for _, item := range v {
+				if str, ok := item.(string); ok {
+					s = append(s, str)
+				}
+			}
+			m.Schedules = &s
 		}
 	}
 
@@ -186,6 +211,26 @@ func (api CronitorApi) PutMonitors(monitors map[string]*Monitor) (map[string]*Mo
 	}
 
 	return monitors, nil
+}
+
+// PutRawMonitors sends raw payload to the monitors API endpoint
+// Used for bulk import from YAML/JSON files
+// contentType should be "application/json" or "application/yaml"
+func (api CronitorApi) PutRawMonitors(payload []byte, contentType string) ([]byte, error) {
+	url := api.Url()
+
+	api.Logger("\nRequest:")
+	api.Logger(string(payload) + "\n")
+
+	response, err, _ := api.sendWithContentType("PUT", url, string(payload), contentType)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Request to %s failed: %s", url, err))
+	}
+
+	api.Logger("\nResponse:")
+	api.Logger(string(response) + "\n")
+
+	return response, nil
 }
 
 func (api CronitorApi) GetMonitors() ([]Monitor, error) {
@@ -276,7 +321,47 @@ func (api CronitorApi) send(method string, url string, body string) ([]byte, err
 	}
 
 	request.Header.Add("User-Agent", api.UserAgent)
-	request.Header.Add("Cronitor-Version", "2025-11-28")
+	if apiVersion := viper.GetString("CRONITOR_API_VERSION"); apiVersion != "" {
+		request.Header.Add("Cronitor-Version", apiVersion)
+	}
+	request.ContentLength = int64(len(body))
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err, 0
+	}
+
+	defer response.Body.Close()
+	contents, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		raven.CaptureErrorAndWait(err, nil)
+		return nil, err, 0
+	}
+
+	return contents, nil, response.StatusCode
+}
+
+func (api CronitorApi) sendWithContentType(method string, url string, body string, contentType string) ([]byte, error, int) {
+	client := &http.Client{
+		Timeout: 120 * time.Second,
+	}
+	request, err := http.NewRequest(method, url, strings.NewReader(body))
+	if err != nil {
+		return nil, err, 0
+	}
+
+	// Always fetch the latest API key from viper to pick up settings changes
+	currentApiKey := viper.GetString("CRONITOR_API_KEY")
+	if currentApiKey == "" {
+		// Fallback to the API key stored in the struct if viper doesn't have it
+		currentApiKey = api.ApiKey
+	}
+	request.SetBasicAuth(currentApiKey, "")
+
+	request.Header.Add("Content-Type", contentType)
+	request.Header.Add("User-Agent", api.UserAgent)
+	if apiVersion := viper.GetString("CRONITOR_API_VERSION"); apiVersion != "" {
+		request.Header.Add("Cronitor-Version", apiVersion)
+	}
 	request.ContentLength = int64(len(body))
 	response, err := client.Do(request)
 	if err != nil {

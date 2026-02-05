@@ -1,0 +1,11 @@
+{
+  "data": [
+    {
+      "key": "err-001",
+      "message": "Uncaught TypeError: Cannot read properties of null",
+      "error_type": "TypeError",
+      "filename": "https://example.com/assets/app.js",
+      "count": 42
+    }
+  ]
+}
