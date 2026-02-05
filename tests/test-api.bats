@@ -265,18 +265,18 @@ setup() {
 
 @test "monitor list integration test" {
   if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
-  run ../cronitor monitor list --format json -k "$CRONITOR_API_KEY"
+  run ../cronitor $CRONITOR_ARGS monitor list --format json -k $CRONITOR_API_KEY
   [ "$status" -eq 0 ]
 }
 
 @test "issue list integration test" {
   if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
-  run ../cronitor issue list --format json -k "$CRONITOR_API_KEY"
+  run ../cronitor $CRONITOR_ARGS issue list --format json -k $CRONITOR_API_KEY
   [ "$status" -eq 0 ]
 }
 
 @test "statuspage list integration test" {
   if [ -z "$CRONITOR_API_KEY" ]; then skip "Requires CRONITOR_API_KEY"; fi
-  run ../cronitor statuspage list --format json -k "$CRONITOR_API_KEY"
+  run ../cronitor $CRONITOR_ARGS statuspage list --format json -k $CRONITOR_API_KEY
   [ "$status" -eq 0 ]
 }
