@@ -224,8 +224,10 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 				if withMonitoring {
 					monitoringWaitGroup.Add(1)
 					go sendPing("complete", monitorCode, string(outputForPing), series, endTime, &duration, &exitCode, metrics, schedule, &monitoringWaitGroup)
-					monitoringWaitGroup.Add(1)
-					go shipLogData(tempFile, series, &monitoringWaitGroup)
+					if tempFile != nil {
+						monitoringWaitGroup.Add(1)
+						go shipLogData(tempFile, series, &monitoringWaitGroup)
+					}
 				}
 			} else {
 				message := ""
@@ -246,8 +248,10 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 				if withMonitoring {
 					monitoringWaitGroup.Add(1)
 					go sendPing("fail", monitorCode, message, series, endTime, &duration, &exitCode, metrics, schedule, &monitoringWaitGroup)
-					monitoringWaitGroup.Add(1)
-					go shipLogData(tempFile, series, &monitoringWaitGroup)
+					if tempFile != nil {
+						monitoringWaitGroup.Add(1)
+						go shipLogData(tempFile, series, &monitoringWaitGroup)
+					}
 				}
 			}
 
@@ -319,7 +323,10 @@ func getFileSize(tempFile *os.File) (int64, error) {
 	// 2. filesystem is no longer available
 
 	stat, err := os.Stat(tempFile.Name())
-	return stat.Size(), err
+	if err != nil {
+		return 0, err
+	}
+	return stat.Size(), nil
 }
 
 func gatherOutput(tempFile *os.File, truncateForPingOutput bool) []byte {
