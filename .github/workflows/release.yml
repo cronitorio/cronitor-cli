@@ -48,7 +48,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -92,7 +92,7 @@ jobs:
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
           asset_name: ${{ matrix.goos }}_${{ matrix.goarch }}
-          goversion: 1.23.4
+          goversion: '${{ github.workspace }}/go.mod'
           binary_name: cronitor
           sha256sum: true
           overwrite: true
