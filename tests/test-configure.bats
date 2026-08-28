@@ -5,6 +5,7 @@ load setup_suite
 setup() {
   SCRIPT_DIR="$(dirname $BATS_TEST_FILENAME)"
   cd $SCRIPT_DIR
+  load test_helper
   export BATS_TMPDIR="/tmp/cronitor-test"
   mkdir -p $BATS_TMPDIR
   export CLI_CONFIGFILE_ALTERNATE="$BATS_TMPDIR/test-build-config.json"
