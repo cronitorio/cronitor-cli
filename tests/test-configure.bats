@@ -129,24 +129,30 @@ teardown() {
   [ "$perms" = "600" ]
 }
 
-@test "Configure rejects existing 0644 config with migration text" {
+@test "Configure rewrites existing 0644 config to 0600 with warning" {
   skip_if_windows
   printf '%s\n' '{"CRONITOR_HOSTNAME":"keep-me"}' > "$CLI_CONFIGFILE_ALTERNATE"
   chmod 644 "$CLI_CONFIGFILE_ALTERNATE"
-  run env CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --hostname other
-  [ "$status" -ne 0 ]
-  echo "$output" | grep -q "CRONITOR_CONFIG"
-  echo "$output" | grep -q "0640"
-  grep -q "keep-me" "$CLI_CONFIGFILE_ALTERNATE"
+  run env CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --api-key "test-api-key-not-real"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "WARNING"
+  echo "$output" | grep -q "CRONITOR_API_KEY"
+  ! echo "$output" | grep -q "test-api-key-not-real"
+  perms=$(stat -c '%a' "$CLI_CONFIGFILE_ALTERNATE")
+  [ "$perms" = "600" ]
+  grep "CRONITOR_HOSTNAME" "$CLI_CONFIGFILE_ALTERNATE" | grep -q "keep-me"
+  grep "CRONITOR_API_KEY" "$CLI_CONFIGFILE_ALTERNATE" | grep -q "test-api-key-not-real"
 }
 
-@test "Configure preserves 0640 mode and existing hostname" {
+@test "Configure rewrites existing 0640 config to 0600 with warning" {
   skip_if_windows
   CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --hostname "$MSG" >/dev/null
   chmod 640 "$CLI_CONFIGFILE_ALTERNATE"
-  CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --api-key "test-api-key-not-real" >/dev/null
+  run env CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --api-key "test-api-key-not-real"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "WARNING"
   perms=$(stat -c '%a' "$CLI_CONFIGFILE_ALTERNATE")
-  [ "$perms" = "640" ]
+  [ "$perms" = "600" ]
   grep "CRONITOR_HOSTNAME" "$CLI_CONFIGFILE_ALTERNATE" | grep -q "$MSG"
   grep "CRONITOR_API_KEY" "$CLI_CONFIGFILE_ALTERNATE" | grep -q "test-api-key-not-real"
 }

@@ -3,7 +3,6 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 	"os/user"
 	"strings"
@@ -12,7 +11,7 @@ import (
 )
 
 // persistApplyMode is a no-op for Unix mode bits on Windows. Owner-restricted
-// ACLs are applied via persistLockdownNewFile / persistPreserveSecurity.
+// ACLs are applied via persistLockdownNewFile.
 //
 // Platform limitation: Windows does not honor 0600/0640 the way Unix does.
 // os.Chmod only toggles the read-only attribute and is not used here.
@@ -20,18 +19,14 @@ func persistApplyMode(_ *os.File, _ string, _ os.FileMode) error {
 	return nil
 }
 
-func persistApplyPathMode(_ string, _ os.FileMode) error {
-	return nil
-}
-
 func persistLockdownNewFile(path string) error {
 	return applyOwnerOnlyACL(path)
 }
 
-func persistPreserveSecurity(tmpName, dest string, _ os.FileInfo) error {
-	// Copy the existing DACL so a carefully set group-readable ACL is not
-	// replaced with owner-only on update. New files use persistLockdownNewFile.
-	return copyFileDACL(dest, tmpName)
+func persistPreserveOwner(_ string, _ os.FileInfo) error {
+	// Windows replace keeps the destination name; owner-only ACL is applied
+	// to the replacement file. The writing user is the new owner.
+	return nil
 }
 
 func persistReplaceFile(tmpName, dest string) error {
@@ -48,22 +43,14 @@ func persistReplaceFile(tmpName, dest string) error {
 	return windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING)
 }
 
-func checkExistingConfigPerms(path string, _ os.FileInfo) error {
-	world, err := windowsGrantsWorldRead(path)
+func existingAccessWillNarrow(path string, _ os.FileInfo) bool {
+	broader, err := windowsACLBroaderThanOwner(path)
 	if err != nil {
-		// Fail closed: if we cannot read the ACL we will not overwrite a
-		// file that might be readable by other users.
-		return fmt.Errorf("could not inspect ACL on %s: %w\n\n%s", path, err, configMigrationGuidance)
+		// Cannot confirm the ACL is already owner-only; warn because we will
+		// apply an owner-restricted DACL. Never fail the write for this.
+		return true
 	}
-	if world {
-		return configOverlyPermissiveError(path, 0644)
-	}
-	return nil
-}
-
-func existingConfigMode(_ os.FileInfo) os.FileMode {
-	// Unix mode bits are unused on Windows; ACL preservation happens separately.
-	return configModeOwnerOnly
+	return broader
 }
 
 func applyOwnerOnlyACL(path string) error {
@@ -92,24 +79,7 @@ func applyOwnerOnlyACL(path string) error {
 	)
 }
 
-func copyFileDACL(from, to string) error {
-	sd, err := windows.GetNamedSecurityInfo(from, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
-	if err != nil {
-		return err
-	}
-	dacl, _, err := sd.DACL()
-	if err != nil {
-		return err
-	}
-	return windows.SetNamedSecurityInfo(
-		to,
-		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION,
-		nil, nil, dacl, nil,
-	)
-}
-
-func windowsGrantsWorldRead(path string) (bool, error) {
+func windowsACLBroaderThanOwner(path string) (bool, error) {
 	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return false, err
@@ -123,21 +93,22 @@ func windowsGrantsWorldRead(path string) (bool, error) {
 		return true, nil
 	}
 
-	sddl := sd.String()
-	// SDDL allow ACEs for Everyone (WD) or BUILTIN\Users (BU) mean the file
-	// is readable beyond the owner — the Windows analog of 0644+.
-	// Administrators (BA) and SYSTEM (SY) are expected and ignored.
-	return sddlContainsWorldAllow(strings.ToUpper(sddl)), nil
+	sddl := strings.ToUpper(sd.String())
+	return sddlContainsWorldAllow(sddl), nil
+}
+
+func windowsGrantsWorldRead(path string) (bool, error) {
+	return windowsACLBroaderThanOwner(path)
 }
 
 func sddlContainsWorldAllow(sddl string) bool {
-	// Look for allow ACEs granted to Everyone or Users.
+	// Look for allow ACEs granted to Everyone, Users, or Authenticated Users.
 	for _, ace := range strings.Split(sddl, "(") {
 		ace = strings.ToUpper(ace)
 		if !strings.HasPrefix(ace, "A;") {
 			continue
 		}
-		if strings.Contains(ace, ";;;WD)") || strings.Contains(ace, ";;;BU)") {
+		if strings.Contains(ace, ";;;WD)") || strings.Contains(ace, ";;;BU)") || strings.Contains(ace, ";;;AU)") {
 			return true
 		}
 	}

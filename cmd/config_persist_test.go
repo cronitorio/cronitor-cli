@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/spf13/viper"
 )
 
 const (
@@ -168,6 +170,33 @@ func TestSignupSuccessClientMessage_OmitsKeys(t *testing.T) {
 	}
 	if strings.Contains(s, testAPIKey) || strings.Contains(s, testPingKey) {
 		t.Errorf("signup client JSON leaked keys: %s", s)
+	}
+}
+
+func TestSaveSignupCredentials_ErrorOmitsReturnedKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "not-a-file")
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	prev := viper.GetString(varConfig)
+	viper.Set(varConfig, path)
+	t.Cleanup(func() { viper.Set(varConfig, prev) })
+
+	apiKey := "signup-api-key-must-not-leak"
+	pingKey := "signup-ping-key-must-not-leak"
+	err := saveSignupCredentials(apiKey, pingKey)
+	if err == nil {
+		t.Fatal("expected persist to fail when the config path is a directory")
+	}
+	wrapped := formatSignupPersistError(err)
+	msg := wrapped.Error()
+	if strings.Contains(msg, apiKey) || strings.Contains(msg, pingKey) {
+		t.Fatalf("signup persist error leaked keys: %s", msg)
+	}
+	if !strings.Contains(msg, "could not be saved") {
+		t.Errorf("expected safe recovery message, got: %s", msg)
 	}
 }
 

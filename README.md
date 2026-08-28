@@ -203,17 +203,17 @@ cronitor configure
 
 `cronitor configure` prints `API Key: Set` / `Ping API Key: Set` (or `Not Set`). It never prints complete keys. Dashboard passwords are shown as `********`.
 
-Credential-bearing config files use mode **0600** (owner-only) on Unix. An existing **0640** file is kept so a dedicated group can read a shared file. Existing **0644+** files are **rejected**; Cronitor will not silently chmod `/etc/cronitor/cronitor.json`, because that would break non-root cron jobs that currently read the system file.
+Credential-bearing config files are written as **0600** (owner-only) on Unix. An existing file — including a world-readable **0644** system file — is still **read** for `exec` / `ping`. The next `configure`, signup, or dashboard save **rewrites** it as `0600` and prints a warning that other users will lose read access.
 
 Default paths are unchanged: `/etc/cronitor/cronitor.json` (Linux/macOS) and `%SystemDrive%\ProgramData\Cronitor\cronitor.json` (Windows).
 
-If persistence fails because of permissions, choose one of:
+If non-root cron or another account still needs credentials after a save:
 
-1. **Preferred:** inject `CRONITOR_API_KEY` / `CRONITOR_PING_API_KEY` in the crontab or service environment (not in the JSON file).
-2. **Shared file:** set `CRONITOR_CONFIG` to a file that is `0640` and group-readable by a group the cron user is in. After root creates a `0600` file, run `chgrp` and `chmod 0640`.
+1. **Preferred:** inject `CRONITOR_API_KEY` / `CRONITOR_PING_API_KEY` in the crontab or service environment (not in the JSON file). On Windows, set them on the scheduled task or Windows service.
+2. **Shared file:** after the save you may `chmod 0640` and `chgrp` a dedicated group (Unix), or grant that service account read on the file ACL (Windows). The next Cronitor save will set owner-only again.
 3. **Per-user:** a user-owned `0600` file via `--config` / `CRONITOR_CONFIG` for jobs that run as that user.
 
-On Windows, new credential files get an owner-restricted ACL (Administrators and SYSTEM still have access — a platform limitation). Unix 0600/0640 bits are not applied.
+On Windows, writes apply an owner-restricted ACL (Administrators and SYSTEM still have access — a platform limitation). Unix 0600 bits are not applied. Existing open ACLs are not a reason to fail the write.
 
 ## MCP Server (AI Integration)
 

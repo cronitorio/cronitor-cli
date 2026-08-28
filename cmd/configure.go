@@ -44,10 +44,10 @@ By default, configuration files are system-wide for ease of use in cron jobs and
   MacOS        /etc/cronitor/cronitor.json
   Windows      %SystemDrive%\ProgramData\Cronitor\cronitor.json
 
-Credential-bearing config files are written with mode 0600 (owner-only). An existing 0640 file is preserved so a dedicated group can read a shared file. Existing world-readable files (0644+) are rejected; Cronitor will not silently chmod /etc/cronitor/cronitor.json because that would break non-root cron.
+Credential-bearing config files are written with mode 0600 (owner-only). Existing files remain readable at their current mode (including 0644) until someone saves. The next configure/signup/dash save rewrites the file as 0600 and prints a warning that other users will lose read access.
 
 Preferred: inject CRONITOR_API_KEY and CRONITOR_PING_API_KEY in the crontab or service environment instead of storing keys in the JSON file.
-Shared file: CRONITOR_CONFIG pointing at a 0640 file that is group-readable by the cron user's group (chgrp + chmod 0640 after root creates the file).
+If you need a shared file after a save, chmod 0640 and chgrp a dedicated group yourself (the next Cronitor save will set 0600 again).
 Per-user: --config or CRONITOR_CONFIG pointing at a user-owned 0600 file.
 
 CronitorCLI configuration can be supplied from a file, environment variables, or command line flags.

@@ -26,7 +26,7 @@ func TestPersistConfigFile_NewFileGetsOwnerACL(t *testing.T) {
 	}
 }
 
-func TestPersistConfigFile_WorldReadableRejected(t *testing.T) {
+func TestPersistConfigFile_WorldReadableRewrittenOwnerOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cronitor.json")
 	if err := os.WriteFile(path, []byte(`{"CRONITOR_HOSTNAME":"keep-me"}`), 0644); err != nil {
 		t.Fatal(err)
@@ -35,12 +35,24 @@ func TestPersistConfigFile_WorldReadableRejected(t *testing.T) {
 		t.Skipf("could not grant Everyone read for test: %v", err)
 	}
 
-	err := persistConfigFile(path, []byte(`{"CRONITOR_HOSTNAME":"changed"}`))
-	if err == nil {
-		t.Fatal("expected world-readable persist to be rejected")
+	_, stderr := captureOutput(t, func() {
+		if err := persistConfigFile(path, []byte(`{"CRONITOR_HOSTNAME":"keep-me","CRONITOR_ENV":"keep-env"}`)); err != nil {
+			t.Errorf("world-readable persist should succeed: %v", err)
+		}
+	})
+	if !strings.Contains(stderr, "WARNING") {
+		t.Errorf("expected warning when tightening Windows ACL, stderr:\n%s", stderr)
 	}
-	if !strings.Contains(err.Error(), "CRONITOR_CONFIG") {
-		t.Errorf("expected migration text, got: %v", err)
+	if !strings.Contains(stderr, "scheduled task") && !strings.Contains(stderr, "Windows") {
+		t.Errorf("Windows warning should be actionable, stderr:\n%s", stderr)
+	}
+
+	world, err := windowsGrantsWorldRead(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if world {
+		t.Fatal("rewritten Windows credential file is still readable by Everyone or Users")
 	}
 
 	data, err := os.ReadFile(path)
@@ -48,7 +60,7 @@ func TestPersistConfigFile_WorldReadableRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), "keep-me") {
-		t.Errorf("world-readable file was modified: %s", data)
+		t.Errorf("hostname did not survive rewrite: %s", data)
 	}
 }
 
