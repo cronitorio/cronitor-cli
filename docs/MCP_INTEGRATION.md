@@ -37,8 +37,11 @@ The MCP integration has two components:
 On the machine where your cron jobs run, start the Cronitor dashboard:
 
 ```bash
-# Set credentials for the dashboard
-cronitor configure --dash-username USER --dash-password PASS
+# Set credentials for the dashboard via environment variables
+# (--dash-username / --dash-password work but appear in shell history and process lists)
+export CRONITOR_DASH_USER=USER
+export CRONITOR_DASH_PASS=PASS
+cronitor configure
 
 # Start the dashboard (runs on port 9000 by default)
 cronitor dash

@@ -93,3 +93,65 @@ teardown() {
   CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --exclude-from-name "${MSG}A" --exclude-from-name "${MSG}B"  2>/dev/null
   grep -q "CRONITOR_EXCLUDE_TEXT" $CLI_CONFIGFILE_ALTERNATE && grep -q "${MSG}A" $CLI_CONFIGFILE_ALTERNATE && grep -q "${MSG}B" $CLI_CONFIGFILE_ALTERNATE
 }
+
+@test "Configure does not print API or ping keys" {
+  FAKE_API="test-api-key-not-real"
+  FAKE_PING="test-ping-key-not-real"
+  output=$(CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --api-key "$FAKE_API" --ping-api-key "$FAKE_PING" 2>&1)
+  ! echo "$output" | grep -q "$FAKE_API"
+  ! echo "$output" | grep -q "$FAKE_PING"
+  echo "$output" | grep -q "API Key"
+  echo "$output" | grep -q "Set"
+}
+
+@test "Configure does not print dashboard password" {
+  FAKE_PASS="test-dash-password-not-real"
+  output=$(CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --dash-username bats-user --dash-password "$FAKE_PASS" 2>&1)
+  ! echo "$output" | grep -q "$FAKE_PASS"
+  echo "$output" | grep -q "********"
+}
+
+@test "Configure verbose does not dump secret env values or unrelated names" {
+  FAKE_API="test-api-key-not-real"
+  FAKE_AWS="fake-aws-secret-value-not-real"
+  output=$(AWS_SECRET_ACCESS_KEY="$FAKE_AWS" CRONITOR_API_KEY="$FAKE_API" CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --verbose 2>&1)
+  ! echo "$output" | grep -q "$FAKE_API"
+  ! echo "$output" | grep -q "$FAKE_AWS"
+  ! echo "$output" | grep -q "AWS_SECRET_ACCESS_KEY"
+  echo "$output" | grep -q "CRONITOR_API_KEY: Set"
+}
+
+@test "Configure new credential file is mode 0600" {
+  skip_if_windows
+  CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --hostname bats-host >/dev/null
+  perms=$(stat -c '%a' "$CLI_CONFIGFILE_ALTERNATE")
+  [ "$perms" = "600" ]
+}
+
+@test "Configure rejects existing 0644 config with migration text" {
+  skip_if_windows
+  printf '%s\n' '{"CRONITOR_HOSTNAME":"keep-me"}' > "$CLI_CONFIGFILE_ALTERNATE"
+  chmod 644 "$CLI_CONFIGFILE_ALTERNATE"
+  run env CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --hostname other
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "CRONITOR_CONFIG"
+  echo "$output" | grep -q "0640"
+  grep -q "keep-me" "$CLI_CONFIGFILE_ALTERNATE"
+}
+
+@test "Configure preserves 0640 mode and existing hostname" {
+  skip_if_windows
+  CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --hostname "$MSG" >/dev/null
+  chmod 640 "$CLI_CONFIGFILE_ALTERNATE"
+  CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --api-key "test-api-key-not-real" >/dev/null
+  perms=$(stat -c '%a' "$CLI_CONFIGFILE_ALTERNATE")
+  [ "$perms" = "640" ]
+  grep "CRONITOR_HOSTNAME" "$CLI_CONFIGFILE_ALTERNATE" | grep -q "$MSG"
+  grep "CRONITOR_API_KEY" "$CLI_CONFIGFILE_ALTERNATE" | grep -q "test-api-key-not-real"
+}
+
+@test "Configure preserves hostname when writing a new API key" {
+  CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --hostname "$MSG" >/dev/null
+  CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --api-key "test-api-key-not-real" >/dev/null
+  grep "CRONITOR_HOSTNAME" "$CLI_CONFIGFILE_ALTERNATE" | grep -q "$MSG"
+}

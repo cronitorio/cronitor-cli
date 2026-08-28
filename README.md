@@ -158,7 +158,7 @@ cronitor environment delete <key>
 | `--page <n>` | Page number for paginated results |
 | `-d, --data <json>` | JSON data for create/update |
 | `-f, --file <path>` | Read JSON or YAML from a file |
-| `-k, --api-key <key>` | Cronitor API key |
+| `-k, --api-key <key>` | Cronitor API key (appears in shell history and process lists; prefer `CRONITOR_API_KEY`) |
 
 ## Crontab Guru Dashboard
 
@@ -180,13 +180,40 @@ ssh -L 9000:localhost:9000 user@your-server
 
 Access control & options
 ```
-# Set login credentials for the dashboard
-cronitor configure --dash-username USER --dash-password PASS
+# Set login credentials via environment variables (preferred).
+# --dash-username / --dash-password work but appear in shell history and process lists.
+export CRONITOR_DASH_USER=USER
+export CRONITOR_DASH_PASS=PASS
+cronitor configure
 
 # Optionally, restrict which system users' crontabs are loaded
 cronitor configure --users user1,user2
 ```
 For systemd and Docker examples, and security best‑practices, see the full [Dashboard documentation](https://crontab.guru/dashboard.html).
+
+## Configuration and secrets
+
+Do not put API keys, ping keys, or dashboard passwords on the command line. Those flags (`--api-key`, `--ping-api-key`, `--dash-password`) remain for compatibility but appear in shell history and process lists. Set credentials in the environment instead:
+
+```
+export CRONITOR_API_KEY
+export CRONITOR_PING_API_KEY
+cronitor configure
+```
+
+`cronitor configure` prints `API Key: Set` / `Ping API Key: Set` (or `Not Set`). It never prints complete keys. Dashboard passwords are shown as `********`.
+
+Credential-bearing config files use mode **0600** (owner-only) on Unix. An existing **0640** file is kept so a dedicated group can read a shared file. Existing **0644+** files are **rejected**; Cronitor will not silently chmod `/etc/cronitor/cronitor.json`, because that would break non-root cron jobs that currently read the system file.
+
+Default paths are unchanged: `/etc/cronitor/cronitor.json` (Linux/macOS) and `%SystemDrive%\ProgramData\Cronitor\cronitor.json` (Windows).
+
+If persistence fails because of permissions, choose one of:
+
+1. **Preferred:** inject `CRONITOR_API_KEY` / `CRONITOR_PING_API_KEY` in the crontab or service environment (not in the JSON file).
+2. **Shared file:** set `CRONITOR_CONFIG` to a file that is `0640` and group-readable by a group the cron user is in. After root creates a `0600` file, run `chgrp` and `chmod 0640`.
+3. **Per-user:** a user-owned `0600` file via `--config` / `CRONITOR_CONFIG` for jobs that run as that user.
+
+On Windows, new credential files get an owner-restricted ACL (Administrators and SYSTEM still have access — a platform limitation). Unix 0600/0640 bits are not applied.
 
 ## MCP Server (AI Integration)
 

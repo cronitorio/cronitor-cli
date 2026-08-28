@@ -9,7 +9,6 @@ import (
 	"github.com/cronitorio/cronitor-cli/lib"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 type model struct {
@@ -126,12 +125,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, tea.Quit
 					}
 
-					viper.Set(varApiKey, resp.ApiKey)
-					viper.Set(varPingApiKey, resp.PingApiKey)
-					m.submitted = true
-
-					if err := viper.WriteConfig(); err != nil {
-						m.err = fmt.Errorf("%v\n\nYour API keys could not be saved. Try setting them with sudo:\nsudo cronitor configure --api-key %s --ping-api-key %s", err, resp.ApiKey, resp.PingApiKey)
+					if err := saveSignupCredentials(resp.ApiKey, resp.PingApiKey); err != nil {
+						m.err = formatSignupPersistError(err)
+					} else {
+						m.submitted = true
 					}
 
 					return m, tea.Quit

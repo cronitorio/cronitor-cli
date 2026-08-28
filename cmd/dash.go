@@ -722,12 +722,7 @@ not start a web server but instead communicates via stdio protocol.`,
 				fatal(fmt.Sprintf("Failed to marshal config data: %v", err), 1)
 			}
 
-			// Write to config file
-			if err := os.MkdirAll(defaultConfigFileDirectory(), os.ModePerm); err != nil {
-				fatal(fmt.Sprintf("Failed to create config directory: %v", err), 1)
-			}
-
-			if err := ioutil.WriteFile(configPath, b, 0644); err != nil {
+			if err := persistConfigFile(configPath, b); err != nil {
 				fatal(fmt.Sprintf("Failed to write config file: %v", err), 1)
 			}
 
@@ -1357,13 +1352,8 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 
 		// Write to config file
 		configPath := configFilePath()
-		if err := os.MkdirAll(defaultConfigFileDirectory(), os.ModePerm); err != nil {
-			http.Error(w, "Failed to create config directory", http.StatusInternalServerError)
-			return
-		}
-
-		if err := ioutil.WriteFile(configPath, b, 0644); err != nil {
-			http.Error(w, "Failed to write config file", http.StatusInternalServerError)
+		if err := persistConfigFile(configPath, b); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -1678,24 +1668,13 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Save the API keys to config
-	viper.Set(varApiKey, resp.ApiKey)
-	viper.Set(varPingApiKey, resp.PingApiKey)
-
-	// Write config to file
-	if err := viper.WriteConfig(); err != nil {
-		// Try to create config directory if it doesn't exist
-		if err := os.MkdirAll(defaultConfigFileDirectory(), os.ModePerm); err == nil {
-			viper.WriteConfig()
-		}
+	if err := saveSignupCredentials(resp.ApiKey, resp.PingApiKey); err != nil {
+		http.Error(w, formatSignupPersistError(err).Error(), http.StatusInternalServerError)
+		return
 	}
 
-	// Return the API keys
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"api_key":      resp.ApiKey,
-		"ping_api_key": resp.PingApiKey,
-	})
+	json.NewEncoder(w).Encode(signupSuccessClientMessage())
 }
 
 // findInstances finds running instances of commands using cached ps output
