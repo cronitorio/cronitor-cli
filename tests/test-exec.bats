@@ -89,9 +89,16 @@ teardown() {
 
 @test "Exec sends duration with complete ping" {
   ../cronitor $CRONITOR_ARGS --log $CLI_LOGFILE exec d3x0c1 sleep 1 > /dev/null
-  # Extract duration and verify it's a reasonable value (between 0.5 and 2 seconds)
+  # Extract duration and verify it's a reasonable value for sleep 1.
+  # On Windows, exec wraps the command in powershell.exe; cold start on CI
+  # often pushes the measured duration past the 2s Linux window.
   duration=$(grep -o '&duration=[0-9.]*' $CLI_LOGFILE | head -1 | cut -d= -f2)
-  [ -n "$duration" ] && awk "BEGIN {exit !($duration >= 0.5 && $duration <= 2)}"
+  [ -n "$duration" ]
+  if [ "$WINDOWS" = "true" ]; then
+    awk "BEGIN {exit !($duration >= 0.5 && $duration <= 15)}"
+  else
+    awk "BEGIN {exit !($duration >= 0.5 && $duration <= 2)}"
+  fi
 }
 
 @test "Exec sends command with run ping (Linux)" {

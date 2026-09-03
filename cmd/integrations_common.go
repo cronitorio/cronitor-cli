@@ -92,21 +92,55 @@ func redactSecretWalk(v interface{}) {
 }
 
 // redactRequestFieldsObject redacts secret values in a request-body fields map
-// ({"api_key":"secret"}). Catalogue field metadata objects
-// ({"api_key":{"label":"...","required":true,"secret":true}}) are left intact.
+// ({"api_key":"secret"} or nested {"auth":{"token":"S"}}). Catalogue field
+// metadata objects ({"api_key":{"label":"...","required":true,"secret":true}})
+// are left intact via a public-metadata key allowlist.
 func redactRequestFieldsObject(v interface{}) {
-	m, ok := v.(map[string]interface{})
-	if !ok {
-		return
-	}
-	for k, child := range m {
-		switch child.(type) {
-		case map[string]interface{}, []interface{}:
-			// Public catalogue metadata (label, required, secret flags).
-			continue
-		default:
-			m[k] = "[REDACTED]"
+	switch node := v.(type) {
+	case map[string]interface{}:
+		if isCatalogueFieldMetadata(node) {
+			return
 		}
+		for k, child := range node {
+			switch child.(type) {
+			case map[string]interface{}, []interface{}:
+				redactRequestFieldsObject(child)
+			default:
+				node[k] = "[REDACTED]"
+			}
+		}
+	case []interface{}:
+		for i, child := range node {
+			switch child.(type) {
+			case map[string]interface{}, []interface{}:
+				redactRequestFieldsObject(child)
+			default:
+				node[i] = "[REDACTED]"
+			}
+		}
+	}
+}
+
+func isCatalogueFieldMetadata(m map[string]interface{}) bool {
+	if len(m) == 0 {
+		return false
+	}
+	hasMetadata := false
+	for k := range m {
+		if !isCatalogueMetadataKey(k) {
+			return false
+		}
+		hasMetadata = true
+	}
+	return hasMetadata
+}
+
+func isCatalogueMetadataKey(k string) bool {
+	switch strings.ToLower(k) {
+	case "label", "name", "secret", "required", "help", "prompt", "type", "placeholder", "description":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -758,8 +758,34 @@ func TestConnect_SecretsRedactedFromVerboseAndLog(t *testing.T) {
 	if strings.Contains(string(data), secret) {
 		t.Errorf("secret leaked to --log file:\n%s", data)
 	}
-	if !strings.Contains(string(data), `"label"`) && !strings.Contains(string(data), "API Key") {
-		t.Errorf("catalogue fields metadata should remain visible under --verbose/--log, got:\n%s", data)
+	if !strings.Contains(string(data), `"label":"API Key"`) {
+		t.Errorf("catalogue fields metadata must remain visible as \"label\":\"API Key\" under --verbose/--log, got:\n%s", data)
+	}
+}
+
+func TestRedactRequestFields_NestedSecretsAndCatalogueMetadata(t *testing.T) {
+	request := `{"service":"webhook","fields":{"auth":{"token":"nested-token-secret"},"urls":["array-secret-value"],"api_key":"scalar-secret"}}`
+	redacted, ok := redactSecretJSON(request)
+	if !ok {
+		t.Fatal("expected request JSON to be redacted")
+	}
+	if strings.Contains(redacted, "nested-token-secret") || strings.Contains(redacted, "array-secret-value") || strings.Contains(redacted, "scalar-secret") {
+		t.Errorf("nested field secrets leaked: %s", redacted)
+	}
+	if !strings.Contains(redacted, "[REDACTED]") {
+		t.Errorf("expected [REDACTED] placeholders, got %s", redacted)
+	}
+
+	catalogue := `{"services":[{"service":"opsgenie","fields":{"api_key":{"label":"API Key","secret":true,"required":true}}}]}`
+	kept, ok := redactSecretJSON(catalogue)
+	if !ok {
+		t.Fatal("expected catalogue JSON to parse")
+	}
+	if !strings.Contains(kept, `"label":"API Key"`) {
+		t.Errorf("catalogue metadata label was redacted: %s", kept)
+	}
+	if !strings.Contains(kept, `"required":true`) {
+		t.Errorf("catalogue metadata required flag was redacted: %s", kept)
 	}
 }
 

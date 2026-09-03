@@ -260,7 +260,9 @@ Examples:
 		}
 
 		if integrationFormat == "json" {
-			integrationOutputToTarget(FormatJSON(resp.Body))
+			if len(resp.Body) > 0 {
+				integrationOutputToTarget(FormatJSON(resp.Body))
+			}
 			return
 		}
 
