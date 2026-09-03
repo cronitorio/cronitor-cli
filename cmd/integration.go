@@ -7,7 +7,6 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/cronitorio/cronitor-cli/lib"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -64,6 +63,9 @@ var (
 
 func init() {
 	RootCmd.AddCommand(integrationCmd)
+	integrationCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		resetSecretRedaction()
+	}
 	integrationCmd.PersistentFlags().IntVar(&integrationPage, "page", 1, "Page number")
 	integrationCmd.PersistentFlags().IntVar(&integrationPageSize, "page-size", 0, "Number of results per page")
 	integrationCmd.PersistentFlags().StringVar(&integrationFormat, "format", "", "Output format: json, table")
@@ -117,7 +119,7 @@ Examples:
   cronitor integration list --page 2 --page-size 50
   cronitor integration list --format json`,
 	Run: func(cmd *cobra.Command, args []string) {
-		client := lib.NewAPIClient(dev, log)
+		client := newIntegrationAPIClient()
 		params := make(map[string]string)
 		if integrationService != "" {
 			params["service"] = integrationService
@@ -175,7 +177,7 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		id := args[0]
-		client := lib.NewAPIClient(dev, log)
+		client := newIntegrationAPIClient()
 
 		resp, err := client.GET(fmt.Sprintf("/integrations/%s", id), nil)
 		if err != nil {
@@ -205,7 +207,7 @@ Examples:
   cronitor integration services
   cronitor integration services --format json`,
 	Run: func(cmd *cobra.Command, args []string) {
-		client := lib.NewAPIClient(dev, log)
+		client := newIntegrationAPIClient()
 		services, raw, err := fetchCatalogue(client)
 		if err != nil {
 			failAndExit(fmt.Sprintf("Failed to list services: %s", err))
@@ -246,7 +248,7 @@ Examples:
 			return
 		}
 
-		client := lib.NewAPIClient(dev, log)
+		client := newIntegrationAPIClient()
 		resp, err := client.POST("/integrations", body, nil)
 		if err != nil {
 			failAndExit(fmt.Sprintf("Failed to create integration: %s", err))
@@ -290,7 +292,7 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		id := args[0]
-		client := lib.NewAPIClient(dev, log)
+		client := newIntegrationAPIClient()
 
 		params := map[string]string{}
 		if integrationForce {

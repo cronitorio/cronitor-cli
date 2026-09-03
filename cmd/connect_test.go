@@ -7,10 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/spf13/viper"
 )
 
 type exitSentinel int
@@ -34,15 +37,21 @@ func withConnectTest(t *testing.T, mockURL string) func() {
 	oldNow := nowFn
 	sleepFn = func(time.Duration) {}
 	openBrowserFn = func(string) {}
+	resetSecretRedaction()
+	verbose = false
+	viper.Set("CRONITOR_LOG", "")
 	return func() {
 		cleanup()
 		resetConnectFlags()
 		resetIntegrationFlags()
+		resetSecretRedaction()
 		exitFn = oldExit
 		sleepFn = oldSleep
 		openBrowserFn = oldOpen
 		readSecretFn = oldSecret
 		nowFn = oldNow
+		verbose = false
+		viper.Set("CRONITOR_LOG", "")
 	}
 }
 
@@ -360,7 +369,7 @@ func TestConnect_AddTo_AmbiguousLabelRetry(t *testing.T) {
 			fmtWrite(w, `{"status":"complete","id":"slack:12","service":"slack","label":"Workspace"}`)
 		case r.Method == "GET" && r.URL.Path == "/notifications/default":
 			w.WriteHeader(200)
-			fmtWrite(w, `{"key":"default","name":"Default","notifications":{"slack":["#existing"]}}`)
+			fmtWrite(w, `{"key":"default","name":"Default","notifications":{"slack":["#existing"]},"monitors":["abc"],"monitor_details":{"abc":{}},"status":"ok","created":"2020-01-01T00:00:00Z"}`)
 		case r.Method == "PUT" && r.URL.Path == "/notifications/default":
 			mu.Lock()
 			putCount++
@@ -413,6 +422,17 @@ func TestConnect_AddTo_AmbiguousLabelRetry(t *testing.T) {
 	}
 	if containsString(secondSlack, "Workspace") {
 		t.Errorf("retry PUT should replace the ambiguous label, got %#v", secondSlack)
+	}
+	for i, raw := range putBodies {
+		for _, readonly := range []string{"monitors", "monitor_details", "status", "created"} {
+			var payload map[string]interface{}
+			if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+				t.Fatalf("PUT %d not JSON: %s", i+1, raw)
+			}
+			if _, ok := payload[readonly]; ok {
+				t.Errorf("PUT %d must not send read-only field %s: %s", i+1, readonly, raw)
+			}
+		}
 	}
 	if !strings.Contains(output, "default") {
 		t.Errorf("expected add-to confirmation, got:\n%s", output)
@@ -469,14 +489,25 @@ func TestConnect_Telegram_MatchByIDDiff(t *testing.T) {
 }
 
 func TestConnect_Telegram_MatchByName(t *testing.T) {
+	var mu sync.Mutex
+	listCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/integrations/services":
 			w.WriteHeader(200)
 			fmtWrite(w, catalogueJSON())
 		case r.Method == "GET" && r.URL.Path == "/integrations":
+			mu.Lock()
+			listCalls++
+			n := listCalls
+			mu.Unlock()
 			w.WriteHeader(200)
-			fmtWrite(w, `{"integrations":[{"id":"telegram:7","service":"telegram","name":"On-call bot","label":"On-call bot"}]}`)
+			// Pre-list and first poll still only have the existing same-name row.
+			if n <= 2 {
+				fmtWrite(w, `{"integrations":[{"id":"telegram:7","service":"telegram","name":"On-call bot","label":"On-call bot"}]}`)
+				return
+			}
+			fmtWrite(w, `{"integrations":[{"id":"telegram:7","service":"telegram","name":"On-call bot","label":"On-call bot"},{"id":"telegram:8","service":"telegram","name":"On-call bot","label":"On-call bot"}]}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -493,9 +524,206 @@ func TestConnect_Telegram_MatchByName(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d\n%s", code, output)
 	}
-	if !strings.Contains(output, "telegram:7") || !strings.Contains(output, "On-call bot") {
-		t.Errorf("expected --name match, got:\n%s", output)
+	if listCalls < 3 {
+		t.Errorf("expected to keep polling past the pre-existing same-name row, listCalls=%d", listCalls)
 	}
+	if !strings.Contains(output, "telegram:8") || !strings.Contains(output, "On-call bot") {
+		t.Errorf("expected new id that matches --name, got:\n%s", output)
+	}
+	if strings.Contains(output, "telegram:7") && !strings.Contains(output, "telegram:8") {
+		t.Errorf("matched the pre-existing same-name row:\n%s", output)
+	}
+}
+
+func TestConnect_FormatJSON_ParseableOnly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/integrations/services":
+			w.WriteHeader(200)
+			fmtWrite(w, catalogueJSON())
+		case r.Method == "POST" && r.URL.Path == "/integrations/connect":
+			w.WriteHeader(200)
+			fmtWrite(w, `{"authorize_url":"https://slack.example/oauth","token":"tok_json","expires_at":"2099-01-01T00:00:00Z","poll_interval":1}`)
+		case r.Method == "GET" && r.URL.Path == "/integrations/connect/tok_json":
+			w.WriteHeader(200)
+			fmtWrite(w, `{"status":"complete","id":"slack:12","service":"slack","label":"Workspace"}`)
+		case r.Method == "GET" && r.URL.Path == "/notifications/default":
+			w.WriteHeader(200)
+			fmtWrite(w, `{"key":"default","name":"Default","notifications":{"slack":[]}}`)
+		case r.Method == "PUT" && r.URL.Path == "/notifications/default":
+			w.WriteHeader(200)
+			w.Write(mustRead(r))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cleanup := withConnectTest(t, server.URL)
+	defer cleanup()
+
+	output, code, err := executeWithExit("connect", "slack", "--no-browser", "--format", "json", "--add-to", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d\n%s", code, output)
+	}
+	trimmed := strings.TrimSpace(output)
+	if !json.Valid([]byte(trimmed)) {
+		t.Fatalf("expected stdout to be parseable JSON only, got:\n%s", output)
+	}
+	if strings.Contains(output, "https://slack.example/oauth") {
+		t.Errorf("authorize URL must not appear on stdout in --format json:\n%s", output)
+	}
+	if strings.Contains(output, "Added") {
+		t.Errorf("Added confirmation must not appear on stdout in --format json:\n%s", output)
+	}
+	if !strings.Contains(trimmed, "slack:12") {
+		t.Errorf("expected complete payload in JSON stdout, got:\n%s", output)
+	}
+}
+
+func TestConnect_AddTo_WebhookUsesPluralKey(t *testing.T) {
+	var putBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/integrations/services":
+			w.WriteHeader(200)
+			fmtWrite(w, catalogueJSON())
+		case r.Method == "POST" && r.URL.Path == "/integrations":
+			w.WriteHeader(201)
+			fmtWrite(w, `{"id":"webhook:3","service":"webhook","name":"Hook","label":"Hook"}`)
+		case r.Method == "GET" && r.URL.Path == "/notifications/default":
+			w.WriteHeader(200)
+			fmtWrite(w, `{"key":"default","name":"Default","notifications":{"webhooks":["https://old.example"]},"monitors":["m1"],"status":"ok","created":"2020-01-01T00:00:00Z"}`)
+		case r.Method == "PUT" && r.URL.Path == "/notifications/default":
+			putBody = string(body)
+			w.WriteHeader(200)
+			w.Write(body)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cleanup := withConnectTest(t, server.URL)
+	defer cleanup()
+
+	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook", "--field", "url=https://example.com/hook", "--add-to", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d\n%s", code, output)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(putBody), &payload); err != nil {
+		t.Fatalf("PUT body is not JSON: %s", putBody)
+	}
+	notifications, _ := payload["notifications"].(map[string]interface{})
+	if notifications == nil {
+		t.Fatalf("PUT missing notifications: %s", putBody)
+	}
+	if _, ok := notifications["webhook"]; ok {
+		t.Errorf("must not write singular notifications.webhook: %s", putBody)
+	}
+	hooks := toStringSlice(notifications["webhooks"])
+	if !containsString(hooks, "Hook") {
+		t.Errorf("expected notifications.webhooks to include Hook, got %#v", hooks)
+	}
+	for _, readonly := range []string{"monitors", "status", "created"} {
+		if _, ok := payload[readonly]; ok {
+			t.Errorf("PUT must not send read-only field %s: %s", readonly, putBody)
+		}
+	}
+	if !strings.Contains(output, "Added") {
+		t.Errorf("expected Added only after verified PUT, got:\n%s", output)
+	}
+}
+
+func TestConnect_AddTo_UnverifiedDoesNotPrintAdded(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/integrations/services":
+			w.WriteHeader(200)
+			fmtWrite(w, catalogueJSON())
+		case r.Method == "POST" && r.URL.Path == "/integrations":
+			w.WriteHeader(201)
+			fmtWrite(w, `{"id":"webhook:3","service":"webhook","name":"Hook","label":"Hook"}`)
+		case r.Method == "GET" && r.URL.Path == "/notifications/default":
+			w.WriteHeader(200)
+			fmtWrite(w, `{"key":"default","name":"Default","notifications":{"webhooks":[]}}`)
+		case r.Method == "PUT" && r.URL.Path == "/notifications/default":
+			w.WriteHeader(200)
+			fmtWrite(w, `{"ok":true}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cleanup := withConnectTest(t, server.URL)
+	defer cleanup()
+
+	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook", "--field", "url=https://example.com/hook", "--add-to", "default")
+	if err != nil && code == 0 {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != 1 {
+		t.Fatalf("expected exit 1 when add-to is unverified, got %d\n%s", code, output)
+	}
+	if strings.Contains(output, "Added") {
+		t.Errorf("must not print Added for an unverified PUT:\n%s", output)
+	}
+}
+
+func TestConnect_SecretsRedactedFromVerboseAndLog(t *testing.T) {
+	const secret = "verbose-secret-api-key-do-not-print"
+	logFile := filepath.Join(t.TempDir(), "debug.log")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/integrations/services":
+			w.WriteHeader(200)
+			fmtWrite(w, catalogueJSON())
+		case r.Method == "POST" && r.URL.Path == "/integrations":
+			w.WriteHeader(201)
+			fmtWrite(w, `{"id":"opsgenie:9","service":"opsgenie","name":"On-call","label":"On-call"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cleanup := withConnectTest(t, server.URL)
+	defer cleanup()
+
+	verbose = true
+	viper.Set(varLog, logFile)
+	output, code, err := executeWithExit("--verbose", "--log", logFile, "connect", "opsgenie", "--name", "On-call", "--field", "api_key="+secret)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d\n%s", code, output)
+	}
+	if strings.Contains(output, secret) {
+		t.Errorf("secret leaked to stdout with --verbose:\n%s", output)
+	}
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("expected debug log file: %v", err)
+	}
+	if strings.Contains(string(data), secret) {
+		t.Errorf("secret leaked to --log file:\n%s", data)
+	}
+}
+
+func mustRead(r *http.Request) []byte {
+	body, _ := io.ReadAll(r.Body)
+	return body
 }
 
 func TestConnect_NoBrowserSkipsOpen(t *testing.T) {

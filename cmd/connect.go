@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -29,8 +30,9 @@ victorops, datadog-on-call, webhook):
   then creates the integration.
 
 Telegram:
-  Prints bot instructions and waits for a new Telegram integration, matching
-  either a new id versus the pre-connect list or --name.
+  Prints bot instructions and waits for a new Telegram integration. A match is
+  a new id versus the pre-connect snapshot. If --name is set, that new id
+  must also match the name/label.
 
 Service names are catalogue keys. Friendly aliases are not accepted.
 
@@ -52,7 +54,8 @@ Examples:
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		client := lib.NewAPIClient(dev, log)
+		resetSecretRedaction()
+		client := newIntegrationAPIClient()
 		if len(args) == 0 {
 			runConnectCatalogue(client)
 			return
@@ -176,7 +179,7 @@ func runOAuthConnect(client *lib.APIClient, svc catalogueService) {
 		return
 	}
 
-	fmt.Println(authorizeURL)
+	connectHumanPrintln(authorizeURL)
 	printInstructions(start.Instructions, start.Message, start.HelpText)
 
 	if !connectNoBrowser {
@@ -203,13 +206,7 @@ func runOAuthConnect(client *lib.APIClient, svc catalogueService) {
 		service = svc.Service
 	}
 	printConnected(id, label, service, raw, connectFormat, connectOutput)
-	if err := addToNotificationList(client, connectAddTo, service, label, id); err != nil {
-		failAndExit(fmt.Sprintf("Connected, but failed to add to notification list: %s", err))
-		return
-	}
-	if connectAddTo != "" {
-		Success(fmt.Sprintf("Added to notification list '%s'", connectAddTo))
-	}
+	confirmAddTo(client, service, label, id)
 }
 
 func pollConnectSession(client *lib.APIClient, token string, interval, timeout time.Duration, expiresAt time.Time) ([]byte, integrationRecord, error) {
@@ -346,13 +343,7 @@ func runAPIKeyConnect(client *lib.APIClient, svc catalogueService) {
 		label = name
 	}
 	printConnected(id, label, service, resp.Body, connectFormat, connectOutput)
-	if err := addToNotificationList(client, connectAddTo, service, label, id); err != nil {
-		failAndExit(fmt.Sprintf("Created, but failed to add to notification list: %s", err))
-		return
-	}
-	if connectAddTo != "" {
-		Success(fmt.Sprintf("Added to notification list '%s'", connectAddTo))
-	}
+	confirmAddTo(client, service, label, id)
 }
 
 func runTelegramConnect(client *lib.APIClient, svc catalogueService) {
@@ -379,7 +370,7 @@ func runTelegramConnect(client *lib.APIClient, svc catalogueService) {
 
 	deadline := nowFn().Add(timeout)
 	interval := defaultPollInterval(0)
-	Info("Waiting for a Telegram integration...")
+	connectInfo("Waiting for a Telegram integration...")
 
 	for {
 		if !nowFn().Before(deadline) {
@@ -406,13 +397,7 @@ func runTelegramConnect(client *lib.APIClient, svc catalogueService) {
 				}
 			}
 			printConnected(id, label, service, matchRaw, connectFormat, connectOutput)
-			if err := addToNotificationList(client, connectAddTo, service, label, id); err != nil {
-				failAndExit(fmt.Sprintf("Connected, but failed to add to notification list: %s", err))
-				return
-			}
-			if connectAddTo != "" {
-				Success(fmt.Sprintf("Added to notification list '%s'", connectAddTo))
-			}
+			confirmAddTo(client, service, label, id)
 			return
 		}
 
@@ -426,30 +411,58 @@ func runTelegramConnect(client *lib.APIClient, svc catalogueService) {
 
 func matchTelegramIntegration(records []integrationRecord, knownIDs map[string]struct{}, name string) (integrationRecord, bool) {
 	name = strings.TrimSpace(name)
-	if name != "" {
-		for _, rec := range records {
-			if rec.Name == name || rec.Label == name {
-				return rec, true
-			}
-		}
-		return integrationRecord{}, false
-	}
 	for _, rec := range records {
 		if rec.ID == "" {
 			continue
 		}
-		if _, exists := knownIDs[rec.ID]; !exists {
-			return rec, true
+		if _, exists := knownIDs[rec.ID]; exists {
+			continue
 		}
+		if name != "" && rec.Name != name && rec.Label != name {
+			continue
+		}
+		return rec, true
 	}
 	return integrationRecord{}, false
+}
+
+func confirmAddTo(client *lib.APIClient, service, label, id string) {
+	if connectAddTo == "" {
+		return
+	}
+	if err := addToNotificationList(client, connectAddTo, service, label, id); err != nil {
+		failAndExit(fmt.Sprintf("Connected, but failed to add to notification list: %s", err))
+		return
+	}
+	if !connectIsJSON() {
+		Success(fmt.Sprintf("Added to notification list '%s'", connectAddTo))
+	}
+}
+
+func connectIsJSON() bool {
+	return connectFormat == "json"
+}
+
+func connectHumanPrintln(s string) {
+	if connectIsJSON() {
+		fmt.Fprintln(os.Stderr, s)
+		return
+	}
+	fmt.Println(s)
+}
+
+func connectInfo(msg string) {
+	if connectIsJSON() {
+		return
+	}
+	Info(msg)
 }
 
 func printTelegramInstructions(svc catalogueService) {
 	if printInstructions(svc.Instructions, svc.Message, svc.HelpText) {
 		return
 	}
-	fmt.Println(`To connect Telegram:
+	connectHumanPrintln(`To connect Telegram:
 1. Open Telegram and start a chat with the Cronitor bot
 2. Follow the bot instructions to link this Cronitor account
 3. This command will detect the new integration automatically`)
@@ -467,7 +480,7 @@ func printInstructions(values ...string) bool {
 			continue
 		}
 		seen[value] = struct{}{}
-		fmt.Println(value)
+		connectHumanPrintln(value)
 		printed = true
 	}
 	return printed

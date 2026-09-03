@@ -106,8 +106,8 @@ cronitor connect slack                                # OAuth: print URL, open b
 cronitor connect slack --no-browser                   # Print authorize URL only
 cronitor connect pagerduty --timeout 10m --add-to default
 cronitor connect opsgenie --name "On-call" --field api_key=SECRET
-cronitor connect telegram                             # Print bot instructions and wait
-cronitor connect telegram --name "On-call bot"        # Match the new integration by name
+cronitor connect telegram                             # Print bot instructions; wait for a new id
+cronitor connect telegram --name "On-call bot"        # Wait for a new id whose name matches
 
 cronitor integration list
 cronitor integration list --service slack

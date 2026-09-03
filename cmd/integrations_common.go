@@ -22,6 +22,89 @@ var (
 	nowFn         = time.Now
 )
 
+var integrationSecretValues []string
+
+func resetSecretRedaction() {
+	integrationSecretValues = nil
+}
+
+func rememberSecret(val string) {
+	if strings.TrimSpace(val) == "" {
+		return
+	}
+	integrationSecretValues = append(integrationSecretValues, val)
+}
+
+func newIntegrationAPIClient() *lib.APIClient {
+	return lib.NewAPIClient(dev, redactSecretsLog)
+}
+
+func redactSecretsLog(msg string) {
+	log(redactIntegrationLogMessage(msg))
+}
+
+func redactIntegrationLogMessage(msg string) string {
+	for _, secret := range integrationSecretValues {
+		if secret != "" {
+			msg = strings.ReplaceAll(msg, secret, "[REDACTED]")
+		}
+	}
+	if idx := strings.Index(msg, "{"); idx >= 0 {
+		if redacted, ok := redactSecretJSON(msg[idx:]); ok {
+			msg = msg[:idx] + redacted
+		}
+	}
+	return msg
+}
+
+func redactSecretJSON(s string) (string, bool) {
+	var v interface{}
+	if json.Unmarshal([]byte(s), &v) != nil {
+		return s, false
+	}
+	redactSecretWalk(v, false)
+	out, err := json.Marshal(v)
+	if err != nil {
+		return s, false
+	}
+	return string(out), true
+}
+
+func redactSecretWalk(v interface{}, inFields bool) {
+	switch node := v.(type) {
+	case map[string]interface{}:
+		for k, child := range node {
+			if strings.EqualFold(k, "fields") {
+				redactSecretWalk(child, true)
+				continue
+			}
+			if inFields || isSecretFieldKey(k) {
+				switch child.(type) {
+				case map[string]interface{}, []interface{}:
+					redactSecretWalk(child, inFields || strings.EqualFold(k, "fields"))
+				default:
+					node[k] = "[REDACTED]"
+				}
+				continue
+			}
+			redactSecretWalk(child, false)
+		}
+	case []interface{}:
+		for _, child := range node {
+			redactSecretWalk(child, inFields)
+		}
+	}
+}
+
+func isSecretFieldKey(k string) bool {
+	switch strings.ToLower(k) {
+	case "api_key", "apikey", "token", "secret", "password", "authorization", "access_token", "bot_token":
+		return true
+	}
+	lower := strings.ToLower(k)
+	return strings.HasSuffix(lower, "_secret") || strings.HasSuffix(lower, "_token") || strings.HasSuffix(lower, "_password")
+}
+
 type catalogueService struct {
 	Service      string          `json:"service"`
 	ServiceName  string          `json:"service_name"`
@@ -78,6 +161,7 @@ func parseFieldFlags(fields []string) (map[string]string, error) {
 			return nil, fmt.Errorf("invalid --field %q (expected key=value)", f)
 		}
 		out[strings.TrimSpace(key)] = val
+		rememberSecret(val)
 	}
 	return out, nil
 }
@@ -402,6 +486,7 @@ func promptCatalogueFields(fields []catalogueField, provided map[string]string) 
 			continue
 		}
 		out[field.Key] = val
+		rememberSecret(val)
 	}
 	return out, nil
 }
@@ -492,6 +577,67 @@ func toStringSlice(v interface{}) []string {
 	}
 }
 
+func notificationChannelKey(service string) string {
+	switch service {
+	case "webhook":
+		return "webhooks"
+	default:
+		return service
+	}
+}
+
+func parseNotificationListObject(body []byte) (map[string]interface{}, error) {
+	var list map[string]interface{}
+	if err := json.Unmarshal(body, &list); err != nil {
+		return nil, err
+	}
+	if _, ok := list["notifications"]; ok {
+		return list, nil
+	}
+	if inner, ok := list["template"].(map[string]interface{}); ok {
+		return inner, nil
+	}
+	return list, nil
+}
+
+func writableNotificationListBody(list map[string]interface{}) map[string]interface{} {
+	out := map[string]interface{}{}
+	for _, k := range []string{"key", "name", "notifications"} {
+		if v, ok := list[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func notificationChannelContains(body []byte, channel, value string) bool {
+	list, err := parseNotificationListObject(body)
+	if err != nil {
+		return false
+	}
+	notifications, _ := list["notifications"].(map[string]interface{})
+	if notifications == nil {
+		return false
+	}
+	for _, item := range toStringSlice(notifications[channel]) {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func verifyNotificationUpdate(client *lib.APIClient, listKey, channel, value string, putResp *lib.APIResponse) bool {
+	if putResp != nil && notificationChannelContains(putResp.Body, channel, value) {
+		return true
+	}
+	resp, err := client.GET(fmt.Sprintf("/notifications/%s", listKey), nil)
+	if err != nil || !resp.IsSuccess() {
+		return false
+	}
+	return notificationChannelContains(resp.Body, channel, value)
+}
+
 func addToNotificationList(client *lib.APIClient, listKey, service, label, id string) error {
 	if listKey == "" {
 		return nil
@@ -511,8 +657,8 @@ func addToNotificationList(client *lib.APIClient, listKey, service, label, id st
 		return fmt.Errorf("API Error (%d): %s", resp.StatusCode, resp.ParseError())
 	}
 
-	var list map[string]interface{}
-	if err := json.Unmarshal(resp.Body, &list); err != nil {
+	list, err := parseNotificationListObject(resp.Body)
+	if err != nil {
 		return fmt.Errorf("failed to parse notification list: %w", err)
 	}
 
@@ -522,6 +668,7 @@ func addToNotificationList(client *lib.APIClient, listKey, service, label, id st
 		list["notifications"] = notifications
 	}
 
+	channel := notificationChannelKey(service)
 	value := label
 	if value == "" {
 		value = id
@@ -530,26 +677,29 @@ func addToNotificationList(client *lib.APIClient, listKey, service, label, id st
 		return fmt.Errorf("cannot add to notification list: missing integration label")
 	}
 
-	existing := toStringSlice(notifications[service])
+	existing := toStringSlice(notifications[channel])
 	existing = append(existing, value)
-	notifications[service] = existing
+	notifications[channel] = existing
 
-	body, err := json.Marshal(list)
+	putBody, err := json.Marshal(writableNotificationListBody(list))
 	if err != nil {
 		return err
 	}
 
-	putResp, err := client.PUT(fmt.Sprintf("/notifications/%s", listKey), body, nil)
+	putResp, err := client.PUT(fmt.Sprintf("/notifications/%s", listKey), putBody, nil)
 	if err != nil {
 		return fmt.Errorf("failed to update notification list %s: %w", listKey, err)
 	}
 	if putResp.IsSuccess() {
-		return nil
+		if verifyNotificationUpdate(client, listKey, channel, value, putResp) {
+			return nil
+		}
+		return fmt.Errorf("notification list update was not applied")
 	}
 	if isAmbiguousLabelError(putResp) && id != "" && id != value {
 		existing[len(existing)-1] = id
-		notifications[service] = existing
-		retryBody, marshalErr := json.Marshal(list)
+		notifications[channel] = existing
+		retryBody, marshalErr := json.Marshal(writableNotificationListBody(list))
 		if marshalErr != nil {
 			return marshalErr
 		}
@@ -558,7 +708,10 @@ func addToNotificationList(client *lib.APIClient, listKey, service, label, id st
 			return fmt.Errorf("failed to update notification list %s: %w", listKey, retryErr)
 		}
 		if retryResp.IsSuccess() {
-			return nil
+			if verifyNotificationUpdate(client, listKey, channel, id, retryResp) {
+				return nil
+			}
+			return fmt.Errorf("notification list update was not applied")
 		}
 		return fmt.Errorf("API Error (%d): %s", retryResp.StatusCode, retryResp.ParseError())
 	}
