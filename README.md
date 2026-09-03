@@ -98,6 +98,27 @@ cronitor notification update <key> -d '{"name":"Updated"}'
 cronitor notification delete <key>
 ```
 
+#### Integrations
+
+```bash
+cronitor connect                                      # List available services
+cronitor connect slack                                # OAuth: print URL, open browser, wait
+cronitor connect slack --no-browser                   # Print authorize URL only
+cronitor connect pagerduty --timeout 10m --add-to default
+cronitor connect opsgenie --name "On-call" --field api_key=SECRET
+cronitor connect telegram                             # Print bot instructions and wait
+cronitor connect telegram --name "On-call bot"        # Match the new integration by name
+
+cronitor integration list
+cronitor integration list --service slack
+cronitor integration get slack:12
+cronitor integration services
+cronitor integration create --service discord --name "Alerts" --field url=https://example.com/webhook
+cronitor integration create -d '{"service":"webhook","name":"Hook","fields":{"url":"https://example.com"}}'
+cronitor integration delete discord:44
+cronitor integration delete discord:44 --force
+```
+
 #### Groups
 
 ```bash
@@ -121,7 +142,7 @@ cronitor environment update <key> -d '{"name":"Updated"}'
 cronitor environment delete <key>
 ```
 
-**Aliases:** `cronitor env` → `environment`, `cronitor notifications` → `notification`
+**Aliases:** `cronitor env` → `environment`, `cronitor notifications` → `notification`, `cronitor integrations` → `integration`
 
 ### Common Flags
 

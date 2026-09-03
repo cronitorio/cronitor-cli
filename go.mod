@@ -22,6 +22,7 @@ require (
 	github.com/mark3labs/mcp-go v0.32.0
 	github.com/pkg/errors v0.8.1
 	github.com/rickb777/date v1.14.2
+	golang.org/x/term v0.45.0
 	golang.org/x/time v0.11.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -60,7 +61,7 @@ require (
 	github.com/subosito/gotenv v1.2.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/sync v0.9.0 // indirect
-	golang.org/x/sys v0.27.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.3.8 // indirect
 	gopkg.in/ini.v1 v1.63.2 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
