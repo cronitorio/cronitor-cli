@@ -229,6 +229,39 @@ func TestIntegration_Create_FlagsAndFile(t *testing.T) {
 	}
 }
 
+func TestIntegration_Create_FormatJSON_ParseableOnly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/integrations" {
+			w.WriteHeader(201)
+			fmtWrite(w, `{"id":"discord:44","service":"discord","name":"Alerts","label":"Alerts"}`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	cleanup := withConnectTest(t, server.URL)
+	defer cleanup()
+
+	output, code, err := executeWithExit("integration", "create", "--service", "discord", "--name", "Alerts", "--field", "url=https://example.com/hook", "--format", "json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d\n%s", code, output)
+	}
+	trimmed := strings.TrimSpace(output)
+	if !json.Valid([]byte(trimmed)) {
+		t.Fatalf("expected stdout to be parseable JSON only, got:\n%s", output)
+	}
+	if strings.Contains(output, "Created") {
+		t.Errorf("Created confirmation must not appear on stdout in --format json:\n%s", output)
+	}
+	if !strings.Contains(trimmed, "discord:44") {
+		t.Errorf("expected create payload in JSON stdout, got:\n%s", output)
+	}
+}
+
 func TestIntegration_Delete_Force(t *testing.T) {
 	var force string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

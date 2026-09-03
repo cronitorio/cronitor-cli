@@ -259,24 +259,25 @@ Examples:
 			return
 		}
 
+		if integrationFormat == "json" {
+			integrationOutputToTarget(FormatJSON(resp.Body))
+			return
+		}
+
 		id, label, service := extractConnectIdentity(resp.Body)
 		if id == "" && label == "" {
 			Success("Integration created")
-		} else {
-			display := label
-			if display == "" {
-				display = id
-			}
-			if id != "" && label != "" && id != label {
-				Success(fmt.Sprintf("Created %s %s (%s)", service, label, id))
-			} else {
-				Success(fmt.Sprintf("Created integration %s", display))
-			}
+			return
 		}
-
-		if integrationFormat == "json" {
-			integrationOutputToTarget(FormatJSON(resp.Body))
+		display := label
+		if display == "" {
+			display = id
 		}
+		if id != "" && label != "" && id != label {
+			Success(fmt.Sprintf("Created %s %s (%s)", service, label, id))
+			return
+		}
+		Success(fmt.Sprintf("Created integration %s", display))
 	},
 }
 

@@ -62,7 +62,7 @@ func redactSecretJSON(s string) (string, bool) {
 	if json.Unmarshal([]byte(s), &v) != nil {
 		return s, false
 	}
-	redactSecretWalk(v, false)
+	redactSecretWalk(v)
 	out, err := json.Marshal(v)
 	if err != nil {
 		return s, false
@@ -70,29 +70,52 @@ func redactSecretJSON(s string) (string, bool) {
 	return string(out), true
 }
 
-func redactSecretWalk(v interface{}, inFields bool) {
+func redactSecretWalk(v interface{}) {
 	switch node := v.(type) {
 	case map[string]interface{}:
 		for k, child := range node {
 			if strings.EqualFold(k, "fields") {
-				redactSecretWalk(child, true)
+				redactRequestFieldsObject(child)
 				continue
 			}
-			if inFields || isSecretFieldKey(k) {
-				switch child.(type) {
-				case map[string]interface{}, []interface{}:
-					redactSecretWalk(child, inFields || strings.EqualFold(k, "fields"))
-				default:
-					node[k] = "[REDACTED]"
-				}
+			if isSecretFieldKey(k) && isScalar(child) {
+				node[k] = "[REDACTED]"
 				continue
 			}
-			redactSecretWalk(child, false)
+			redactSecretWalk(child)
 		}
 	case []interface{}:
 		for _, child := range node {
-			redactSecretWalk(child, inFields)
+			redactSecretWalk(child)
 		}
+	}
+}
+
+// redactRequestFieldsObject redacts secret values in a request-body fields map
+// ({"api_key":"secret"}). Catalogue field metadata objects
+// ({"api_key":{"label":"...","required":true,"secret":true}}) are left intact.
+func redactRequestFieldsObject(v interface{}) {
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return
+	}
+	for k, child := range m {
+		switch child.(type) {
+		case map[string]interface{}, []interface{}:
+			// Public catalogue metadata (label, required, secret flags).
+			continue
+		default:
+			m[k] = "[REDACTED]"
+		}
+	}
+}
+
+func isScalar(v interface{}) bool {
+	switch v.(type) {
+	case map[string]interface{}, []interface{}:
+		return false
+	default:
+		return true
 	}
 }
 
@@ -627,6 +650,15 @@ func notificationChannelContains(body []byte, channel, value string) bool {
 	return false
 }
 
+func notificationEntryExists(existing []string, value, id string) bool {
+	for _, item := range existing {
+		if item == value || (id != "" && item == id) {
+			return true
+		}
+	}
+	return false
+}
+
 func verifyNotificationUpdate(client *lib.APIClient, listKey, channel, value string, putResp *lib.APIResponse) bool {
 	if putResp != nil && notificationChannelContains(putResp.Body, channel, value) {
 		return true
@@ -678,6 +710,9 @@ func addToNotificationList(client *lib.APIClient, listKey, service, label, id st
 	}
 
 	existing := toStringSlice(notifications[channel])
+	if notificationEntryExists(existing, value, id) {
+		return nil
+	}
 	existing = append(existing, value)
 	notifications[channel] = existing
 

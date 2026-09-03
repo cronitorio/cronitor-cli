@@ -644,6 +644,45 @@ func TestConnect_AddTo_WebhookUsesPluralKey(t *testing.T) {
 	}
 }
 
+func TestConnect_AddTo_DedupeSkipsExisting(t *testing.T) {
+	putCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/integrations/services":
+			w.WriteHeader(200)
+			fmtWrite(w, catalogueJSON())
+		case r.Method == "POST" && r.URL.Path == "/integrations":
+			w.WriteHeader(201)
+			fmtWrite(w, `{"id":"webhook:3","service":"webhook","name":"Hook","label":"Hook"}`)
+		case r.Method == "GET" && r.URL.Path == "/notifications/default":
+			w.WriteHeader(200)
+			fmtWrite(w, `{"key":"default","name":"Default","notifications":{"webhooks":["Hook"]}}`)
+		case r.Method == "PUT" && r.URL.Path == "/notifications/default":
+			putCount++
+			body, _ := io.ReadAll(r.Body)
+			w.WriteHeader(200)
+			w.Write(body)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cleanup := withConnectTest(t, server.URL)
+	defer cleanup()
+
+	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook", "--field", "url=https://example.com/hook", "--add-to", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d\n%s", code, output)
+	}
+	if putCount != 0 {
+		t.Fatalf("expected no PUT when the entry already exists, got %d", putCount)
+	}
+}
+
 func TestConnect_AddTo_UnverifiedDoesNotPrintAdded(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -718,6 +757,9 @@ func TestConnect_SecretsRedactedFromVerboseAndLog(t *testing.T) {
 	}
 	if strings.Contains(string(data), secret) {
 		t.Errorf("secret leaked to --log file:\n%s", data)
+	}
+	if !strings.Contains(string(data), `"label"`) && !strings.Contains(string(data), "API Key") {
+		t.Errorf("catalogue fields metadata should remain visible under --verbose/--log, got:\n%s", data)
 	}
 }
 
