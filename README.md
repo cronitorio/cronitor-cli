@@ -106,17 +106,18 @@ cronitor connect slack                                # OAuth: print URL, open b
 cronitor connect slack --no-browser                   # Print authorize URL only
 cronitor connect pagerduty --timeout 10m --add-to default
 cronitor connect opsgenie --name "On-call" --field api_key=SECRET
-cronitor connect telegram                             # Print bot instructions; wait for a new id
-cronitor connect telegram --name "On-call bot"        # Wait for a new id whose name matches
+cronitor connect telegram                             # Print bot instructions; wait for a new label
+cronitor connect telegram --name "On-call bot"        # Wait for a new label that matches
 
 cronitor integration list
 cronitor integration list --service slack
-cronitor integration get slack:12
+cronitor integration get Workspace
+cronitor integration get Alerts --service slack
 cronitor integration services
 cronitor integration create --service discord --name "Alerts" --field url=https://example.com/webhook
 cronitor integration create -d '{"service":"webhook","name":"Hook","fields":{"url":"https://example.com"}}'
-cronitor integration delete discord:44
-cronitor integration delete discord:44 --force
+cronitor integration delete Alerts
+cronitor integration delete Alerts --force
 ```
 
 #### Groups

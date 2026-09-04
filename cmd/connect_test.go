@@ -162,7 +162,7 @@ func TestConnect_APIKey_FieldFlag_SecretsAbsentFromStdout(t *testing.T) {
 		case r.Method == "POST" && r.URL.Path == "/integrations":
 			createBody = string(body)
 			w.WriteHeader(201)
-			fmtWrite(w, `{"id":"opsgenie:9","service":"opsgenie","name":"On-call","label":"On-call","method":"api_key","available":true}`)
+			fmtWrite(w, `{"service":"opsgenie","name":"On-call","label":"On-call","method":"api_key","available":true}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -179,8 +179,11 @@ func TestConnect_APIKey_FieldFlag_SecretsAbsentFromStdout(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d\n%s", code, output)
 	}
-	if !strings.Contains(output, "opsgenie:9") || !strings.Contains(output, "On-call") {
-		t.Errorf("expected id and label in output, got:\n%s", output)
+	if !strings.Contains(output, "On-call") || !strings.Contains(output, "opsgenie") {
+		t.Errorf("expected label and service in output, got:\n%s", output)
+	}
+	if strings.Contains(output, "opsgenie:") {
+		t.Errorf("must not print composite pk ids, got:\n%s", output)
 	}
 	if strings.Contains(output, secret) {
 		t.Errorf("secret leaked to stdout:\n%s", output)
@@ -215,7 +218,7 @@ func TestConnect_APIKey_PromptsForCatalogueFields(t *testing.T) {
 		case r.Method == "POST" && r.URL.Path == "/integrations":
 			createBody = string(body)
 			w.WriteHeader(201)
-			fmtWrite(w, `{"id":"opsgenie:11","service":"opsgenie","label":"Opsgenie","name":"Opsgenie"}`)
+			fmtWrite(w, `{"service":"opsgenie","label":"Opsgenie","name":"Opsgenie"}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -275,7 +278,7 @@ func TestConnect_Slack_TwoPendingThenComplete(t *testing.T) {
 				fmtWrite(w, `{"status":"pending"}`)
 				return
 			}
-			fmtWrite(w, `{"status":"complete","id":"slack:12","service":"slack","label":"Workspace","name":"Workspace"}`)
+			fmtWrite(w, `{"status":"complete","service":"slack","label":"Workspace","name":"Workspace"}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -298,8 +301,11 @@ func TestConnect_Slack_TwoPendingThenComplete(t *testing.T) {
 	if !strings.Contains(output, "https://slack.example/oauth") {
 		t.Errorf("expected authorize URL to be printed first, got:\n%s", output)
 	}
-	if !strings.Contains(output, "slack:12") || !strings.Contains(output, "Workspace") {
-		t.Errorf("expected id and label after complete, got:\n%s", output)
+	if !strings.Contains(output, "Workspace") || !strings.Contains(output, "slack") {
+		t.Errorf("expected label and service after complete, got:\n%s", output)
+	}
+	if strings.Contains(output, "slack:") {
+		t.Errorf("must not print composite pk ids, got:\n%s", output)
 	}
 	if polls != 3 {
 		t.Errorf("expected 3 status polls (2 pending + complete), got %d", polls)
@@ -351,7 +357,7 @@ func TestConnect_TimeoutExitCode(t *testing.T) {
 	}
 }
 
-func TestConnect_AddTo_AmbiguousLabelRetry(t *testing.T) {
+func TestConnect_AddTo_AmbiguousLabelSurfacesError(t *testing.T) {
 	var mu sync.Mutex
 	var putBodies []string
 	putCount := 0
@@ -366,23 +372,17 @@ func TestConnect_AddTo_AmbiguousLabelRetry(t *testing.T) {
 			fmtWrite(w, `{"authorize_url":"https://slack.example/oauth","token":"tok_add","expires_at":"2099-01-01T00:00:00Z","poll_interval":1}`)
 		case r.Method == "GET" && r.URL.Path == "/integrations/connect/tok_add":
 			w.WriteHeader(200)
-			fmtWrite(w, `{"status":"complete","id":"slack:12","service":"slack","label":"Workspace"}`)
+			fmtWrite(w, `{"status":"complete","service":"slack","label":"Workspace"}`)
 		case r.Method == "GET" && r.URL.Path == "/notifications/default":
 			w.WriteHeader(200)
 			fmtWrite(w, `{"key":"default","name":"Default","notifications":{"slack":["#existing"]},"monitors":["abc"],"monitor_details":{"abc":{}},"status":"ok","created":"2020-01-01T00:00:00Z"}`)
 		case r.Method == "PUT" && r.URL.Path == "/notifications/default":
 			mu.Lock()
 			putCount++
-			n := putCount
 			putBodies = append(putBodies, string(body))
 			mu.Unlock()
-			if n == 1 {
-				w.WriteHeader(400)
-				fmtWrite(w, `{"error":"ambiguous label"}`)
-				return
-			}
-			w.WriteHeader(200)
-			w.Write(body)
+			w.WriteHeader(400)
+			fmtWrite(w, `{"error":"ambiguous label"}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -393,53 +393,41 @@ func TestConnect_AddTo_AmbiguousLabelRetry(t *testing.T) {
 	defer cleanup()
 
 	output, code, err := executeWithExit("connect", "slack", "--no-browser", "--add-to", "default")
-	if err != nil {
+	if err != nil && code == 0 {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if code != 0 {
-		t.Fatalf("expected exit 0, got %d\n%s", code, output)
+	if code != 1 {
+		t.Fatalf("expected exit 1 when add-to is ambiguous, got %d\n%s", code, output)
 	}
-	if putCount != 2 {
-		t.Fatalf("expected 2 PUTs (label then id retry), got %d", putCount)
+	if putCount != 1 {
+		t.Fatalf("expected exactly one PUT with the label (no service:pk retry), got %d", putCount)
 	}
 
 	var first map[string]interface{}
 	if err := json.Unmarshal([]byte(putBodies[0]), &first); err != nil {
-		t.Fatalf("first PUT not JSON: %s", putBodies[0])
+		t.Fatalf("PUT not JSON: %s", putBodies[0])
 	}
 	firstSlack := toStringSlice(first["notifications"].(map[string]interface{})["slack"])
 	if !containsString(firstSlack, "Workspace") {
-		t.Errorf("first PUT should append label Workspace, got %#v", firstSlack)
+		t.Errorf("PUT should append label Workspace, got %#v", firstSlack)
 	}
-
-	var second map[string]interface{}
-	if err := json.Unmarshal([]byte(putBodies[1]), &second); err != nil {
-		t.Fatalf("second PUT not JSON: %s", putBodies[1])
+	if containsString(firstSlack, "slack:12") {
+		t.Errorf("PUT must not use a composite pk id, got %#v", firstSlack)
 	}
-	secondSlack := toStringSlice(second["notifications"].(map[string]interface{})["slack"])
-	if !containsString(secondSlack, "slack:12") {
-		t.Errorf("retry PUT should use service:pk id, got %#v", secondSlack)
-	}
-	if containsString(secondSlack, "Workspace") {
-		t.Errorf("retry PUT should replace the ambiguous label, got %#v", secondSlack)
-	}
-	for i, raw := range putBodies {
-		for _, readonly := range []string{"monitors", "monitor_details", "status", "created"} {
-			var payload map[string]interface{}
-			if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-				t.Fatalf("PUT %d not JSON: %s", i+1, raw)
-			}
-			if _, ok := payload[readonly]; ok {
-				t.Errorf("PUT %d must not send read-only field %s: %s", i+1, readonly, raw)
-			}
+	for _, readonly := range []string{"monitors", "monitor_details", "status", "created"} {
+		if _, ok := first[readonly]; ok {
+			t.Errorf("PUT must not send read-only field %s: %s", readonly, putBodies[0])
 		}
 	}
-	if !strings.Contains(output, "default") {
-		t.Errorf("expected add-to confirmation, got:\n%s", output)
+	if !strings.Contains(strings.ToLower(output), "ambiguous") {
+		t.Errorf("expected ambiguous-label error to be surfaced, got:\n%s", output)
+	}
+	if strings.Contains(output, "Added") {
+		t.Errorf("must not print Added after an ambiguous-label error:\n%s", output)
 	}
 }
 
-func TestConnect_Telegram_MatchByIDDiff(t *testing.T) {
+func TestConnect_Telegram_MatchByLabelDiff(t *testing.T) {
 	var mu sync.Mutex
 	listCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -457,10 +445,10 @@ func TestConnect_Telegram_MatchByIDDiff(t *testing.T) {
 			mu.Unlock()
 			w.WriteHeader(200)
 			if n == 1 {
-				fmtWrite(w, `{"integrations":[{"id":"telegram:1","service":"telegram","name":"Existing","label":"Existing"}]}`)
+				fmtWrite(w, `{"integrations":[{"service":"telegram","name":"Existing","label":"Existing"}]}`)
 				return
 			}
-			fmtWrite(w, `{"integrations":[{"id":"telegram:1","service":"telegram","name":"Existing","label":"Existing"},{"id":"telegram:2","service":"telegram","name":"New Bot","label":"New Bot"}]}`)
+			fmtWrite(w, `{"integrations":[{"service":"telegram","name":"Existing","label":"Existing"},{"service":"telegram","name":"New Bot","label":"New Bot"}]}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -480,10 +468,10 @@ func TestConnect_Telegram_MatchByIDDiff(t *testing.T) {
 	if !strings.Contains(output, "Cronitor Telegram bot") && !strings.Contains(output, "Message the Cronitor Telegram bot") {
 		t.Errorf("expected Telegram bot instructions, got:\n%s", output)
 	}
-	if !strings.Contains(output, "telegram:2") || !strings.Contains(output, "New Bot") {
-		t.Errorf("expected new integration from id-diff, got:\n%s", output)
+	if !strings.Contains(output, "New Bot") {
+		t.Errorf("expected new integration from label-diff, got:\n%s", output)
 	}
-	if strings.Contains(output, "telegram:1") && !strings.Contains(output, "telegram:2") {
+	if strings.Contains(output, "Existing") && !strings.Contains(output, "New Bot") {
 		t.Errorf("matched the pre-existing integration instead of the new one:\n%s", output)
 	}
 }
@@ -502,12 +490,12 @@ func TestConnect_Telegram_MatchByName(t *testing.T) {
 			n := listCalls
 			mu.Unlock()
 			w.WriteHeader(200)
-			// Pre-list and first poll still only have the existing same-name row.
+			// Pre-list and first poll still only have the existing row.
 			if n <= 2 {
-				fmtWrite(w, `{"integrations":[{"id":"telegram:7","service":"telegram","name":"On-call bot","label":"On-call bot"}]}`)
+				fmtWrite(w, `{"integrations":[{"service":"telegram","name":"Existing","label":"Existing"}]}`)
 				return
 			}
-			fmtWrite(w, `{"integrations":[{"id":"telegram:7","service":"telegram","name":"On-call bot","label":"On-call bot"},{"id":"telegram:8","service":"telegram","name":"On-call bot","label":"On-call bot"}]}`)
+			fmtWrite(w, `{"integrations":[{"service":"telegram","name":"Existing","label":"Existing"},{"service":"telegram","name":"On-call bot","label":"On-call bot"}]}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -527,11 +515,11 @@ func TestConnect_Telegram_MatchByName(t *testing.T) {
 	if listCalls < 3 {
 		t.Errorf("expected to keep polling past the pre-existing same-name row, listCalls=%d", listCalls)
 	}
-	if !strings.Contains(output, "telegram:8") || !strings.Contains(output, "On-call bot") {
-		t.Errorf("expected new id that matches --name, got:\n%s", output)
+	if !strings.Contains(output, "On-call bot") {
+		t.Errorf("expected new label that matches --name, got:\n%s", output)
 	}
-	if strings.Contains(output, "telegram:7") && !strings.Contains(output, "telegram:8") {
-		t.Errorf("matched the pre-existing same-name row:\n%s", output)
+	if strings.Contains(output, "Existing") && !strings.Contains(output, "On-call bot") {
+		t.Errorf("matched the pre-existing row instead of the --name label:\n%s", output)
 	}
 }
 
@@ -546,7 +534,7 @@ func TestConnect_FormatJSON_ParseableOnly(t *testing.T) {
 			fmtWrite(w, `{"authorize_url":"https://slack.example/oauth","token":"tok_json","expires_at":"2099-01-01T00:00:00Z","poll_interval":1}`)
 		case r.Method == "GET" && r.URL.Path == "/integrations/connect/tok_json":
 			w.WriteHeader(200)
-			fmtWrite(w, `{"status":"complete","id":"slack:12","service":"slack","label":"Workspace"}`)
+			fmtWrite(w, `{"status":"complete","service":"slack","label":"Workspace"}`)
 		case r.Method == "GET" && r.URL.Path == "/notifications/default":
 			w.WriteHeader(200)
 			fmtWrite(w, `{"key":"default","name":"Default","notifications":{"slack":[]}}`)
@@ -579,8 +567,11 @@ func TestConnect_FormatJSON_ParseableOnly(t *testing.T) {
 	if strings.Contains(output, "Added") {
 		t.Errorf("Added confirmation must not appear on stdout in --format json:\n%s", output)
 	}
-	if !strings.Contains(trimmed, "slack:12") {
-		t.Errorf("expected complete payload in JSON stdout, got:\n%s", output)
+	if !strings.Contains(trimmed, "Workspace") {
+		t.Errorf("expected complete payload label in JSON stdout, got:\n%s", output)
+	}
+	if strings.Contains(trimmed, "slack:") {
+		t.Errorf("JSON stdout must not teach composite pk ids, got:\n%s", output)
 	}
 }
 
@@ -594,7 +585,7 @@ func TestConnect_AddTo_WebhookUsesPluralKey(t *testing.T) {
 			fmtWrite(w, catalogueJSON())
 		case r.Method == "POST" && r.URL.Path == "/integrations":
 			w.WriteHeader(201)
-			fmtWrite(w, `{"id":"webhook:3","service":"webhook","name":"Hook","label":"Hook"}`)
+			fmtWrite(w, `{"service":"webhook","name":"Hook","label":"Hook"}`)
 		case r.Method == "GET" && r.URL.Path == "/notifications/default":
 			w.WriteHeader(200)
 			fmtWrite(w, `{"key":"default","name":"Default","notifications":{"webhooks":["https://old.example"]},"monitors":["m1"],"status":"ok","created":"2020-01-01T00:00:00Z"}`)
@@ -653,7 +644,7 @@ func TestConnect_AddTo_DedupeSkipsExisting(t *testing.T) {
 			fmtWrite(w, catalogueJSON())
 		case r.Method == "POST" && r.URL.Path == "/integrations":
 			w.WriteHeader(201)
-			fmtWrite(w, `{"id":"webhook:3","service":"webhook","name":"Hook","label":"Hook"}`)
+			fmtWrite(w, `{"service":"webhook","name":"Hook","label":"Hook"}`)
 		case r.Method == "GET" && r.URL.Path == "/notifications/default":
 			w.WriteHeader(200)
 			fmtWrite(w, `{"key":"default","name":"Default","notifications":{"webhooks":["Hook"]}}`)
@@ -691,7 +682,7 @@ func TestConnect_AddTo_UnverifiedDoesNotPrintAdded(t *testing.T) {
 			fmtWrite(w, catalogueJSON())
 		case r.Method == "POST" && r.URL.Path == "/integrations":
 			w.WriteHeader(201)
-			fmtWrite(w, `{"id":"webhook:3","service":"webhook","name":"Hook","label":"Hook"}`)
+			fmtWrite(w, `{"service":"webhook","name":"Hook","label":"Hook"}`)
 		case r.Method == "GET" && r.URL.Path == "/notifications/default":
 			w.WriteHeader(200)
 			fmtWrite(w, `{"key":"default","name":"Default","notifications":{"webhooks":[]}}`)
@@ -729,7 +720,7 @@ func TestConnect_SecretsRedactedFromVerboseAndLog(t *testing.T) {
 			fmtWrite(w, catalogueJSON())
 		case r.Method == "POST" && r.URL.Path == "/integrations":
 			w.WriteHeader(201)
-			fmtWrite(w, `{"id":"opsgenie:9","service":"opsgenie","name":"On-call","label":"On-call"}`)
+			fmtWrite(w, `{"service":"opsgenie","name":"On-call","label":"On-call"}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -806,7 +797,7 @@ func TestConnect_NoBrowserSkipsOpen(t *testing.T) {
 			fmtWrite(w, `{"authorize_url":"https://slack.example/oauth","token":"tok_nb","poll_interval":1}`)
 		case r.Method == "GET" && r.URL.Path == "/integrations/connect/tok_nb":
 			w.WriteHeader(200)
-			fmtWrite(w, `{"status":"complete","id":"slack:1","label":"A"}`)
+			fmtWrite(w, `{"status":"complete","label":"A"}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -829,6 +820,30 @@ func TestConnect_NoBrowserSkipsOpen(t *testing.T) {
 	}
 	if !strings.Contains(output, "https://slack.example/oauth") {
 		t.Errorf("expected URL to still be printed, got:\n%s", output)
+	}
+}
+
+func TestPreferPublicLabel_IgnoresCompositePK(t *testing.T) {
+	if got := preferPublicLabel("Workspace", "Workspace", "slack:12"); got != "Workspace" {
+		t.Errorf("prefer label, got %q", got)
+	}
+	if got := preferPublicLabel("", "Workspace", "slack:12"); got != "Workspace" {
+		t.Errorf("fall back to name, got %q", got)
+	}
+	if got := preferPublicLabel("", "", "slack:12"); got != "" {
+		t.Errorf("must not use composite pk as a public label, got %q", got)
+	}
+	if got := preferPublicLabel("", "", "legacy-key"); got != "legacy-key" {
+		t.Errorf("non-composite leftover id is still a public identifier, got %q", got)
+	}
+
+	label, service := extractPublicIdentity([]byte(`{"id":"slack:12","service":"slack","label":"Workspace"}`))
+	if label != "Workspace" || service != "slack" {
+		t.Errorf("extractPublicIdentity should prefer label, got label=%q service=%q", label, service)
+	}
+	label, service = extractPublicIdentity([]byte(`{"id":"slack:12","service":"slack"}`))
+	if label != "" || service != "slack" {
+		t.Errorf("extractPublicIdentity must ignore composite pk, got label=%q service=%q", label, service)
 	}
 }
 

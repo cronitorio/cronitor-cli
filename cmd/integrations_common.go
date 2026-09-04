@@ -433,7 +433,7 @@ func parseIntegrationList(body []byte) ([]integrationRecord, error) {
 	}
 
 	var single integrationRecord
-	if err := json.Unmarshal(body, &single); err == nil && single.ID != "" {
+	if err := json.Unmarshal(body, &single); err == nil && (single.Label != "" || single.Name != "" || single.Service != "" || (single.ID != "" && !isCompositePKID(single.ID))) {
 		return []integrationRecord{single}, nil
 	}
 
@@ -548,17 +548,39 @@ func promptCatalogueFields(fields []catalogueField, provided map[string]string) 
 	return out, nil
 }
 
-func integrationDisplayName(rec integrationRecord) string {
-	if rec.Label != "" {
-		return rec.Label
-	}
-	if rec.Name != "" {
-		return rec.Name
-	}
-	return rec.ID
+func integrationPublicLabel(rec integrationRecord) string {
+	return preferPublicLabel(rec.Label, rec.Name, rec.ID)
 }
 
-func extractConnectIdentity(body []byte) (id, label, service string) {
+func preferPublicLabel(label, name, id string) string {
+	if label != "" {
+		return label
+	}
+	if name != "" {
+		return name
+	}
+	if id != "" && !isCompositePKID(id) {
+		return id
+	}
+	return ""
+}
+
+// isCompositePKID reports service:pk values such as slack:12. These are not
+// part of the public addressing contract and must not be used or printed.
+func isCompositePKID(s string) bool {
+	i := strings.LastIndex(s, ":")
+	if i <= 0 || i >= len(s)-1 {
+		return false
+	}
+	for _, c := range s[i+1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func extractPublicIdentity(body []byte) (label, service string) {
 	var rec struct {
 		ID          string `json:"id"`
 		Label       string `json:"label"`
@@ -572,44 +594,19 @@ func extractConnectIdentity(body []byte) (id, label, service string) {
 		} `json:"integration"`
 	}
 	if err := json.Unmarshal(body, &rec); err != nil {
-		return "", "", ""
+		return "", ""
 	}
-	id = rec.ID
-	label = rec.Label
-	if label == "" {
-		label = rec.Name
-	}
+	label = preferPublicLabel(rec.Label, rec.Name, rec.ID)
 	service = rec.Service
 	if rec.Integration != nil {
-		if id == "" {
-			id = rec.Integration.ID
-		}
 		if label == "" {
-			label = rec.Integration.Label
-		}
-		if label == "" {
-			label = rec.Integration.Name
+			label = preferPublicLabel(rec.Integration.Label, rec.Integration.Name, rec.Integration.ID)
 		}
 		if service == "" {
 			service = rec.Integration.Service
 		}
 	}
-	return id, label, service
-}
-
-func isAmbiguousLabelError(resp *lib.APIResponse) bool {
-	if resp == nil {
-		return false
-	}
-	if resp.IsSuccess() {
-		return false
-	}
-	msg := strings.ToLower(resp.ParseError())
-	if strings.Contains(msg, "ambiguous") {
-		return true
-	}
-	body := strings.ToLower(string(resp.Body))
-	return strings.Contains(body, "ambiguous")
+	return label, service
 }
 
 func toStringSlice(v interface{}) []string {
@@ -684,9 +681,9 @@ func notificationChannelContains(body []byte, channel, value string) bool {
 	return false
 }
 
-func notificationEntryExists(existing []string, value, id string) bool {
+func notificationEntryExists(existing []string, value string) bool {
 	for _, item := range existing {
-		if item == value || (id != "" && item == id) {
+		if item == value {
 			return true
 		}
 	}
@@ -704,12 +701,15 @@ func verifyNotificationUpdate(client *lib.APIClient, listKey, channel, value str
 	return notificationChannelContains(resp.Body, channel, value)
 }
 
-func addToNotificationList(client *lib.APIClient, listKey, service, label, id string) error {
+func addToNotificationList(client *lib.APIClient, listKey, service, label string) error {
 	if listKey == "" {
 		return nil
 	}
 	if service == "" {
 		return fmt.Errorf("cannot add to notification list: missing service")
+	}
+	if label == "" {
+		return fmt.Errorf("cannot add to notification list: missing integration label")
 	}
 
 	resp, err := client.GET(fmt.Sprintf("/notifications/%s", listKey), nil)
@@ -735,19 +735,11 @@ func addToNotificationList(client *lib.APIClient, listKey, service, label, id st
 	}
 
 	channel := notificationChannelKey(service)
-	value := label
-	if value == "" {
-		value = id
-	}
-	if value == "" {
-		return fmt.Errorf("cannot add to notification list: missing integration label")
-	}
-
 	existing := toStringSlice(notifications[channel])
-	if notificationEntryExists(existing, value, id) {
+	if notificationEntryExists(existing, label) {
 		return nil
 	}
-	existing = append(existing, value)
+	existing = append(existing, label)
 	notifications[channel] = existing
 
 	putBody, err := json.Marshal(writableNotificationListBody(list))
@@ -760,52 +752,28 @@ func addToNotificationList(client *lib.APIClient, listKey, service, label, id st
 		return fmt.Errorf("failed to update notification list %s: %w", listKey, err)
 	}
 	if putResp.IsSuccess() {
-		if verifyNotificationUpdate(client, listKey, channel, value, putResp) {
+		if verifyNotificationUpdate(client, listKey, channel, label, putResp) {
 			return nil
 		}
 		return fmt.Errorf("notification list update was not applied")
 	}
-	if isAmbiguousLabelError(putResp) && id != "" && id != value {
-		existing[len(existing)-1] = id
-		notifications[channel] = existing
-		retryBody, marshalErr := json.Marshal(writableNotificationListBody(list))
-		if marshalErr != nil {
-			return marshalErr
-		}
-		retryResp, retryErr := client.PUT(fmt.Sprintf("/notifications/%s", listKey), retryBody, nil)
-		if retryErr != nil {
-			return fmt.Errorf("failed to update notification list %s: %w", listKey, retryErr)
-		}
-		if retryResp.IsSuccess() {
-			if verifyNotificationUpdate(client, listKey, channel, id, retryResp) {
-				return nil
-			}
-			return fmt.Errorf("notification list update was not applied")
-		}
-		return fmt.Errorf("API Error (%d): %s", retryResp.StatusCode, retryResp.ParseError())
-	}
 	return fmt.Errorf("API Error (%d): %s", putResp.StatusCode, putResp.ParseError())
 }
 
-func printConnected(id, label, service string, raw []byte, format, outputPath string) {
+func printConnected(label, service string, raw []byte, format, outputPath string) {
 	if format == "json" && len(raw) > 0 {
 		writeCLIOutput(outputPath, FormatJSON(raw))
 		return
 	}
-	display := label
-	if display == "" {
-		display = id
+	if label != "" && service != "" {
+		Success(fmt.Sprintf("Connected %s %s", service, label))
+		return
 	}
-	if id != "" && label != "" && id != label {
-		Success(fmt.Sprintf("Connected %s %s (%s)", service, label, id))
-	} else if display != "" {
-		Success(fmt.Sprintf("Connected %s", display))
-	} else {
-		Success("Integration connected")
+	if label != "" {
+		Success(fmt.Sprintf("Connected %s", label))
+		return
 	}
-	if format == "json" && len(raw) > 0 {
-		writeCLIOutput(outputPath, FormatJSON(raw))
-	}
+	Success("Integration connected")
 }
 
 func failAndExit(msg string) {

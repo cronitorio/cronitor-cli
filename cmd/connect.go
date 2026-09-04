@@ -31,8 +31,8 @@ victorops, datadog-on-call, webhook):
 
 Telegram:
   Prints bot instructions and waits for a new Telegram integration. A match is
-  a new id versus the pre-connect snapshot. If --name is set, that new id
-  must also match the name/label.
+  a new label versus the pre-connect snapshot. If --name is set, that new
+  label must also match.
 
 Service names are catalogue keys. Friendly aliases are not accepted.
 
@@ -198,15 +198,15 @@ func runOAuthConnect(client *lib.APIClient, svc catalogueService) {
 		return
 	}
 
-	id, label, service := rec.ID, rec.Label, rec.Service
+	label, service := rec.Label, rec.Service
 	if label == "" {
 		label = rec.Name
 	}
 	if service == "" {
 		service = svc.Service
 	}
-	printConnected(id, label, service, raw, connectFormat, connectOutput)
-	confirmAddTo(client, service, label, id)
+	printConnected(label, service, raw, connectFormat, connectOutput)
+	confirmAddTo(client, service, label)
 }
 
 func pollConnectSession(client *lib.APIClient, token string, interval, timeout time.Duration, expiresAt time.Time) ([]byte, integrationRecord, error) {
@@ -231,8 +231,8 @@ func pollConnectSession(client *lib.APIClient, token string, interval, timeout t
 		status, intervalOverride := parseConnectStatus(resp.Body)
 		switch status {
 		case "complete":
-			id, label, service := extractConnectIdentity(resp.Body)
-			return resp.Body, integrationRecord{ID: id, Label: label, Name: label, Service: service}, nil
+			label, service := extractPublicIdentity(resp.Body)
+			return resp.Body, integrationRecord{Label: label, Name: label, Service: service}, nil
 		case "failed":
 			return nil, integrationRecord{}, fmt.Errorf("connect failed: %s", connectStatusMessage(resp.Body))
 		case "expired":
@@ -335,15 +335,15 @@ func runAPIKeyConnect(client *lib.APIClient, svc catalogueService) {
 		return
 	}
 
-	id, label, service := extractConnectIdentity(resp.Body)
+	label, service := extractPublicIdentity(resp.Body)
 	if service == "" {
 		service = svc.Service
 	}
 	if label == "" {
 		label = name
 	}
-	printConnected(id, label, service, resp.Body, connectFormat, connectOutput)
-	confirmAddTo(client, service, label, id)
+	printConnected(label, service, resp.Body, connectFormat, connectOutput)
+	confirmAddTo(client, service, label)
 }
 
 func runTelegramConnect(client *lib.APIClient, svc catalogueService) {
@@ -363,8 +363,8 @@ func runTelegramConnect(client *lib.APIClient, svc catalogueService) {
 	}
 	known := map[string]struct{}{}
 	for _, rec := range preList {
-		if rec.ID != "" {
-			known[rec.ID] = struct{}{}
+		if key := integrationPublicLabel(rec); key != "" {
+			known[key] = struct{}{}
 		}
 	}
 
@@ -385,19 +385,18 @@ func runTelegramConnect(client *lib.APIClient, svc catalogueService) {
 		}
 
 		if rec, ok := matchTelegramIntegration(records, known, connectName); ok {
-			id, label, service := rec.ID, integrationDisplayName(rec), rec.Service
+			label, service := integrationPublicLabel(rec), rec.Service
 			if service == "" {
 				service = "telegram"
 			}
-			// Prefer a single-record JSON body when formatting json.
 			matchRaw := raw
 			if connectFormat == "json" {
 				if encoded, err := json.Marshal(rec); err == nil {
 					matchRaw = encoded
 				}
 			}
-			printConnected(id, label, service, matchRaw, connectFormat, connectOutput)
-			confirmAddTo(client, service, label, id)
+			printConnected(label, service, matchRaw, connectFormat, connectOutput)
+			confirmAddTo(client, service, label)
 			return
 		}
 
@@ -409,13 +408,14 @@ func runTelegramConnect(client *lib.APIClient, svc catalogueService) {
 	}
 }
 
-func matchTelegramIntegration(records []integrationRecord, knownIDs map[string]struct{}, name string) (integrationRecord, bool) {
+func matchTelegramIntegration(records []integrationRecord, knownLabels map[string]struct{}, name string) (integrationRecord, bool) {
 	name = strings.TrimSpace(name)
 	for _, rec := range records {
-		if rec.ID == "" {
+		key := integrationPublicLabel(rec)
+		if key == "" {
 			continue
 		}
-		if _, exists := knownIDs[rec.ID]; exists {
+		if _, exists := knownLabels[key]; exists {
 			continue
 		}
 		if name != "" && rec.Name != name && rec.Label != name {
@@ -426,11 +426,11 @@ func matchTelegramIntegration(records []integrationRecord, knownIDs map[string]s
 	return integrationRecord{}, false
 }
 
-func confirmAddTo(client *lib.APIClient, service, label, id string) {
+func confirmAddTo(client *lib.APIClient, service, label string) {
 	if connectAddTo == "" {
 		return
 	}
-	if err := addToNotificationList(client, connectAddTo, service, label, id); err != nil {
+	if err := addToNotificationList(client, connectAddTo, service, label); err != nil {
 		failAndExit(fmt.Sprintf("Connected, but failed to add to notification list: %s", err))
 		return
 	}

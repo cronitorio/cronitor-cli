@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 
@@ -24,12 +25,13 @@ webhooks, and Telegram.
 Examples:
   cronitor integration list
   cronitor integration list --service slack
-  cronitor integration get slack:12
+  cronitor integration get Workspace
+  cronitor integration get Alerts --service slack
   cronitor integration services
   cronitor integration create --service discord --name "Alerts" --field url=https://example.com/webhook
   cronitor integration create --data '{"service":"opsgenie","name":"On-call","fields":{"api_key":"..."}}'
-  cronitor integration delete discord:44
-  cronitor integration delete discord:44 --force
+  cronitor integration delete Alerts
+  cronitor integration delete Alerts --force
 
 Use 'cronitor connect' to add an integration interactively (OAuth, API key, or Telegram).
 
@@ -86,7 +88,9 @@ func init() {
 	integrationCreateCmd.Flags().StringVarP(&integrationData, "data", "d", "", "JSON payload")
 	integrationCreateCmd.Flags().StringVarP(&integrationFile, "file", "f", "", "JSON file")
 
+	integrationGetCmd.Flags().StringVar(&integrationService, "service", "", "Service key to disambiguate the label")
 	integrationDeleteCmd.Flags().BoolVar(&integrationForce, "force", false, "Force delete (sends force=1)")
+	integrationDeleteCmd.Flags().StringVar(&integrationService, "service", "", "Service key to disambiguate the label")
 }
 
 func resetIntegrationFlags() {
@@ -148,13 +152,12 @@ Examples:
 		}
 
 		table := &UITable{
-			Headers: []string{"ID", "SERVICE", "NAME", "METHOD", "AVAILABLE"},
+			Headers: []string{"LABEL", "SERVICE", "METHOD", "AVAILABLE"},
 		}
 		for _, rec := range records {
 			table.Rows = append(table.Rows, []string{
-				rec.ID,
+				integrationPublicLabel(rec),
 				rec.Service,
-				integrationDisplayName(rec),
 				rec.Method,
 				strconv.FormatBool(rec.Available),
 			})
@@ -165,27 +168,33 @@ Examples:
 
 // --- GET ---
 var integrationGetCmd = &cobra.Command{
-	Use:   "get <id>",
-	Short: "Get a notification integration",
+	Use:   "get <label>",
+	Short: "Get a notification integration by unique label",
 	Long: `Get details for a specific integration.
 
-IDs use the form service:pk, for example discord:44 or slack:12.
+Address integrations by unique label (unique per org, service, and visibility).
+Pass --service when the same label exists on more than one service.
 
 Examples:
-  cronitor integration get slack:12
-  cronitor integration get discord:44 --format json`,
+  cronitor integration get Workspace
+  cronitor integration get Alerts --service slack
+  cronitor integration get Alerts --format json`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		id := args[0]
+		label := args[0]
 		client := newIntegrationAPIClient()
+		params := map[string]string{}
+		if integrationService != "" {
+			params["service"] = integrationService
+		}
 
-		resp, err := client.GET(fmt.Sprintf("/integrations/%s", id), nil)
+		resp, err := client.GET(fmt.Sprintf("/integrations/%s", url.PathEscape(label)), params)
 		if err != nil {
 			failAndExit(fmt.Sprintf("Failed to get integration: %s", err))
 			return
 		}
 		if resp.IsNotFound() {
-			failAndExit(fmt.Sprintf("Integration '%s' not found", id))
+			failAndExit(fmt.Sprintf("Integration '%s' not found", label))
 			return
 		}
 		if !resp.IsSuccess() {
@@ -266,53 +275,59 @@ Examples:
 			return
 		}
 
-		id, label, service := extractConnectIdentity(resp.Body)
-		if id == "" && label == "" {
+		label, service := extractPublicIdentity(resp.Body)
+		if label == "" && service == "" {
 			Success("Integration created")
 			return
 		}
-		display := label
-		if display == "" {
-			display = id
-		}
-		if id != "" && label != "" && id != label {
-			Success(fmt.Sprintf("Created %s %s (%s)", service, label, id))
+		if label != "" && service != "" {
+			Success(fmt.Sprintf("Created %s %s", service, label))
 			return
 		}
-		Success(fmt.Sprintf("Created integration %s", display))
+		if label != "" {
+			Success(fmt.Sprintf("Created %s", label))
+			return
+		}
+		Success(fmt.Sprintf("Created %s", service))
 	},
 }
 
 // --- DELETE ---
 var integrationDeleteCmd = &cobra.Command{
-	Use:   "delete <id>",
-	Short: "Delete a notification integration",
+	Use:   "delete <label>",
+	Short: "Delete a notification integration by unique label",
 	Long: `Delete a notification integration.
 
+Address integrations by unique label. Pass --service when the same label
+exists on more than one service.
+
 Examples:
-  cronitor integration delete slack:12
-  cronitor integration delete discord:44 --force`,
+  cronitor integration delete Workspace
+  cronitor integration delete Alerts --force`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		id := args[0]
+		label := args[0]
 		client := newIntegrationAPIClient()
 
 		params := map[string]string{}
 		if integrationForce {
 			params["force"] = "1"
 		}
+		if integrationService != "" {
+			params["service"] = integrationService
+		}
 
-		resp, err := client.DELETE(fmt.Sprintf("/integrations/%s", id), nil, params)
+		resp, err := client.DELETE(fmt.Sprintf("/integrations/%s", url.PathEscape(label)), nil, params)
 		if err != nil {
 			failAndExit(fmt.Sprintf("Failed to delete integration: %s", err))
 			return
 		}
 		if resp.IsNotFound() {
-			failAndExit(fmt.Sprintf("Integration '%s' not found", id))
+			failAndExit(fmt.Sprintf("Integration '%s' not found", label))
 			return
 		}
 		if resp.IsSuccess() {
-			Success(fmt.Sprintf("Integration '%s' deleted", id))
+			Success(fmt.Sprintf("Integration '%s' deleted", label))
 			return
 		}
 		failAndExit(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))

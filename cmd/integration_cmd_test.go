@@ -47,6 +47,12 @@ func TestIntegrationDeleteCommandFlags(t *testing.T) {
 	if integrationDeleteCmd.Flags().Lookup("force") == nil {
 		t.Error("Expected flag --force not found on integration delete")
 	}
+	if integrationDeleteCmd.Flags().Lookup("service") == nil {
+		t.Error("Expected flag --service not found on integration delete")
+	}
+	if integrationGetCmd.Flags().Lookup("service") == nil {
+		t.Error("Expected flag --service not found on integration get")
+	}
 }
 
 func TestIntegrationCommandAliases(t *testing.T) {
@@ -109,7 +115,7 @@ func TestIntegration_ListTableAndFilters(t *testing.T) {
 			gotPage = r.URL.Query().Get("page")
 			gotPageSize = r.URL.Query().Get("pageSize")
 			w.WriteHeader(200)
-			fmtWrite(w, `{"integrations":[{"id":"slack:12","service":"slack","service_name":"Slack","method":"oauth","name":"Workspace","label":"Workspace","available":true,"created":"2026-01-01T00:00:00Z"}]}`)
+			fmtWrite(w, `{"integrations":[{"service":"slack","service_name":"Slack","method":"oauth","name":"Workspace","label":"Workspace","available":true,"created":"2026-01-01T00:00:00Z"}]}`)
 			return
 		}
 		http.NotFound(w, r)
@@ -129,21 +135,29 @@ func TestIntegration_ListTableAndFilters(t *testing.T) {
 	if gotService != "slack" || gotPage != "2" || gotPageSize != "25" {
 		t.Errorf("expected query service=slack page=2 pageSize=25, got service=%q page=%q pageSize=%q", gotService, gotPage, gotPageSize)
 	}
-	for _, header := range []string{"ID", "SERVICE", "NAME", "METHOD", "AVAILABLE"} {
+	for _, header := range []string{"LABEL", "SERVICE", "METHOD", "AVAILABLE"} {
 		if !strings.Contains(output, header) {
 			t.Errorf("expected table header %q, got:\n%s", header, output)
 		}
 	}
-	if !strings.Contains(output, "slack:12") || !strings.Contains(output, "Workspace") {
+	if strings.Contains(output, " ID ") || strings.Contains(output, "ID  ") || strings.HasPrefix(strings.TrimSpace(output), "ID") {
+		t.Errorf("list table must not use an ID column, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Workspace") || !strings.Contains(output, "slack") {
 		t.Errorf("expected integration row, got:\n%s", output)
+	}
+	if strings.Contains(output, "slack:") {
+		t.Errorf("must not print composite pk ids, got:\n%s", output)
 	}
 }
 
 func TestIntegration_Get(t *testing.T) {
+	var gotService string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && r.URL.Path == "/integrations/discord:44" {
+		if r.Method == "GET" && r.URL.Path == "/integrations/Alerts" {
+			gotService = r.URL.Query().Get("service")
 			w.WriteHeader(200)
-			fmtWrite(w, `{"id":"discord:44","service":"discord","service_name":"Discord","method":"api_key","name":"Alerts","label":"Alerts","available":true}`)
+			fmtWrite(w, `{"service":"slack","service_name":"Slack","method":"oauth","name":"Alerts","label":"Alerts","available":true}`)
 			return
 		}
 		http.NotFound(w, r)
@@ -153,19 +167,25 @@ func TestIntegration_Get(t *testing.T) {
 	cleanup := withConnectTest(t, server.URL)
 	defer cleanup()
 
-	output, code, err := executeWithExit("integration", "get", "discord:44")
+	output, code, err := executeWithExit("integration", "get", "Alerts", "--service", "slack")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d\n%s", code, output)
 	}
+	if gotService != "slack" {
+		t.Errorf("expected service=slack query, got %q", gotService)
+	}
 	trimmed := strings.TrimSpace(output)
 	if !json.Valid([]byte(trimmed)) {
 		t.Errorf("expected JSON output, got:\n%s", output)
 	}
-	if !strings.Contains(output, "discord:44") {
-		t.Errorf("expected id in output, got:\n%s", output)
+	if !strings.Contains(output, "Alerts") {
+		t.Errorf("expected label in output, got:\n%s", output)
+	}
+	if strings.Contains(output, "discord:") || strings.Contains(output, "slack:") {
+		t.Errorf("must not print composite pk ids, got:\n%s", output)
 	}
 }
 
@@ -177,7 +197,7 @@ func TestIntegration_Create_FlagsAndFile(t *testing.T) {
 		if r.Method == "POST" && r.URL.Path == "/integrations" {
 			createBody = string(body)
 			w.WriteHeader(201)
-			fmtWrite(w, `{"id":"discord:44","service":"discord","name":"Alerts","label":"Alerts"}`)
+			fmtWrite(w, `{"service":"discord","name":"Alerts","label":"Alerts"}`)
 			return
 		}
 		http.NotFound(w, r)
@@ -233,7 +253,7 @@ func TestIntegration_Create_FormatJSON_ParseableOnly(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" && r.URL.Path == "/integrations" {
 			w.WriteHeader(201)
-			fmtWrite(w, `{"id":"discord:44","service":"discord","name":"Alerts","label":"Alerts"}`)
+			fmtWrite(w, `{"service":"discord","name":"Alerts","label":"Alerts"}`)
 			return
 		}
 		http.NotFound(w, r)
@@ -257,16 +277,20 @@ func TestIntegration_Create_FormatJSON_ParseableOnly(t *testing.T) {
 	if strings.Contains(output, "Created") {
 		t.Errorf("Created confirmation must not appear on stdout in --format json:\n%s", output)
 	}
-	if !strings.Contains(trimmed, "discord:44") {
-		t.Errorf("expected create payload in JSON stdout, got:\n%s", output)
+	if !strings.Contains(trimmed, "Alerts") {
+		t.Errorf("expected create payload label in JSON stdout, got:\n%s", output)
+	}
+	if strings.Contains(trimmed, "discord:") {
+		t.Errorf("JSON stdout must not teach composite pk ids, got:\n%s", output)
 	}
 }
 
 func TestIntegration_Delete_Force(t *testing.T) {
-	var force string
+	var force, service string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "DELETE" && r.URL.Path == "/integrations/discord:44" {
+		if r.Method == "DELETE" && r.URL.Path == "/integrations/Alerts" {
 			force = r.URL.Query().Get("force")
+			service = r.URL.Query().Get("service")
 			w.WriteHeader(204)
 			return
 		}
@@ -277,7 +301,7 @@ func TestIntegration_Delete_Force(t *testing.T) {
 	cleanup := withConnectTest(t, server.URL)
 	defer cleanup()
 
-	output, code, err := executeWithExit("integration", "delete", "discord:44", "--force")
+	output, code, err := executeWithExit("integration", "delete", "Alerts", "--force")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -287,8 +311,14 @@ func TestIntegration_Delete_Force(t *testing.T) {
 	if force != "1" {
 		t.Errorf("expected force=1 query param, got %q", force)
 	}
-	if !strings.Contains(output, "discord:44") {
-		t.Errorf("expected deleted id in output, got:\n%s", output)
+	if service != "" {
+		t.Errorf("expected no service query when --service is omitted, got %q", service)
+	}
+	if !strings.Contains(output, "Alerts") {
+		t.Errorf("expected deleted label in output, got:\n%s", output)
+	}
+	if strings.Contains(output, "discord:") {
+		t.Errorf("must not print composite pk ids, got:\n%s", output)
 	}
 }
 
@@ -296,7 +326,7 @@ func TestIntegration_ListJSONOutputToFile(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && r.URL.Path == "/integrations" {
 			w.WriteHeader(200)
-			fmtWrite(w, `{"integrations":[{"id":"slack:12","service":"slack","label":"Workspace"}]}`)
+			fmtWrite(w, `{"integrations":[{"service":"slack","label":"Workspace"}]}`)
 			return
 		}
 		http.NotFound(w, r)
@@ -321,10 +351,13 @@ func TestIntegration_ListJSONOutputToFile(t *testing.T) {
 	if !json.Valid(bytesTrim(data)) {
 		t.Errorf("expected valid JSON in file, got %s", data)
 	}
-	if !strings.Contains(string(data), "slack:12") {
-		t.Errorf("expected file to contain slack:12, got %s", data)
+	if !strings.Contains(string(data), "Workspace") {
+		t.Errorf("expected file to contain Workspace, got %s", data)
 	}
-	if strings.Contains(output, `"slack:12"`) {
+	if strings.Contains(string(data), "slack:") {
+		t.Errorf("file must not teach composite pk ids, got %s", data)
+	}
+	if strings.Contains(output, `"Workspace"`) {
 		t.Error("expected stdout not to contain JSON when writing to a file")
 	}
 }
