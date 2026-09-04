@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -119,10 +120,26 @@ func initConfig() {
 		viper.SetConfigName("cronitor")
 	}
 
-	// If a config file is found, read it in.
+	// If a config file is found, read it in. A missing file is normal. A file
+	// that exists but cannot be read (permissions, a directory, bad JSON) is
+	// reported once so a job does not silently run without its settings.
 	if err := viper.ReadInConfig(); err == nil {
 		log("Reading config from " + viper.ConfigFileUsed())
+	} else if !configFileMissing(err) {
+		path := configFile
+		if path == "" {
+			path = configFilePath()
+		}
+		fmt.Fprintf(os.Stderr, "Warning: could not read config file %s: %v\n", path, err)
 	}
+}
+
+func configFileMissing(err error) bool {
+	var notFound viper.ConfigFileNotFoundError
+	if errors.As(err, &notFound) {
+		return true
+	}
+	return errors.Is(err, fs.ErrNotExist)
 }
 
 func sendPing(endpoint string, uniqueIdentifier string, message string, series string, timestamp float64, duration *float64, exitCode *int, metrics map[string]int, schedule string, group *sync.WaitGroup) {

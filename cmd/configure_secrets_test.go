@@ -179,3 +179,30 @@ func TestConfigure_WritesNewKeyWithoutDroppingSettings(t *testing.T) {
 		t.Errorf("exclude-text: got %#v", got.ExcludeText)
 	}
 }
+
+func TestInitConfig_ReportsUnreadableConfigFile(t *testing.T) {
+	prev := viper.GetString(varConfig)
+	t.Cleanup(func() {
+		viper.Set(varConfig, prev)
+		viper.SetConfigFile("")
+	})
+
+	// A directory at the config path exists but cannot be read as a file.
+	dir := filepath.Join(t.TempDir(), "cronitor.json")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	viper.Set(varConfig, dir)
+	_, stderr := captureOutput(t, initConfig)
+	if !strings.Contains(stderr, "could not read") || !strings.Contains(stderr, dir) {
+		t.Errorf("expected an unreadable-config notice naming the path, stderr:\n%s", stderr)
+	}
+
+	// A missing file is the normal case for a fresh install and stays silent.
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	viper.Set(varConfig, missing)
+	_, stderr = captureOutput(t, initConfig)
+	if stderr != "" {
+		t.Errorf("missing config file must stay silent, stderr:\n%s", stderr)
+	}
+}
