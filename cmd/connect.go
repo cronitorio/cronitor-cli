@@ -153,38 +153,24 @@ func runOAuthConnect(client *lib.APIClient, svc catalogueService) {
 	}
 
 	var start struct {
-		AuthorizeURL     string          `json:"authorize_url"`
-		AuthorizationURL string          `json:"authorization_url"`
-		URL              string          `json:"url"`
-		Token            string          `json:"token"`
-		ExpiresAt        string          `json:"expires_at"`
-		PollInterval     json.RawMessage `json:"poll_interval"`
-		Instructions     string          `json:"instructions"`
-		Message          string          `json:"message"`
-		HelpText         string          `json:"help_text"`
+		AuthorizeURL string  `json:"authorize_url"`
+		Token        string  `json:"token"`
+		ExpiresAt    string  `json:"expires_at"`
+		PollInterval float64 `json:"poll_interval"`
 	}
 	if err := json.Unmarshal(resp.Body, &start); err != nil {
 		failAndExit(fmt.Sprintf("Failed to parse connect session: %s", err))
 		return
 	}
-
-	authorizeURL := start.AuthorizeURL
-	if authorizeURL == "" {
-		authorizeURL = start.AuthorizationURL
-	}
-	if authorizeURL == "" {
-		authorizeURL = start.URL
-	}
-	if authorizeURL == "" || start.Token == "" {
+	if start.AuthorizeURL == "" || start.Token == "" {
 		failAndExit("Connect session did not include authorize_url and token")
 		return
 	}
 
-	connectHumanPrintln(authorizeURL)
-	printInstructions(start.Instructions, start.Message, start.HelpText)
+	connectHumanPrintln(start.AuthorizeURL)
 
 	if !connectNoBrowser {
-		openBrowserFn(authorizeURL)
+		openBrowserFn(start.AuthorizeURL)
 	}
 
 	timeout, err := parseTimeoutFlag(connectTimeout)
@@ -193,7 +179,7 @@ func runOAuthConnect(client *lib.APIClient, svc catalogueService) {
 		return
 	}
 
-	raw, rec, err := pollConnectSession(client, start.Token, defaultPollInterval(durationFromJSON(start.PollInterval)), timeout, parseExpiresAt(start.ExpiresAt))
+	raw, rec, err := pollConnectSession(client, start.Token, defaultPollInterval(secondsToDuration(start.PollInterval)), timeout, parseExpiresAt(start.ExpiresAt))
 	if err != nil {
 		failAndExit(err.Error())
 		return
@@ -229,8 +215,7 @@ func pollConnectSession(client *lib.APIClient, token string, interval, timeout t
 			return nil, integrationRecord{}, fmt.Errorf("API Error (%d): %s", resp.StatusCode, resp.ParseError())
 		}
 
-		status, intervalOverride := parseConnectStatus(resp.Body)
-		switch status {
+		switch parseConnectStatus(resp.Body) {
 		case "complete":
 			label, service := extractPublicIdentity(resp.Body)
 			return resp.Body, integrationRecord{Label: label, Name: label, Service: service}, nil
@@ -240,10 +225,7 @@ func pollConnectSession(client *lib.APIClient, token string, interval, timeout t
 			return nil, integrationRecord{}, fmt.Errorf("connect session expired")
 		}
 
-		// pending, claimed, or any other non-terminal status: keep polling
-		if intervalOverride > 0 {
-			interval = intervalOverride
-		}
+		// pending or any other non-terminal status: keep polling
 		sleepForPoll(interval, deadline)
 		if !nowFn().Before(deadline) {
 			return nil, integrationRecord{}, fmt.Errorf("connect timed out")
@@ -251,29 +233,22 @@ func pollConnectSession(client *lib.APIClient, token string, interval, timeout t
 	}
 }
 
-func parseConnectStatus(body []byte) (string, time.Duration) {
+func parseConnectStatus(body []byte) string {
 	var payload struct {
-		Status       string          `json:"status"`
-		PollInterval json.RawMessage `json:"poll_interval"`
+		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", 0
+		return ""
 	}
-	return strings.ToLower(strings.TrimSpace(payload.Status)), durationFromJSON(payload.PollInterval)
+	return strings.ToLower(strings.TrimSpace(payload.Status))
 }
 
 func connectStatusMessage(body []byte) string {
 	var payload struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
+		Error string `json:"error"`
 	}
-	if json.Unmarshal(body, &payload) == nil {
-		if payload.Error != "" {
-			return payload.Error
-		}
-		if payload.Message != "" {
-			return payload.Message
-		}
+	if json.Unmarshal(body, &payload) == nil && payload.Error != "" {
+		return payload.Error
 	}
 	return "session failed"
 }
@@ -348,7 +323,7 @@ func runAPIKeyConnect(client *lib.APIClient, svc catalogueService) {
 }
 
 func runTelegramConnect(client *lib.APIClient, svc catalogueService) {
-	printTelegramInstructions(svc)
+	printTelegramInstructions()
 
 	timeout, err := parseTimeoutFlag(connectTimeout)
 	if err != nil {
@@ -459,30 +434,9 @@ func connectInfo(msg string) {
 	Info(msg)
 }
 
-func printTelegramInstructions(svc catalogueService) {
-	if printInstructions(svc.Instructions, svc.Message, svc.HelpText) {
-		return
-	}
+func printTelegramInstructions() {
 	connectHumanPrintln(`To connect Telegram:
-1. Open Telegram and start a chat with the Cronitor bot
+1. Open Telegram and start a chat with the Cronitor Telegram bot
 2. Follow the bot instructions to link this Cronitor account
 3. This command will detect the new integration automatically`)
-}
-
-func printInstructions(values ...string) bool {
-	seen := map[string]struct{}{}
-	printed := false
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		connectHumanPrintln(value)
-		printed = true
-	}
-	return printed
 }

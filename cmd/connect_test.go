@@ -105,7 +105,7 @@ func catalogueJSON() string {
     {"service":"discord","service_name":"Discord","type":"Messaging","method":"apikey","fields":{"key":"Webhook URL"},"available":true},
     {"service":"opsgenie","service_name":"Opsgenie","type":"api_key","method":"api_key","fields":{"api_key":{"label":"API Key","secret":true,"required":true}},"available":true},
     {"service":"webhook","service_name":"Webhook","type":"Messaging","method":"apikey","fields":{"key":"URL","username":"Username (optional)","password":"Password (optional)"},"available":true},
-    {"service":"telegram","service_name":"Telegram","type":"telegram","method":"telegram","fields":{},"available":true,"instructions":"Message the Cronitor Telegram bot to finish connecting."}
+    {"service":"telegram","service_name":"Telegram","type":"Messaging","method":"link","fields":{"type":"Type"},"available":true}
   ]
 }`
 }
@@ -459,7 +459,7 @@ func TestConnect_Telegram_MatchByLabelDiff(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d\n%s", code, output)
 	}
-	if !strings.Contains(output, "Cronitor Telegram bot") && !strings.Contains(output, "Message the Cronitor Telegram bot") {
+	if !strings.Contains(output, "Cronitor Telegram bot") {
 		t.Errorf("expected Telegram bot instructions, got:\n%s", output)
 	}
 	if !strings.Contains(output, "New Bot") {

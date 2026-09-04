@@ -165,15 +165,12 @@ func isSecretFieldKey(k string) bool {
 }
 
 type catalogueService struct {
-	Service      string          `json:"service"`
-	ServiceName  string          `json:"service_name"`
-	Type         string          `json:"type"`
-	Method       string          `json:"method"`
-	Fields       json.RawMessage `json:"fields"`
-	Available    bool            `json:"available"`
-	Instructions string          `json:"instructions"`
-	Message      string          `json:"message"`
-	HelpText     string          `json:"help_text"`
+	Service     string          `json:"service"`
+	ServiceName string          `json:"service_name"`
+	Type        string          `json:"type"`
+	Method      string          `json:"method"`
+	Fields      json.RawMessage `json:"fields"`
+	Available   bool            `json:"available"`
 }
 
 type catalogueField struct {
@@ -378,23 +375,13 @@ func catalogueServiceKeys(services []catalogueService) []string {
 	return keys
 }
 
+// connectFlowFor maps the catalogue method to a connect flow. The API uses
+// oauth (slack, pagerduty), link (telegram), and apikey for everything else.
 func connectFlowFor(svc catalogueService) string {
-	method := strings.ToLower(strings.TrimSpace(svc.Method))
-	if method == "" {
-		method = strings.ToLower(strings.TrimSpace(svc.Type))
-	}
-	switch svc.Service {
-	case "telegram":
-		return "telegram"
-	case "slack", "pagerduty":
-		if method == "" {
-			return "oauth"
-		}
-	}
-	switch method {
-	case "oauth", "connect", "browser", "authorization":
+	switch strings.ToLower(strings.TrimSpace(svc.Method)) {
+	case "oauth":
 		return "oauth"
-	case "telegram":
+	case "link":
 		return "telegram"
 	default:
 		return "apikey"
@@ -406,13 +393,9 @@ func renderServicesTable(services []catalogueService) string {
 		Headers: []string{"SERVICE", "METHOD", "AVAILABLE"},
 	}
 	for _, s := range services {
-		method := s.Method
-		if method == "" {
-			method = s.Type
-		}
 		table.Rows = append(table.Rows, []string{
 			s.Service,
-			method,
+			s.Method,
 			strconv.FormatBool(s.Available),
 		})
 	}
@@ -437,39 +420,12 @@ func listIntegrations(client *lib.APIClient, params map[string]string) ([]integr
 
 func parseIntegrationList(body []byte) ([]integrationRecord, error) {
 	var wrapper struct {
-		Integrations []integrationRecord `json:"integrations"`
-		Results      []integrationRecord `json:"results"`
+		Integrations *[]integrationRecord `json:"integrations"`
 	}
-	if err := json.Unmarshal(body, &wrapper); err == nil {
-		if len(wrapper.Integrations) > 0 {
-			return wrapper.Integrations, nil
-		}
-		if len(wrapper.Results) > 0 {
-			return wrapper.Results, nil
-		}
-		// Distinguish empty list object from a single record.
-		var probe map[string]json.RawMessage
-		if json.Unmarshal(body, &probe) == nil {
-			if _, ok := probe["integrations"]; ok {
-				return []integrationRecord{}, nil
-			}
-			if _, ok := probe["results"]; ok {
-				return []integrationRecord{}, nil
-			}
-		}
+	if err := json.Unmarshal(body, &wrapper); err != nil || wrapper.Integrations == nil {
+		return nil, fmt.Errorf("failed to parse integrations list")
 	}
-
-	var arr []integrationRecord
-	if err := json.Unmarshal(body, &arr); err == nil {
-		return arr, nil
-	}
-
-	var single integrationRecord
-	if err := json.Unmarshal(body, &single); err == nil && (single.Label != "" || single.Name != "" || single.Service != "") {
-		return []integrationRecord{single}, nil
-	}
-
-	return nil, fmt.Errorf("failed to parse integrations list")
+	return *wrapper.Integrations, nil
 }
 
 // integrationNotFoundError is returned when no visible integration matches a label.
@@ -494,21 +450,11 @@ func (e integrationAmbiguousError) Error() string {
 func rawIntegrationItems(body []byte) []json.RawMessage {
 	var wrapper struct {
 		Integrations []json.RawMessage `json:"integrations"`
-		Results      []json.RawMessage `json:"results"`
 	}
-	if json.Unmarshal(body, &wrapper) == nil {
-		if len(wrapper.Integrations) > 0 {
-			return wrapper.Integrations
-		}
-		if len(wrapper.Results) > 0 {
-			return wrapper.Results
-		}
+	if json.Unmarshal(body, &wrapper) != nil {
+		return nil
 	}
-	var arr []json.RawMessage
-	if json.Unmarshal(body, &arr) == nil {
-		return arr
-	}
-	return nil
+	return wrapper.Integrations
 }
 
 // resolveIntegrationByLabel finds exactly one integration through the list
@@ -582,43 +528,20 @@ func parseTimeoutFlag(s string) (time.Duration, error) {
 	return 0, fmt.Errorf("invalid --timeout %q (use a duration like 15m or 30s)", s)
 }
 
+// parseExpiresAt reads the ISO 8601 timestamp the API returns for expires_at.
 func parseExpiresAt(s string) time.Time {
-	s = strings.TrimSpace(s)
-	if s == "" {
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(s))
+	if err != nil {
 		return time.Time{}
 	}
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05Z07:00", "2006-01-02 15:04:05"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t
-		}
-	}
-	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
-		if n > 1e12 {
-			return time.UnixMilli(n)
-		}
-		return time.Unix(n, 0)
-	}
-	return time.Time{}
+	return t
 }
 
-func durationFromJSON(raw json.RawMessage) time.Duration {
-	if len(raw) == 0 || string(raw) == "null" {
+func secondsToDuration(n float64) time.Duration {
+	if n <= 0 {
 		return 0
 	}
-	var n float64
-	if json.Unmarshal(raw, &n) == nil && n > 0 {
-		return time.Duration(n * float64(time.Second))
-	}
-	var s string
-	if json.Unmarshal(raw, &s) == nil && s != "" {
-		if d, err := time.ParseDuration(s); err == nil {
-			return d
-		}
-		if i, err := strconv.Atoi(s); err == nil && i > 0 {
-			return time.Duration(i) * time.Second
-		}
-	}
-	return 0
+	return time.Duration(n * float64(time.Second))
 }
 
 func defaultPollInterval(d time.Duration) time.Duration {
@@ -743,12 +666,6 @@ func parseNotificationListObject(body []byte) (map[string]interface{}, error) {
 	var list map[string]interface{}
 	if err := json.Unmarshal(body, &list); err != nil {
 		return nil, err
-	}
-	if _, ok := list["notifications"]; ok {
-		return list, nil
-	}
-	if inner, ok := list["template"].(map[string]interface{}); ok {
-		return inner, nil
 	}
 	return list, nil
 }
