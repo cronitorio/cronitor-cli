@@ -72,3 +72,25 @@ JSON
   [ "$status" -eq 0 ]
   grep -q "^monitor list .*-k secret123" "$STUB_CALLS"
 }
+
+@test "Cleanup strips carriage returns that jq emits on Windows" {
+  cat > "$STUB_LIST_RESPONSES/1.json" <<'JSON'
+{"monitors": [
+  {"key": "aaa111", "name": "[runnervmtest1] true", "type": "job"},
+  {"key": "bbb222", "name": "[runnervmtest1] false", "type": "job"}
+], "page_info": {"page": 1, "pageSize": 100, "totalMonitorCount": 2}}
+JSON
+
+  # Wrap the real jq so every output line ends in CRLF, as on MSYS2.
+  REAL_JQ="$(command -v jq)"
+  cat > "$STUB_DIR/jq" <<WRAP
+#!/usr/bin/env bash
+"$REAL_JQ" "\$@" | sed 's/\$/\r/'
+WRAP
+  chmod +x "$STUB_DIR/jq"
+
+  PATH="$STUB_DIR:$PATH" run ./cleanup-ci-monitors.sh runnervmtest1
+  [ "$status" -eq 0 ]
+  grep -qE "^monitor delete( -k [^ ]+)? aaa111 bbb222$" "$STUB_CALLS"
+  ! grep -q $'\r' "$STUB_CALLS"
+}

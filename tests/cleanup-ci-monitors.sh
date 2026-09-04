@@ -36,7 +36,8 @@ total_deleted=0
 for _ in $(seq 1 $MAX_ROUNDS); do
   keys=$("$CRONITOR_BIN" monitor list --search "$TARGET_HOST" --format json --page-size 100 "${api_key_args[@]}" \
     | jq -r --arg p "$name_prefix" \
-        '.monitors[] | select(.name | (startswith("[" + $p + "] ") or startswith($p + "/"))) | .key')
+        '.monitors[] | select(.name | (startswith("[" + $p + "] ") or startswith($p + "/"))) | .key' \
+    | tr -d '\r')
 
   if [ -z "$keys" ]; then
     break
