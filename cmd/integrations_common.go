@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -19,6 +20,7 @@ var (
 	sleepFn       = time.Sleep
 	openBrowserFn = openBrowser
 	readSecretFn  = readSecretFromTerminal
+	readLineFn    = readLineFromTerminal
 	nowFn         = time.Now
 )
 
@@ -210,6 +212,35 @@ func readSecretFromTerminal(prompt string) (string, error) {
 	return string(pw), nil
 }
 
+// readLineFromTerminal prompts on stderr and reads one echoed line from stdin.
+// It is used for catalogue fields that are not secrets, such as a username.
+func readLineFromTerminal(prompt string) (string, error) {
+	fmt.Fprint(os.Stderr, prompt)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && line == "" {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
+}
+
+// catalogueFieldIsOptional reads the server's string-shaped catalogue, which
+// marks optional fields in the label ("Username (optional)").
+func catalogueFieldIsOptional(label string) bool {
+	return strings.Contains(strings.ToLower(label), "optional")
+}
+
+// catalogueFieldIsSecret decides the prompt style when the catalogue gives no
+// explicit flag. Everything is hidden except a short allowlist of plain
+// identifiers; "key" is always a webhook URL or API key on this API.
+func catalogueFieldIsSecret(key string) bool {
+	switch strings.ToLower(key) {
+	case "username", "user", "oncall_team", "team", "channel", "name", "type", "email":
+		return false
+	default:
+		return true
+	}
+}
+
 func parseFieldFlags(fields []string) (map[string]string, error) {
 	out := make(map[string]string)
 	for _, f := range fields {
@@ -237,7 +268,7 @@ func parseCatalogueFields(raw json.RawMessage) []catalogueField {
 		sort.Strings(keys)
 		fields := make([]catalogueField, 0, len(keys))
 		for _, k := range keys {
-			f := catalogueField{Key: k, Label: k, Required: true, Secret: true}
+			f := catalogueField{Key: k, Label: k, Required: true, Secret: catalogueFieldIsSecret(k)}
 			var obj struct {
 				Label    string `json:"label"`
 				Name     string `json:"name"`
@@ -265,6 +296,7 @@ func parseCatalogueFields(raw json.RawMessage) []catalogueField {
 				var s string
 				if json.Unmarshal(asMap[k], &s) == nil && s != "" {
 					f.Label = s
+					f.Required = !catalogueFieldIsOptional(s)
 				}
 			}
 			fields = append(fields, f)
@@ -290,7 +322,7 @@ func parseCatalogueFields(raw json.RawMessage) []catalogueField {
 			if key == "" {
 				continue
 			}
-			f := catalogueField{Key: key, Label: key, Required: true, Secret: true}
+			f := catalogueField{Key: key, Label: key, Required: true, Secret: catalogueFieldIsSecret(key)}
 			if item.Label != "" {
 				f.Label = item.Label
 			} else if item.Name != "" && item.Key != "" {
@@ -612,7 +644,11 @@ func promptCatalogueFields(fields []catalogueField, provided map[string]string) 
 		if field.Help != "" {
 			fmt.Fprintln(os.Stderr, field.Help)
 		}
-		val, err := readSecretFn(fmt.Sprintf("%s: ", label))
+		read := readSecretFn
+		if !field.Secret {
+			read = readLineFn
+		}
+		val, err := read(fmt.Sprintf("%s: ", label))
 		if err != nil {
 			if field.Required {
 				return nil, fmt.Errorf("required field %q not provided (use --field %s=<value> or run in a terminal)", field.Key, field.Key)

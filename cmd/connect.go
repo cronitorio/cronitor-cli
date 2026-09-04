@@ -26,8 +26,9 @@ OAuth services (slack, pagerduty):
 
 API-key services (discord, microsoft-teams, gchat, larksuite, opsgenie,
 victorops, datadog-on-call, webhook):
-  Prompts for catalogue fields (input is hidden) unless provided with --field,
-  then creates the integration.
+  Prompts for catalogue fields unless provided with --field, then creates the
+  integration. Secret values are not echoed. Fields the catalogue marks
+  "(optional)" can be left empty.
 
 Telegram:
   Prints bot instructions and waits for a new Telegram integration. A match is

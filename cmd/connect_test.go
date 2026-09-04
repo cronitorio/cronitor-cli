@@ -34,8 +34,10 @@ func withConnectTest(t *testing.T, mockURL string) func() {
 	oldSleep := sleepFn
 	oldOpen := openBrowserFn
 	oldSecret := readSecretFn
+	oldLine := readLineFn
 	oldNow := nowFn
 	sleepFn = func(time.Duration) {}
+	readLineFn = func(string) (string, error) { return "", nil }
 	openBrowserFn = func(string) {}
 	resetSecretRedaction()
 	verbose = false
@@ -49,6 +51,7 @@ func withConnectTest(t *testing.T, mockURL string) func() {
 		sleepFn = oldSleep
 		openBrowserFn = oldOpen
 		readSecretFn = oldSecret
+		readLineFn = oldLine
 		nowFn = oldNow
 		verbose = false
 		viper.Set("CRONITOR_LOG", "")
@@ -99,9 +102,9 @@ func catalogueJSON() string {
   "services": [
     {"service":"slack","service_name":"Slack","type":"oauth","method":"oauth","fields":{},"available":true},
     {"service":"pagerduty","service_name":"PagerDuty","type":"oauth","method":"oauth","fields":{},"available":true},
-    {"service":"discord","service_name":"Discord","type":"webhook","method":"api_key","fields":{"url":{"label":"Webhook URL","secret":true,"required":true}},"available":true},
+    {"service":"discord","service_name":"Discord","type":"Messaging","method":"apikey","fields":{"key":"Webhook URL"},"available":true},
     {"service":"opsgenie","service_name":"Opsgenie","type":"api_key","method":"api_key","fields":{"api_key":{"label":"API Key","secret":true,"required":true}},"available":true},
-    {"service":"webhook","service_name":"Webhook","type":"webhook","method":"api_key","fields":{"url":{"label":"URL","secret":true,"required":true}},"available":true},
+    {"service":"webhook","service_name":"Webhook","type":"Messaging","method":"apikey","fields":{"key":"URL","username":"Username (optional)","password":"Password (optional)"},"available":true},
     {"service":"telegram","service_name":"Telegram","type":"telegram","method":"telegram","fields":{},"available":true,"instructions":"Message the Cronitor Telegram bot to finish connecting."}
   ]
 }`
@@ -602,7 +605,7 @@ func TestConnect_AddTo_WebhookUsesPluralKey(t *testing.T) {
 	cleanup := withConnectTest(t, server.URL)
 	defer cleanup()
 
-	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook", "--field", "url=https://example.com/hook", "--add-to", "default")
+	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook", "--field", "key=https://example.com/hook", "--add-to", "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -662,7 +665,7 @@ func TestConnect_AddTo_DedupeSkipsExisting(t *testing.T) {
 	cleanup := withConnectTest(t, server.URL)
 	defer cleanup()
 
-	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook", "--field", "url=https://example.com/hook", "--add-to", "default")
+	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook", "--field", "key=https://example.com/hook", "--add-to", "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -698,7 +701,7 @@ func TestConnect_AddTo_UnverifiedDoesNotPrintAdded(t *testing.T) {
 	cleanup := withConnectTest(t, server.URL)
 	defer cleanup()
 
-	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook", "--field", "url=https://example.com/hook", "--add-to", "default")
+	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook", "--field", "key=https://example.com/hook", "--add-to", "default")
 	if err != nil && code == 0 {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -751,6 +754,83 @@ func TestConnect_SecretsRedactedFromVerboseAndLog(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"label":"API Key"`) {
 		t.Errorf("catalogue fields metadata must remain visible as \"label\":\"API Key\" under --verbose/--log, got:\n%s", data)
+	}
+}
+
+func TestParseCatalogueFields_ServerStringShape(t *testing.T) {
+	fields := parseCatalogueFields(json.RawMessage(`{"key":"URL","username":"Username (optional)","password":"Password (optional)"}`))
+	byKey := map[string]catalogueField{}
+	for _, f := range fields {
+		byKey[f.Key] = f
+	}
+	if len(byKey) != 3 {
+		t.Fatalf("expected 3 fields, got %#v", fields)
+	}
+	if f := byKey["key"]; !f.Required || !f.Secret || f.Label != "URL" {
+		t.Errorf("key should be required and secret with label URL, got %#v", f)
+	}
+	if f := byKey["username"]; f.Required || f.Secret {
+		t.Errorf("username should be optional and not secret, got %#v", f)
+	}
+	if f := byKey["password"]; f.Required || !f.Secret {
+		t.Errorf("password should be optional and secret, got %#v", f)
+	}
+}
+
+func TestConnect_Webhook_OptionalFieldsNotRequired(t *testing.T) {
+	var createBody string
+	var secretPrompts, linePrompts []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/integrations/services":
+			w.WriteHeader(200)
+			fmtWrite(w, catalogueJSON())
+		case r.Method == "POST" && r.URL.Path == "/integrations":
+			createBody = string(body)
+			w.WriteHeader(201)
+			fmtWrite(w, `{"service":"webhook","name":"Hook","label":"Hook"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cleanup := withConnectTest(t, server.URL)
+	defer cleanup()
+	readSecretFn = func(prompt string) (string, error) {
+		secretPrompts = append(secretPrompts, prompt)
+		return "", nil
+	}
+	readLineFn = func(prompt string) (string, error) {
+		linePrompts = append(linePrompts, prompt)
+		return "relay", nil
+	}
+
+	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook", "--field", "key=https://example.com/hook")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("expected exit 0 when optional fields are left empty, got %d\n%s", code, output)
+	}
+	if !strings.Contains(strings.Join(linePrompts, "\n"), "Username") {
+		t.Errorf("username is not a secret and should use the echoing prompt, got line=%#v secret=%#v", linePrompts, secretPrompts)
+	}
+	if !strings.Contains(strings.Join(secretPrompts, "\n"), "Password") {
+		t.Errorf("password should use the hidden prompt, got secret=%#v", secretPrompts)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(createBody), &payload); err != nil {
+		t.Fatalf("create body is not JSON: %s", createBody)
+	}
+	fields, _ := payload["fields"].(map[string]interface{})
+	if fields["key"] != "https://example.com/hook" || fields["username"] != "relay" {
+		t.Errorf("expected key and username in fields, got %#v", fields)
+	}
+	if _, ok := fields["password"]; ok {
+		t.Errorf("empty optional password must be omitted, got %#v", fields)
 	}
 }
 
