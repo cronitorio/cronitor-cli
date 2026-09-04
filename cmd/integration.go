@@ -28,8 +28,8 @@ Examples:
   cronitor integration get Workspace
   cronitor integration get Alerts --service slack
   cronitor integration services
-  cronitor integration create --service discord --name "Alerts" --field url=https://example.com/webhook
-  cronitor integration create --data '{"service":"opsgenie","name":"On-call","fields":{"api_key":"..."}}'
+  cronitor integration create --service discord --name "Alerts" --field key=https://example.com/webhook
+  cronitor integration create --data '{"service":"opsgenie","name":"On-call","fields":{"key":"..."}}'
   cronitor integration delete Alerts
   cronitor integration delete Alerts --force
 
@@ -231,8 +231,8 @@ var integrationCreateCmd = &cobra.Command{
 	Long: `Create a notification integration from flags or a JSON payload.
 
 Examples:
-  cronitor integration create --service discord --name "Alerts" --field url=https://example.com/webhook
-  cronitor integration create --service opsgenie --name "On-call" --field api_key=SECRET --identifier team-a
+  cronitor integration create --service discord --name "Alerts" --field key=https://example.com/webhook
+  cronitor integration create --service opsgenie --name "On-call" --field key=SECRET --identifier team-a
   cronitor integration create --data '{"service":"webhook","name":"Hook","fields":{"url":"https://example.com"}}'
   cronitor integration create --file integration.json`,
 	Run: func(cmd *cobra.Command, args []string) {

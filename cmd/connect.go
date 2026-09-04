@@ -42,7 +42,7 @@ Examples:
   cronitor connect slack
   cronitor connect slack --no-browser
   cronitor connect pagerduty --timeout 10m --add-to default
-  cronitor connect opsgenie --name "On-call" --field api_key=SECRET
+  cronitor connect opsgenie --name "On-call" --field key=SECRET
   cronitor connect telegram
   cronitor connect telegram --name "On-call bot"`,
 	Args: func(cmd *cobra.Command, args []string) error {

@@ -105,7 +105,7 @@ cronitor connect                                      # List available services
 cronitor connect slack                                # OAuth: print URL, open browser, wait
 cronitor connect slack --no-browser                   # Print authorize URL only
 cronitor connect pagerduty --timeout 10m --add-to default
-cronitor connect opsgenie --name "On-call" --field api_key=SECRET
+cronitor connect opsgenie --name "On-call" --field key=SECRET
 cronitor connect telegram                             # Print bot instructions; wait for a new label
 cronitor connect telegram --name "On-call bot"        # Wait for a new label that matches
 
@@ -114,11 +114,15 @@ cronitor integration list --service slack
 cronitor integration get Workspace
 cronitor integration get Alerts --service slack
 cronitor integration services
-cronitor integration create --service discord --name "Alerts" --field url=https://example.com/webhook
-cronitor integration create -d '{"service":"webhook","name":"Hook","fields":{"url":"https://example.com"}}'
+cronitor integration create --service discord --name "Alerts" --field key=https://example.com/webhook
+cronitor integration create -d '{"service":"webhook","name":"Hook","fields":{"key":"https://example.com"}}'
 cronitor integration delete Alerts
 cronitor integration delete Alerts --force
 ```
+
+Field names come from `cronitor integration services`. Most API-key services take a single `key`
+(the webhook URL or API key). Omit `--field` to be prompted; values passed with `--field` are
+visible in shell history.
 
 #### Groups
 
