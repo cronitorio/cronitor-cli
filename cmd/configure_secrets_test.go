@@ -34,9 +34,18 @@ func resetConfigureTestState(t *testing.T) {
 	viper.Set(varMCPEnabled, false)
 	viper.Set("CRONITOR_CORS_ALLOWED_ORIGINS", "")
 	viper.Set("mcp_instances", nil)
+	prevConfig := viper.GetString(varConfig)
 	t.Cleanup(func() {
 		verbose = false
 		persistTestHook = nil
+		// Leave no fake credentials in viper for later test files. Other
+		// tests gate live API calls on the API key being set.
+		viper.Set(varApiKey, "")
+		viper.Set(varPingApiKey, "")
+		viper.Set(varDashUsername, "")
+		viper.Set(varDashPassword, "")
+		viper.Set(varConfig, prevConfig)
+		viper.Set("mcp_instances", nil)
 	})
 }
 
