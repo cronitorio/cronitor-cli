@@ -18,7 +18,7 @@ const configModeOwnerOnly os.FileMode = 0600
 // failures). This text is for when the write itself cannot complete.
 const configMigrationGuidance = `Use --config or CRONITOR_CONFIG if you need a user-writable config file.
 Preferred: inject CRONITOR_API_KEY and CRONITOR_PING_API_KEY in the crontab or service environment (do not store keys in the JSON file).
-On Windows, set those variables on the scheduled task or Windows service. A later save rewrites the JSON file as owner-only.`
+On Windows, set those variables on the scheduled task or Windows service.`
 
 // configSharedReadableNotice is printed to stderr after a save leaves a
 // credential file readable by users other than its owner. It never changes
