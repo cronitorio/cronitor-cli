@@ -556,8 +556,13 @@ func promptCatalogueFields(fields []catalogueField, provided map[string]string) 
 	for k, v := range provided {
 		out[k] = v
 	}
+	var skipped []string
 	for _, field := range fields {
 		if _, ok := out[field.Key]; ok {
+			continue
+		}
+		if !field.Required {
+			skipped = append(skipped, field.Key)
 			continue
 		}
 		label := field.Label
@@ -587,6 +592,9 @@ func promptCatalogueFields(fields []catalogueField, provided map[string]string) 
 		}
 		out[field.Key] = val
 		rememberSecret(val)
+	}
+	if len(skipped) > 0 {
+		fmt.Fprintf(os.Stderr, "Optional fields not set: %s (use --field <name>=<value>)\n", strings.Join(skipped, ", "))
 	}
 	return out, nil
 }

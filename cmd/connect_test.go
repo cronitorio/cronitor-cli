@@ -765,7 +765,7 @@ func TestParseCatalogueFields_ServerStringShape(t *testing.T) {
 	}
 }
 
-func TestConnect_Webhook_OptionalFieldsNotRequired(t *testing.T) {
+func TestConnect_Webhook_PromptsOnlyForRequiredFields(t *testing.T) {
 	var createBody string
 	var secretPrompts, linePrompts []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -788,25 +788,25 @@ func TestConnect_Webhook_OptionalFieldsNotRequired(t *testing.T) {
 	defer cleanup()
 	readSecretFn = func(prompt string) (string, error) {
 		secretPrompts = append(secretPrompts, prompt)
-		return "", nil
+		return "https://example.com/hook", nil
 	}
 	readLineFn = func(prompt string) (string, error) {
 		linePrompts = append(linePrompts, prompt)
-		return "relay", nil
+		return "should-not-be-asked", nil
 	}
 
-	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook", "--field", "key=https://example.com/hook")
+	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if code != 0 {
-		t.Fatalf("expected exit 0 when optional fields are left empty, got %d\n%s", code, output)
+		t.Fatalf("expected exit 0, got %d\n%s", code, output)
 	}
-	if !strings.Contains(strings.Join(linePrompts, "\n"), "Username") {
-		t.Errorf("username is not a secret and should use the echoing prompt, got line=%#v secret=%#v", linePrompts, secretPrompts)
+	if len(secretPrompts) != 1 || !strings.Contains(secretPrompts[0], "URL") {
+		t.Errorf("expected exactly one prompt for the required URL, got secret=%#v line=%#v", secretPrompts, linePrompts)
 	}
-	if !strings.Contains(strings.Join(secretPrompts, "\n"), "Password") {
-		t.Errorf("password should use the hidden prompt, got secret=%#v", secretPrompts)
+	if len(linePrompts) != 0 {
+		t.Errorf("optional fields must not be prompted, got %#v", linePrompts)
 	}
 
 	var payload map[string]interface{}
@@ -814,11 +814,46 @@ func TestConnect_Webhook_OptionalFieldsNotRequired(t *testing.T) {
 		t.Fatalf("create body is not JSON: %s", createBody)
 	}
 	fields, _ := payload["fields"].(map[string]interface{})
-	if fields["key"] != "https://example.com/hook" || fields["username"] != "relay" {
-		t.Errorf("expected key and username in fields, got %#v", fields)
+	if len(fields) != 1 || fields["key"] != "https://example.com/hook" {
+		t.Errorf("expected only key in fields, got %#v", fields)
 	}
-	if _, ok := fields["password"]; ok {
-		t.Errorf("empty optional password must be omitted, got %#v", fields)
+}
+
+func TestConnect_Webhook_OptionalFieldAcceptedViaFlag(t *testing.T) {
+	var createBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/integrations/services":
+			w.WriteHeader(200)
+			fmtWrite(w, catalogueJSON())
+		case r.Method == "POST" && r.URL.Path == "/integrations":
+			createBody = string(body)
+			w.WriteHeader(201)
+			fmtWrite(w, `{"service":"webhook","name":"Hook","label":"Hook"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cleanup := withConnectTest(t, server.URL)
+	defer cleanup()
+
+	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook", "--field", "key=https://example.com/hook", "--field", "username=relay")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d\n%s", code, output)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(createBody), &payload); err != nil {
+		t.Fatalf("create body is not JSON: %s", createBody)
+	}
+	fields, _ := payload["fields"].(map[string]interface{})
+	if fields["key"] != "https://example.com/hook" || fields["username"] != "relay" {
+		t.Errorf("expected key and username from --field, got %#v", fields)
 	}
 }
 
