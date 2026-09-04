@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -190,6 +191,10 @@ func (r *APIResponse) ParseError() string {
 
 	if err := json.Unmarshal(r.Body, &errResp); err == nil {
 		if errResp.Error != "" {
+			// {"error":"invalid_fields","fields":["url"]}: name the fields.
+			if fields := stringListField(r.Body, "fields"); len(fields) > 0 {
+				return errResp.Error + ": " + strings.Join(fields, ", ")
+			}
 			return errResp.Error
 		}
 		if errResp.Message != "" {
@@ -204,6 +209,52 @@ func (r *APIResponse) ParseError() string {
 		}
 	}
 
+	// Django REST Framework validation errors: {"name":["name must be unique"]}
+	if msg := parseFieldErrorMap(r.Body); msg != "" {
+		return msg
+	}
+
 	// Fall back to raw body
 	return string(r.Body)
+}
+
+// stringListField returns body[key] when it is a JSON array of strings.
+func stringListField(body []byte, key string) []string {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(body, &obj) != nil {
+		return nil
+	}
+	var list []string
+	if json.Unmarshal(obj[key], &list) != nil {
+		return nil
+	}
+	return list
+}
+
+// parseFieldErrorMap renders a {field: [messages]} validation body as
+// "field: message; field2: message". Keys are sorted for stable output.
+func parseFieldErrorMap(body []byte) string {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(body, &obj) != nil || len(obj) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var parts []string
+	for _, k := range keys {
+		var messages []string
+		if json.Unmarshal(obj[k], &messages) == nil && len(messages) > 0 {
+			parts = append(parts, k+": "+strings.Join(messages, ", "))
+			continue
+		}
+		var single string
+		if json.Unmarshal(obj[k], &single) == nil && single != "" {
+			parts = append(parts, k+": "+single)
+		}
+	}
+	return strings.Join(parts, "; ")
 }
