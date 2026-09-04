@@ -152,12 +152,14 @@ func TestIntegration_ListTableAndFilters(t *testing.T) {
 }
 
 func TestIntegration_Get(t *testing.T) {
-	var gotService string
+	var gotService, gotLabel, gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && r.URL.Path == "/integrations/Alerts" {
+		if r.Method == "GET" && r.URL.Path == "/integrations" {
+			gotPath = r.URL.Path
 			gotService = r.URL.Query().Get("service")
+			gotLabel = r.URL.Query().Get("label")
 			w.WriteHeader(200)
-			fmtWrite(w, `{"service":"slack","service_name":"Slack","method":"oauth","name":"Alerts","label":"Alerts","available":true}`)
+			fmtWrite(w, `{"integrations":[{"id":"Alerts","service":"slack","service_name":"Slack","method":"oauth","name":"Alerts","label":"Alerts","available":true}],"page":1,"page_size":50,"total_integration_count":1}`)
 			return
 		}
 		http.NotFound(w, r)
@@ -174,18 +176,67 @@ func TestIntegration_Get(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d\n%s", code, output)
 	}
-	if gotService != "slack" {
-		t.Errorf("expected service=slack query, got %q", gotService)
+	if gotPath != "/integrations" || gotService != "slack" || gotLabel != "Alerts" {
+		t.Errorf("expected GET /integrations?service=slack&label=Alerts, got path=%q service=%q label=%q", gotPath, gotService, gotLabel)
 	}
 	trimmed := strings.TrimSpace(output)
-	if !json.Valid([]byte(trimmed)) {
-		t.Errorf("expected JSON output, got:\n%s", output)
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(trimmed), &obj); err != nil {
+		t.Fatalf("expected a single JSON object on stdout, got:\n%s", output)
 	}
-	if !strings.Contains(output, "Alerts") {
-		t.Errorf("expected label in output, got:\n%s", output)
+	if _, isEnvelope := obj["integrations"]; isEnvelope {
+		t.Errorf("expected the integration object, not the list envelope:\n%s", output)
 	}
-	if strings.Contains(output, "discord:") || strings.Contains(output, "slack:") {
-		t.Errorf("must not print composite pk ids, got:\n%s", output)
+	if obj["label"] != "Alerts" || obj["service"] != "slack" {
+		t.Errorf("expected label Alerts and service slack, got:\n%s", output)
+	}
+}
+
+func TestIntegration_Get_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/integrations" {
+			w.WriteHeader(200)
+			fmtWrite(w, `{"integrations":[],"page":1,"page_size":50,"total_integration_count":0}`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	cleanup := withConnectTest(t, server.URL)
+	defer cleanup()
+
+	output, code, _ := executeWithExit("integration", "get", "Missing")
+	if code != 1 {
+		t.Fatalf("expected exit 1 for an empty list, got %d\n%s", code, output)
+	}
+	if !strings.Contains(output, "not found") {
+		t.Errorf("expected not-found message, got:\n%s", output)
+	}
+}
+
+func TestIntegration_Get_AmbiguousWithoutService(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/integrations" {
+			w.WriteHeader(200)
+			fmtWrite(w, `{"integrations":[{"service":"slack","label":"Alerts"},{"service":"discord","label":"Alerts"}]}`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	cleanup := withConnectTest(t, server.URL)
+	defer cleanup()
+
+	output, code, _ := executeWithExit("integration", "get", "Alerts")
+	if code != 1 {
+		t.Fatalf("expected exit 1 for an ambiguous label, got %d\n%s", code, output)
+	}
+	for _, want := range []string{"slack", "discord", "--service"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q in ambiguity message, got:\n%s", want, output)
+		}
 	}
 }
 
@@ -286,12 +337,89 @@ func TestIntegration_Create_FormatJSON_ParseableOnly(t *testing.T) {
 }
 
 func TestIntegration_Delete_Force(t *testing.T) {
-	var force, service string
+	var gotPath, force, service, label string
+	listCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "DELETE" && r.URL.Path == "/integrations/Alerts" {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/integrations":
+			listCalls++
+			w.WriteHeader(200)
+			fmtWrite(w, `{"integrations":[{"service":"slack","label":"Alerts"}]}`)
+		case r.Method == "DELETE" && r.URL.Path == "/integrations":
+			gotPath = r.URL.Path
 			force = r.URL.Query().Get("force")
 			service = r.URL.Query().Get("service")
-			w.WriteHeader(204)
+			label = r.URL.Query().Get("label")
+			w.WriteHeader(200)
+			fmtWrite(w, `{"deleted":true,"detached_from":{"notification_lists":[],"monitors":[]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cleanup := withConnectTest(t, server.URL)
+	defer cleanup()
+
+	output, code, err := executeWithExit("integration", "delete", "Alerts", "--service", "slack", "--force")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d\n%s", code, output)
+	}
+	if gotPath != "/integrations" || service != "slack" || label != "Alerts" || force != "1" {
+		t.Errorf("expected DELETE /integrations?service=slack&label=Alerts&force=1, got path=%q service=%q label=%q force=%q", gotPath, service, label, force)
+	}
+	if listCalls != 0 {
+		t.Errorf("expected no lookup when --service is given, got %d list calls", listCalls)
+	}
+	if !strings.Contains(output, "Alerts") {
+		t.Errorf("expected deleted label in output, got:\n%s", output)
+	}
+}
+
+func TestIntegration_Delete_ResolvesServiceFromLabel(t *testing.T) {
+	var service, label string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/integrations":
+			if r.URL.Query().Get("label") != "Alerts" {
+				t.Errorf("expected lookup by label, got %q", r.URL.RawQuery)
+			}
+			w.WriteHeader(200)
+			fmtWrite(w, `{"integrations":[{"service":"discord","label":"Alerts"}]}`)
+		case r.Method == "DELETE" && r.URL.Path == "/integrations":
+			service = r.URL.Query().Get("service")
+			label = r.URL.Query().Get("label")
+			w.WriteHeader(200)
+			fmtWrite(w, `{"deleted":true}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cleanup := withConnectTest(t, server.URL)
+	defer cleanup()
+
+	output, code, err := executeWithExit("integration", "delete", "Alerts")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d\n%s", code, output)
+	}
+	if service != "discord" || label != "Alerts" {
+		t.Errorf("expected DELETE with service resolved from the label, got service=%q label=%q", service, label)
+	}
+}
+
+func TestIntegration_Delete_InUse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "DELETE" && r.URL.Path == "/integrations" {
+			w.WriteHeader(409)
+			fmtWrite(w, `{"error":"in_use","notification_lists":["oncall"],"monitors":["important-job"]}`)
 			return
 		}
 		http.NotFound(w, r)
@@ -301,24 +429,14 @@ func TestIntegration_Delete_Force(t *testing.T) {
 	cleanup := withConnectTest(t, server.URL)
 	defer cleanup()
 
-	output, code, err := executeWithExit("integration", "delete", "Alerts", "--force")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	output, code, _ := executeWithExit("integration", "delete", "Alerts", "--service", "discord")
+	if code != 1 {
+		t.Fatalf("expected exit 1 when in use, got %d\n%s", code, output)
 	}
-	if code != 0 {
-		t.Fatalf("expected exit 0, got %d\n%s", code, output)
-	}
-	if force != "1" {
-		t.Errorf("expected force=1 query param, got %q", force)
-	}
-	if service != "" {
-		t.Errorf("expected no service query when --service is omitted, got %q", service)
-	}
-	if !strings.Contains(output, "Alerts") {
-		t.Errorf("expected deleted label in output, got:\n%s", output)
-	}
-	if strings.Contains(output, "discord:") {
-		t.Errorf("must not print composite pk ids, got:\n%s", output)
+	for _, want := range []string{"oncall", "important-job", "--force"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q in in-use message, got:\n%s", want, output)
+		}
 	}
 }
 

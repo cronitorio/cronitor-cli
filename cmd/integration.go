@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -173,7 +173,8 @@ var integrationGetCmd = &cobra.Command{
 	Long: `Get details for a specific integration.
 
 Address integrations by unique label (unique per org, service, and visibility).
-Pass --service when the same label exists on more than one service.
+Pass --service when the same label exists on more than one service. The CLI
+filters GET /integrations by service and label and prints the single match.
 
 Examples:
   cronitor integration get Workspace
@@ -183,26 +184,14 @@ Examples:
 	Run: func(cmd *cobra.Command, args []string) {
 		label := args[0]
 		client := newIntegrationAPIClient()
-		params := map[string]string{}
-		if integrationService != "" {
-			params["service"] = integrationService
-		}
 
-		resp, err := client.GET(fmt.Sprintf("/integrations/%s", url.PathEscape(label)), params)
+		_, raw, err := resolveIntegrationByLabel(client, label, integrationService)
 		if err != nil {
-			failAndExit(fmt.Sprintf("Failed to get integration: %s", err))
-			return
-		}
-		if resp.IsNotFound() {
-			failAndExit(fmt.Sprintf("Integration '%s' not found", label))
-			return
-		}
-		if !resp.IsSuccess() {
-			failAndExit(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+			failAndExit(integrationLookupErrorMessage(err, "get"))
 			return
 		}
 
-		integrationOutputToTarget(FormatJSON(resp.Body))
+		integrationOutputToTarget(FormatJSON(raw))
 	},
 }
 
@@ -299,7 +288,9 @@ var integrationDeleteCmd = &cobra.Command{
 	Long: `Delete a notification integration.
 
 Address integrations by unique label. Pass --service when the same label
-exists on more than one service.
+exists on more than one service; otherwise the CLI looks the service up first.
+The delete fails with the lists and monitors that still use the integration
+unless --force is set.
 
 Examples:
   cronitor integration delete Workspace
@@ -309,15 +300,22 @@ Examples:
 		label := args[0]
 		client := newIntegrationAPIClient()
 
-		params := map[string]string{}
+		service := integrationService
+		if service == "" {
+			rec, _, err := resolveIntegrationByLabel(client, label, "")
+			if err != nil {
+				failAndExit(integrationLookupErrorMessage(err, "delete"))
+				return
+			}
+			service = rec.Service
+		}
+
+		params := map[string]string{"service": service, "label": label}
 		if integrationForce {
 			params["force"] = "1"
 		}
-		if integrationService != "" {
-			params["service"] = integrationService
-		}
 
-		resp, err := client.DELETE(fmt.Sprintf("/integrations/%s", url.PathEscape(label)), nil, params)
+		resp, err := client.DELETE("/integrations", nil, params)
 		if err != nil {
 			failAndExit(fmt.Sprintf("Failed to delete integration: %s", err))
 			return
@@ -326,12 +324,49 @@ Examples:
 			failAndExit(fmt.Sprintf("Integration '%s' not found", label))
 			return
 		}
+		if resp.StatusCode == 409 {
+			failAndExit(integrationInUseMessage(label, resp.Body))
+			return
+		}
 		if resp.IsSuccess() {
 			Success(fmt.Sprintf("Integration '%s' deleted", label))
 			return
 		}
 		failAndExit(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
 	},
+}
+
+func integrationLookupErrorMessage(err error, verb string) string {
+	switch err.(type) {
+	case integrationNotFoundError, integrationAmbiguousError:
+		return err.Error()
+	default:
+		return fmt.Sprintf("Failed to %s integration: %s", verb, err)
+	}
+}
+
+// integrationInUseMessage renders the 409 in_use body from DELETE /integrations.
+func integrationInUseMessage(label string, body []byte) string {
+	var payload struct {
+		Error             string   `json:"error"`
+		NotificationLists []string `json:"notification_lists"`
+		Monitors          []string `json:"monitors"`
+	}
+	if json.Unmarshal(body, &payload) != nil || payload.Error != "in_use" {
+		return fmt.Sprintf("API Error (409): %s", string(body))
+	}
+	var uses []string
+	if len(payload.NotificationLists) > 0 {
+		uses = append(uses, fmt.Sprintf("notification lists: %s", strings.Join(payload.NotificationLists, ", ")))
+	}
+	if len(payload.Monitors) > 0 {
+		uses = append(uses, fmt.Sprintf("monitors: %s", strings.Join(payload.Monitors, ", ")))
+	}
+	msg := fmt.Sprintf("Integration '%s' is in use", label)
+	if len(uses) > 0 {
+		msg += " by " + strings.Join(uses, "; ")
+	}
+	return msg + ". Use --force to detach it and delete anyway"
 }
 
 func getIntegrationRequestBody() ([]byte, error) {

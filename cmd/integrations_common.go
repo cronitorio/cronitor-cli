@@ -440,6 +440,90 @@ func parseIntegrationList(body []byte) ([]integrationRecord, error) {
 	return nil, fmt.Errorf("failed to parse integrations list")
 }
 
+// integrationNotFoundError is returned when no visible integration matches a label.
+type integrationNotFoundError struct{ label string }
+
+func (e integrationNotFoundError) Error() string {
+	return fmt.Sprintf("Integration '%s' not found", e.label)
+}
+
+// integrationAmbiguousError is returned when a label exists on more than one service.
+type integrationAmbiguousError struct {
+	label    string
+	services []string
+}
+
+func (e integrationAmbiguousError) Error() string {
+	return fmt.Sprintf("Integration '%s' exists on multiple services (%s). Pass --service to choose one", e.label, strings.Join(e.services, ", "))
+}
+
+// rawIntegrationItems returns the raw JSON of each list item so a single row
+// can be printed without losing fields the typed record does not model.
+func rawIntegrationItems(body []byte) []json.RawMessage {
+	var wrapper struct {
+		Integrations []json.RawMessage `json:"integrations"`
+		Results      []json.RawMessage `json:"results"`
+	}
+	if json.Unmarshal(body, &wrapper) == nil {
+		if len(wrapper.Integrations) > 0 {
+			return wrapper.Integrations
+		}
+		if len(wrapper.Results) > 0 {
+			return wrapper.Results
+		}
+	}
+	var arr []json.RawMessage
+	if json.Unmarshal(body, &arr) == nil {
+		return arr
+	}
+	return nil
+}
+
+// resolveIntegrationByLabel finds exactly one integration through the list
+// filter (GET /integrations?service=&label=). The API has no path-key Get.
+func resolveIntegrationByLabel(client *lib.APIClient, label, service string) (integrationRecord, json.RawMessage, error) {
+	params := map[string]string{"label": label}
+	if service != "" {
+		params["service"] = service
+	}
+	records, body, err := listIntegrations(client, params)
+	if err != nil {
+		return integrationRecord{}, nil, err
+	}
+	raws := rawIntegrationItems(body)
+
+	var matched []int
+	for i, rec := range records {
+		if integrationPublicLabel(rec) != label {
+			continue
+		}
+		if service != "" && rec.Service != "" && rec.Service != service {
+			continue
+		}
+		matched = append(matched, i)
+	}
+
+	switch len(matched) {
+	case 0:
+		return integrationRecord{}, nil, integrationNotFoundError{label: label}
+	case 1:
+		i := matched[0]
+		var raw json.RawMessage
+		if len(raws) == len(records) {
+			raw = raws[i]
+		} else if encoded, err := json.Marshal(records[i]); err == nil {
+			raw = encoded
+		}
+		return records[i], raw, nil
+	default:
+		services := make([]string, 0, len(matched))
+		for _, i := range matched {
+			services = append(services, records[i].Service)
+		}
+		return integrationRecord{}, nil, integrationAmbiguousError{label: label, services: services}
+	}
+}
+
 func writeCLIOutput(outputPath, content string) {
 	if outputPath != "" {
 		if err := os.WriteFile(outputPath, []byte(content+"\n"), 0644); err != nil {
