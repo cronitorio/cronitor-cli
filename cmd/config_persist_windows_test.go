@@ -26,7 +26,7 @@ func TestPersistConfigFile_NewFileGetsOwnerACL(t *testing.T) {
 	}
 }
 
-func TestPersistConfigFile_WorldReadableRewrittenOwnerOnly(t *testing.T) {
+func TestPersistConfigFile_WorldReadableKeepsACL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cronitor.json")
 	if err := os.WriteFile(path, []byte(`{"CRONITOR_HOSTNAME":"keep-me"}`), 0644); err != nil {
 		t.Fatal(err)
@@ -40,19 +40,16 @@ func TestPersistConfigFile_WorldReadableRewrittenOwnerOnly(t *testing.T) {
 			t.Errorf("world-readable persist should succeed: %v", err)
 		}
 	})
-	if !strings.Contains(stderr, "WARNING") {
-		t.Errorf("expected warning when tightening Windows ACL, stderr:\n%s", stderr)
-	}
-	if !strings.Contains(stderr, "scheduled task") && !strings.Contains(stderr, "Windows") {
-		t.Errorf("Windows warning should be actionable, stderr:\n%s", stderr)
+	if strings.Contains(stderr, "WARNING") {
+		t.Errorf("must not warn about narrowing when the ACL is preserved, stderr:\n%s", stderr)
 	}
 
 	world, err := windowsGrantsWorldRead(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if world {
-		t.Fatal("rewritten Windows credential file is still readable by Everyone or Users")
+	if !world {
+		t.Fatal("existing world-readable ACL was narrowed by a plain save")
 	}
 
 	data, err := os.ReadFile(path)

@@ -9,28 +9,16 @@ import (
 	"github.com/spf13/viper"
 )
 
-// New credential-bearing files, and every successful rewrite, use owner-only
-// mode 0600 on Unix. Windows applies an owner-restricted ACL instead.
+// New credential-bearing files use owner-only mode 0600 on Unix; Windows
+// applies an owner-restricted ACL instead. Existing files keep whatever
+// access they already have unless the caller asks to restrict them.
 const configModeOwnerOnly os.FileMode = 0600
 
 // configMigrationGuidance is appended to persist errors (directory/write
-// failures). Existing 0644 files are not rejected; they are rewritten as 0600
-// on the next save. This text is for when the write itself cannot complete.
+// failures). This text is for when the write itself cannot complete.
 const configMigrationGuidance = `Use --config or CRONITOR_CONFIG if you need a user-writable config file.
 Preferred: inject CRONITOR_API_KEY and CRONITOR_PING_API_KEY in the crontab or service environment (do not store keys in the JSON file).
 On Windows, set those variables on the scheduled task or Windows service. A later save rewrites the JSON file as owner-only.`
-
-// configAccessNarrowedWarning is printed to stderr after a successful save
-// that tightens a previously shared-readable credential file to owner-only.
-const configAccessNarrowedWarning = `WARNING: Cronitor rewrote the configuration file as owner-only (Unix mode 0600; owner-restricted ACL on Windows).
-Other users will lose read access.
-
-If jobs run as another account:
-  1. Preferred: set CRONITOR_API_KEY and CRONITOR_PING_API_KEY in the crontab or service environment (not in the JSON file). On Windows, set them on the scheduled task or Windows service.
-  2. Shared file: after this save you may chmod 0640 and chgrp a dedicated group (Unix), or grant that service account read on the file ACL (Windows), then point --config / CRONITOR_CONFIG at that file. The next Cronitor save will set owner-only again.
-  3. Per-user: use --config or CRONITOR_CONFIG with a user-owned 0600 file for jobs that run as that user.
-
-Existing world-readable files keep working for exec/ping until someone saves.`
 
 // persistTestHook is invoked after the temp file is fully written and closed,
 // immediately before the atomic rename. Tests set this to simulate a failure
@@ -64,15 +52,19 @@ func wrapPersistDirError(dir string, err error) error {
 	return fmt.Errorf("the configuration directory %s could not be created: %w\n\n%s", dir, err, configMigrationGuidance)
 }
 
-func printConfigAccessWarning(path string) {
-	fmt.Fprintf(os.Stderr, "\nWARNING: %s\n%s\n\n", path, configAccessNarrowedWarning)
+// persistConfigFile writes credential-bearing Cronitor JSON using an atomic
+// replace. A new file is created owner-only. An existing file keeps its
+// current mode (Unix) or ACL (Windows); nothing narrows access the operator
+// did not ask for. Unrelated 0644 writes (debug logs, crontabs) must not use
+// this helper.
+func persistConfigFile(path string, data []byte) error {
+	return persistConfigFileMode(path, data, false)
 }
 
-// persistConfigFile writes credential-bearing Cronitor JSON using an atomic
-// replace and owner-only permissions. Existing 0644/0640 files are rewritten
-// as 0600 (with a warning). Unrelated 0644 writes (debug logs, crontabs)
-// must not use this helper.
-func persistConfigFile(path string, data []byte) error {
+// persistConfigFileMode is persistConfigFile with an explicit choice: when
+// restrict is true the written file is owner-only even if it already existed
+// with broader access.
+func persistConfigFileMode(path string, data []byte, restrict bool) error {
 	if path == "" {
 		return fmt.Errorf("configuration file path is empty\n\n%s", configMigrationGuidance)
 	}
@@ -87,8 +79,6 @@ func persistConfigFile(path string, data []byte) error {
 	if err != nil && !os.IsNotExist(err) {
 		return wrapPersistWriteError(path, err)
 	}
-
-	warnNarrow := false
 	if exists {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("refusing to write configuration through unexpected symlink %s", path)
@@ -96,19 +86,13 @@ func persistConfigFile(path string, data []byte) error {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("configuration path %s is not a regular file", path)
 		}
-		warnNarrow = existingAccessWillNarrow(path, info)
 	}
 
-	if err := atomicWriteConfigFile(path, data, info, exists); err != nil {
-		return err
-	}
-	if warnNarrow {
-		printConfigAccessWarning(path)
-	}
-	return nil
+	ownerOnly := !exists || restrict
+	return atomicWriteConfigFile(path, data, info, exists, ownerOnly)
 }
 
-func atomicWriteConfigFile(path string, data []byte, existing os.FileInfo, exists bool) error {
+func atomicWriteConfigFile(path string, data []byte, existing os.FileInfo, exists, ownerOnly bool) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".cronitor-config-*.tmp")
 	if err != nil {
@@ -143,7 +127,11 @@ func atomicWriteConfigFile(path string, data []byte, existing os.FileInfo, exist
 			return wrapPersistWriteError(path, err)
 		}
 	}
-	if err := persistLockdownNewFile(tmpName); err != nil {
+	if ownerOnly {
+		if err := persistLockdownNewFile(tmpName); err != nil {
+			return wrapPersistWriteError(path, err)
+		}
+	} else if err := persistPreserveAccess(tmpName, path, existing); err != nil {
 		return wrapPersistWriteError(path, err)
 	}
 
@@ -158,9 +146,11 @@ func atomicWriteConfigFile(path string, data []byte, existing os.FileInfo, exist
 	}
 	renamed = true
 
-	// Re-apply owner-only after replace so Windows dest ACLs cannot linger.
-	if err := persistLockdownNewFile(path); err != nil {
-		return wrapPersistWriteError(path, err)
+	if ownerOnly {
+		// Re-apply owner-only after replace so Windows dest ACLs cannot linger.
+		if err := persistLockdownNewFile(path); err != nil {
+			return wrapPersistWriteError(path, err)
+		}
 	}
 	return nil
 }

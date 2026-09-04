@@ -43,14 +43,23 @@ func persistReplaceFile(tmpName, dest string) error {
 	return windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING)
 }
 
-func existingAccessWillNarrow(path string, _ os.FileInfo) bool {
-	broader, err := windowsACLBroaderThanOwner(path)
+// persistPreserveAccess copies the existing file's DACL onto the replacement
+// so a save does not change who can read the configuration.
+func persistPreserveAccess(tmpName, dest string, _ os.FileInfo) error {
+	sd, err := windows.GetNamedSecurityInfo(dest, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
-		// Cannot confirm the ACL is already owner-only; warn because we will
-		// apply an owner-restricted DACL. Never fail the write for this.
-		return true
+		return err
 	}
-	return broader
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	return windows.SetNamedSecurityInfo(
+		tmpName,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil, nil, dacl, nil,
+	)
 }
 
 func applyOwnerOnlyACL(path string) error {

@@ -31,7 +31,8 @@ func persistReplaceFile(tmpName, dest string) error {
 	return os.Rename(tmpName, dest)
 }
 
-func existingAccessWillNarrow(_ string, info os.FileInfo) bool {
-	// Group or other bits mean this save to 0600 will drop shared read access.
-	return info.Mode().Perm()&0077 != 0
+// persistPreserveAccess gives the replacement file the same mode bits as the
+// file it is about to replace.
+func persistPreserveAccess(tmpName, _ string, existing os.FileInfo) error {
+	return os.Chmod(tmpName, existing.Mode().Perm())
 }

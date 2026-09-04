@@ -23,7 +23,7 @@ func TestPersistConfigFile_NewFileIsOwnerOnly(t *testing.T) {
 	}
 }
 
-func TestPersistConfigFile_Existing0644RewrittenTo0600WithWarning(t *testing.T) {
+func TestPersistConfigFile_Existing0644KeepsMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cronitor.json")
 	original := []byte(`{"CRONITOR_HOSTNAME":"keep-me","CRONITOR_ENV":"keep-env"}`)
 	if err := os.WriteFile(path, original, 0644); err != nil {
@@ -39,40 +39,33 @@ func TestPersistConfigFile_Existing0644RewrittenTo0600WithWarning(t *testing.T) 
 			t.Errorf("0644 persist should succeed: %v", err)
 		}
 	})
-	if !strings.Contains(stderr, "WARNING") {
-		t.Errorf("expected loud warning on 0644 rewrite, stderr:\n%s", stderr)
-	}
-	if !strings.Contains(stderr, "CRONITOR_API_KEY") {
-		t.Errorf("warning should mention CRONITOR_API_KEY, stderr:\n%s", stderr)
+	if strings.Contains(stderr, "WARNING") {
+		t.Errorf("must not warn about narrowing when the mode is preserved, stderr:\n%s", stderr)
 	}
 	if strings.Contains(stderr, testAPIKey) {
-		t.Error("warning leaked API key")
+		t.Error("stderr leaked API key")
 	}
 
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0600 {
-		t.Fatalf("rewritten 0644 file mode = %#o, want 0600", perm)
+	if perm := info.Mode().Perm(); perm != 0644 {
+		t.Fatalf("existing 0644 file mode = %#o after save, want 0644 preserved", perm)
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "keep-me") {
-		t.Error("hostname did not survive 0644 rewrite")
-	}
-	if !strings.Contains(string(data), "keep-env") {
-		t.Error("env did not survive 0644 rewrite")
-	}
-	if !strings.Contains(string(data), testAPIKey) {
-		t.Error("new API key was not written")
+	for _, want := range []string{"keep-me", "keep-env", testAPIKey} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("expected %q in rewritten file, got %s", want, data)
+		}
 	}
 }
 
-func TestPersistConfigFile_Existing0640RewrittenTo0600WithWarning(t *testing.T) {
+func TestPersistConfigFile_Existing0640KeepsMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cronitor.json")
 	if err := os.WriteFile(path, []byte(`{"CRONITOR_HOSTNAME":"shared"}`), 0640); err != nil {
 		t.Fatal(err)
@@ -81,29 +74,15 @@ func TestPersistConfigFile_Existing0640RewrittenTo0600WithWarning(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	_, stderr := captureOutput(t, func() {
-		if err := persistConfigFile(path, []byte(`{"CRONITOR_HOSTNAME":"shared","CRONITOR_API_KEY":"test-api-key-not-real"}`)); err != nil {
-			t.Errorf("0640 persist should succeed: %v", err)
-		}
-	})
-	if !strings.Contains(stderr, "WARNING") {
-		t.Errorf("expected warning when 0640 is narrowed to 0600, stderr:\n%s", stderr)
+	if err := persistConfigFile(path, []byte(`{"CRONITOR_HOSTNAME":"shared","CRONITOR_API_KEY":"test-api-key-not-real"}`)); err != nil {
+		t.Fatalf("0640 persist should succeed: %v", err)
 	}
-
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0600 {
-		t.Fatalf("rewritten 0640 file mode = %#o, want 0600", perm)
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "shared") {
-		t.Error("0640 file lost hostname")
+	if perm := info.Mode().Perm(); perm != 0640 {
+		t.Fatalf("existing 0640 file mode = %#o after save, want 0640 preserved", perm)
 	}
 }
 
