@@ -104,7 +104,7 @@ func catalogueJSON() string {
     {"service":"pagerduty","service_name":"PagerDuty","type":"oauth","method":"oauth","fields":{},"available":true},
     {"service":"discord","service_name":"Discord","type":"Messaging","method":"apikey","fields":{"key":"Webhook URL"},"available":true},
     {"service":"opsgenie","service_name":"Opsgenie","type":"api_key","method":"api_key","fields":{"api_key":{"label":"API Key","secret":true,"required":true}},"available":true},
-    {"service":"webhook","service_name":"Webhook","type":"Messaging","method":"apikey","fields":{"key":"URL","username":"Username (optional)","password":"Password (optional)"},"available":true},
+    {"service":"webhook","service_name":"Webhook","type":"Messaging","method":"apikey","fields":{"key":"URL"},"available":true},
     {"service":"telegram","service_name":"Telegram","type":"Messaging","method":"link","fields":{"type":"Type"},"available":true}
   ]
 }`
@@ -746,7 +746,7 @@ func TestConnect_SecretsRedactedFromVerboseAndLog(t *testing.T) {
 }
 
 func TestParseCatalogueFields_ServerStringShape(t *testing.T) {
-	fields := parseCatalogueFields(json.RawMessage(`{"key":"URL","username":"Username (optional)","password":"Password (optional)"}`))
+	fields := parseCatalogueFields(json.RawMessage(`{"webhook_url":"Webhook URL","api_key":"API Key","oncall_team":"On-Call Team"}`))
 	byKey := map[string]catalogueField{}
 	for _, f := range fields {
 		byKey[f.Key] = f
@@ -754,106 +754,14 @@ func TestParseCatalogueFields_ServerStringShape(t *testing.T) {
 	if len(byKey) != 3 {
 		t.Fatalf("expected 3 fields, got %#v", fields)
 	}
-	if f := byKey["key"]; !f.Required || !f.Secret || f.Label != "URL" {
-		t.Errorf("key should be required and secret with label URL, got %#v", f)
+	if f := byKey["api_key"]; !f.Secret || f.Label != "API Key" {
+		t.Errorf("api_key should be secret with label API Key, got %#v", f)
 	}
-	if f := byKey["username"]; f.Required || f.Secret {
-		t.Errorf("username should be optional and not secret, got %#v", f)
+	if f := byKey["oncall_team"]; f.Secret || f.Label != "On-Call Team" {
+		t.Errorf("oncall_team should echo with label On-Call Team, got %#v", f)
 	}
-	if f := byKey["password"]; f.Required || !f.Secret {
-		t.Errorf("password should be optional and secret, got %#v", f)
-	}
-}
-
-func TestConnect_Webhook_PromptsOnlyForRequiredFields(t *testing.T) {
-	var createBody string
-	var secretPrompts, linePrompts []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		switch {
-		case r.Method == "GET" && r.URL.Path == "/integrations/services":
-			w.WriteHeader(200)
-			fmtWrite(w, catalogueJSON())
-		case r.Method == "POST" && r.URL.Path == "/integrations":
-			createBody = string(body)
-			w.WriteHeader(201)
-			fmtWrite(w, `{"service":"webhook","name":"Hook","label":"Hook"}`)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	cleanup := withConnectTest(t, server.URL)
-	defer cleanup()
-	readSecretFn = func(prompt string) (string, error) {
-		secretPrompts = append(secretPrompts, prompt)
-		return "https://example.com/hook", nil
-	}
-	readLineFn = func(prompt string) (string, error) {
-		linePrompts = append(linePrompts, prompt)
-		return "should-not-be-asked", nil
-	}
-
-	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if code != 0 {
-		t.Fatalf("expected exit 0, got %d\n%s", code, output)
-	}
-	if len(secretPrompts) != 1 || !strings.Contains(secretPrompts[0], "URL") {
-		t.Errorf("expected exactly one prompt for the required URL, got secret=%#v line=%#v", secretPrompts, linePrompts)
-	}
-	if len(linePrompts) != 0 {
-		t.Errorf("optional fields must not be prompted, got %#v", linePrompts)
-	}
-
-	var payload map[string]interface{}
-	if err := json.Unmarshal([]byte(createBody), &payload); err != nil {
-		t.Fatalf("create body is not JSON: %s", createBody)
-	}
-	fields, _ := payload["fields"].(map[string]interface{})
-	if len(fields) != 1 || fields["key"] != "https://example.com/hook" {
-		t.Errorf("expected only key in fields, got %#v", fields)
-	}
-}
-
-func TestConnect_Webhook_OptionalFieldAcceptedViaFlag(t *testing.T) {
-	var createBody string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		switch {
-		case r.Method == "GET" && r.URL.Path == "/integrations/services":
-			w.WriteHeader(200)
-			fmtWrite(w, catalogueJSON())
-		case r.Method == "POST" && r.URL.Path == "/integrations":
-			createBody = string(body)
-			w.WriteHeader(201)
-			fmtWrite(w, `{"service":"webhook","name":"Hook","label":"Hook"}`)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	cleanup := withConnectTest(t, server.URL)
-	defer cleanup()
-
-	output, code, err := executeWithExit("connect", "webhook", "--name", "Hook", "--field", "key=https://example.com/hook", "--field", "username=relay")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if code != 0 {
-		t.Fatalf("expected exit 0, got %d\n%s", code, output)
-	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal([]byte(createBody), &payload); err != nil {
-		t.Fatalf("create body is not JSON: %s", createBody)
-	}
-	fields, _ := payload["fields"].(map[string]interface{})
-	if fields["key"] != "https://example.com/hook" || fields["username"] != "relay" {
-		t.Errorf("expected key and username from --field, got %#v", fields)
+	if f := byKey["webhook_url"]; f.Secret {
+		t.Errorf("webhook_url should echo, got %#v", f)
 	}
 }
 

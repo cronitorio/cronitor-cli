@@ -174,11 +174,10 @@ type catalogueService struct {
 }
 
 type catalogueField struct {
-	Key      string
-	Label    string
-	Secret   bool
-	Required bool
-	Help     string
+	Key    string
+	Label  string
+	Secret bool
+	Help   string
 }
 
 type integrationRecord struct {
@@ -217,12 +216,6 @@ func readLineFromTerminal(prompt string) (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(line, "\r\n"), nil
-}
-
-// catalogueFieldIsOptional reads the server's string-shaped catalogue, which
-// marks optional fields in the label ("Username (optional)").
-func catalogueFieldIsOptional(label string) bool {
-	return strings.Contains(strings.ToLower(label), "optional")
 }
 
 // catalogueFieldIsSecret decides the prompt style when the catalogue gives no
@@ -265,16 +258,15 @@ func parseCatalogueFields(raw json.RawMessage) []catalogueField {
 		sort.Strings(keys)
 		fields := make([]catalogueField, 0, len(keys))
 		for _, k := range keys {
-			f := catalogueField{Key: k, Label: k, Required: true, Secret: catalogueFieldIsSecret(k)}
+			f := catalogueField{Key: k, Label: k, Secret: catalogueFieldIsSecret(k)}
 			var obj struct {
-				Label    string `json:"label"`
-				Name     string `json:"name"`
-				Secret   *bool  `json:"secret"`
-				Required *bool  `json:"required"`
-				Help     string `json:"help"`
-				Prompt   string `json:"prompt"`
+				Label  string `json:"label"`
+				Name   string `json:"name"`
+				Secret *bool  `json:"secret"`
+				Help   string `json:"help"`
+				Prompt string `json:"prompt"`
 			}
-			if json.Unmarshal(asMap[k], &obj) == nil && (obj.Label != "" || obj.Name != "" || obj.Secret != nil || obj.Required != nil || obj.Help != "" || obj.Prompt != "") {
+			if json.Unmarshal(asMap[k], &obj) == nil && (obj.Label != "" || obj.Name != "" || obj.Secret != nil || obj.Help != "" || obj.Prompt != "") {
 				if obj.Label != "" {
 					f.Label = obj.Label
 				} else if obj.Name != "" {
@@ -285,15 +277,11 @@ func parseCatalogueFields(raw json.RawMessage) []catalogueField {
 				if obj.Secret != nil {
 					f.Secret = *obj.Secret
 				}
-				if obj.Required != nil {
-					f.Required = *obj.Required
-				}
 				f.Help = obj.Help
 			} else {
 				var s string
 				if json.Unmarshal(asMap[k], &s) == nil && s != "" {
 					f.Label = s
-					f.Required = !catalogueFieldIsOptional(s)
 				}
 			}
 			fields = append(fields, f)
@@ -302,12 +290,11 @@ func parseCatalogueFields(raw json.RawMessage) []catalogueField {
 	}
 
 	var asArr []struct {
-		Key      string `json:"key"`
-		Name     string `json:"name"`
-		Label    string `json:"label"`
-		Secret   *bool  `json:"secret"`
-		Required *bool  `json:"required"`
-		Help     string `json:"help"`
+		Key    string `json:"key"`
+		Name   string `json:"name"`
+		Label  string `json:"label"`
+		Secret *bool  `json:"secret"`
+		Help   string `json:"help"`
 	}
 	if err := json.Unmarshal(raw, &asArr); err == nil {
 		fields := make([]catalogueField, 0, len(asArr))
@@ -319,7 +306,7 @@ func parseCatalogueFields(raw json.RawMessage) []catalogueField {
 			if key == "" {
 				continue
 			}
-			f := catalogueField{Key: key, Label: key, Required: true, Secret: catalogueFieldIsSecret(key)}
+			f := catalogueField{Key: key, Label: key, Secret: catalogueFieldIsSecret(key)}
 			if item.Label != "" {
 				f.Label = item.Label
 			} else if item.Name != "" && item.Key != "" {
@@ -327,9 +314,6 @@ func parseCatalogueFields(raw json.RawMessage) []catalogueField {
 			}
 			if item.Secret != nil {
 				f.Secret = *item.Secret
-			}
-			if item.Required != nil {
-				f.Required = *item.Required
 			}
 			f.Help = item.Help
 			fields = append(fields, f)
@@ -556,13 +540,8 @@ func promptCatalogueFields(fields []catalogueField, provided map[string]string) 
 	for k, v := range provided {
 		out[k] = v
 	}
-	var skipped []string
 	for _, field := range fields {
 		if _, ok := out[field.Key]; ok {
-			continue
-		}
-		if !field.Required {
-			skipped = append(skipped, field.Key)
 			continue
 		}
 		label := field.Label
@@ -578,23 +557,14 @@ func promptCatalogueFields(fields []catalogueField, provided map[string]string) 
 		}
 		val, err := read(fmt.Sprintf("%s: ", label))
 		if err != nil {
-			if field.Required {
-				return nil, fmt.Errorf("required field %q not provided (use --field %s=<value> or run in a terminal)", field.Key, field.Key)
-			}
-			continue
+			return nil, fmt.Errorf("field %q not provided (use --field %s=<value> or run in a terminal)", field.Key, field.Key)
 		}
 		val = strings.TrimSpace(val)
 		if val == "" {
-			if field.Required {
-				return nil, fmt.Errorf("required field %q cannot be empty", field.Key)
-			}
-			continue
+			return nil, fmt.Errorf("field %q cannot be empty", field.Key)
 		}
 		out[field.Key] = val
 		rememberSecret(val)
-	}
-	if len(skipped) > 0 {
-		fmt.Fprintf(os.Stderr, "Optional fields not set: %s (use --field <name>=<value>)\n", strings.Join(skipped, ", "))
 	}
 	return out, nil
 }
