@@ -185,9 +185,6 @@ func TestConnect_APIKey_FieldFlag_SecretsAbsentFromStdout(t *testing.T) {
 	if !strings.Contains(output, "On-call") || !strings.Contains(output, "opsgenie") {
 		t.Errorf("expected label and service in output, got:\n%s", output)
 	}
-	if strings.Contains(output, "opsgenie:") {
-		t.Errorf("must not print composite pk ids, got:\n%s", output)
-	}
 	if strings.Contains(output, secret) {
 		t.Errorf("secret leaked to stdout:\n%s", output)
 	}
@@ -307,9 +304,6 @@ func TestConnect_Slack_TwoPendingThenComplete(t *testing.T) {
 	if !strings.Contains(output, "Workspace") || !strings.Contains(output, "slack") {
 		t.Errorf("expected label and service after complete, got:\n%s", output)
 	}
-	if strings.Contains(output, "slack:") {
-		t.Errorf("must not print composite pk ids, got:\n%s", output)
-	}
 	if polls != 3 {
 		t.Errorf("expected 3 status polls (2 pending + complete), got %d", polls)
 	}
@@ -413,9 +407,6 @@ func TestConnect_AddTo_AmbiguousLabelSurfacesError(t *testing.T) {
 	firstSlack := toStringSlice(first["notifications"].(map[string]interface{})["slack"])
 	if !containsString(firstSlack, "Workspace") {
 		t.Errorf("PUT should append label Workspace, got %#v", firstSlack)
-	}
-	if containsString(firstSlack, "slack:12") {
-		t.Errorf("PUT must not use a composite pk id, got %#v", firstSlack)
 	}
 	for _, readonly := range []string{"monitors", "monitor_details", "status", "created"} {
 		if _, ok := first[readonly]; ok {
@@ -572,9 +563,6 @@ func TestConnect_FormatJSON_ParseableOnly(t *testing.T) {
 	}
 	if !strings.Contains(trimmed, "Workspace") {
 		t.Errorf("expected complete payload label in JSON stdout, got:\n%s", output)
-	}
-	if strings.Contains(trimmed, "slack:") {
-		t.Errorf("JSON stdout must not teach composite pk ids, got:\n%s", output)
 	}
 }
 
@@ -903,27 +891,21 @@ func TestConnect_NoBrowserSkipsOpen(t *testing.T) {
 	}
 }
 
-func TestPreferPublicLabel_IgnoresCompositePK(t *testing.T) {
-	if got := preferPublicLabel("Workspace", "Workspace", "slack:12"); got != "Workspace" {
+func TestPublicLabel_PrefersLabelThenName(t *testing.T) {
+	if got := publicLabel("Workspace", "Other"); got != "Workspace" {
 		t.Errorf("prefer label, got %q", got)
 	}
-	if got := preferPublicLabel("", "Workspace", "slack:12"); got != "Workspace" {
+	if got := publicLabel("", "Workspace"); got != "Workspace" {
 		t.Errorf("fall back to name, got %q", got)
 	}
-	if got := preferPublicLabel("", "", "slack:12"); got != "" {
-		t.Errorf("must not use composite pk as a public label, got %q", got)
-	}
-	if got := preferPublicLabel("", "", "legacy-key"); got != "legacy-key" {
-		t.Errorf("non-composite leftover id is still a public identifier, got %q", got)
-	}
 
-	label, service := extractPublicIdentity([]byte(`{"id":"slack:12","service":"slack","label":"Workspace"}`))
+	label, service := extractPublicIdentity([]byte(`{"id":"Workspace","service":"slack","label":"Workspace"}`))
 	if label != "Workspace" || service != "slack" {
-		t.Errorf("extractPublicIdentity should prefer label, got label=%q service=%q", label, service)
+		t.Errorf("extractPublicIdentity should read label and service, got label=%q service=%q", label, service)
 	}
-	label, service = extractPublicIdentity([]byte(`{"id":"slack:12","service":"slack"}`))
-	if label != "" || service != "slack" {
-		t.Errorf("extractPublicIdentity must ignore composite pk, got label=%q service=%q", label, service)
+	label, service = extractPublicIdentity([]byte(`{"status":"complete","integration":{"label":"Nested","service":"pagerduty"}}`))
+	if label != "Nested" || service != "pagerduty" {
+		t.Errorf("extractPublicIdentity should read the nested integration, got label=%q service=%q", label, service)
 	}
 }
 

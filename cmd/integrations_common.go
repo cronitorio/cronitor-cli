@@ -185,7 +185,6 @@ type catalogueField struct {
 }
 
 type integrationRecord struct {
-	ID          string          `json:"id"`
 	Service     string          `json:"service"`
 	ServiceName string          `json:"service_name"`
 	Method      string          `json:"method"`
@@ -231,10 +230,11 @@ func catalogueFieldIsOptional(label string) bool {
 
 // catalogueFieldIsSecret decides the prompt style when the catalogue gives no
 // explicit flag. Everything is hidden except a short allowlist of plain
-// identifiers; "key" is always a webhook URL or API key on this API.
+// identifiers; "key" is always a webhook URL or API key on this API, and
+// datadog-on-call's webhook_url is an intake host that may not carry credentials.
 func catalogueFieldIsSecret(key string) bool {
 	switch strings.ToLower(key) {
-	case "username", "user", "oncall_team", "team", "channel", "name", "type", "email":
+	case "username", "user", "oncall_team", "team", "channel", "name", "type", "email", "webhook_url":
 		return false
 	default:
 		return true
@@ -465,7 +465,7 @@ func parseIntegrationList(body []byte) ([]integrationRecord, error) {
 	}
 
 	var single integrationRecord
-	if err := json.Unmarshal(body, &single); err == nil && (single.Label != "" || single.Name != "" || single.Service != "" || (single.ID != "" && !isCompositePKID(single.ID))) {
+	if err := json.Unmarshal(body, &single); err == nil && (single.Label != "" || single.Name != "" || single.Service != "") {
 		return []integrationRecord{single}, nil
 	}
 
@@ -669,45 +669,24 @@ func promptCatalogueFields(fields []catalogueField, provided map[string]string) 
 }
 
 func integrationPublicLabel(rec integrationRecord) string {
-	return preferPublicLabel(rec.Label, rec.Name, rec.ID)
+	return publicLabel(rec.Label, rec.Name)
 }
 
-func preferPublicLabel(label, name, id string) string {
+// publicLabel is the only public identity of an integration. The API returns
+// label on every row; name is kept as a fallback for older responses.
+func publicLabel(label, name string) string {
 	if label != "" {
 		return label
 	}
-	if name != "" {
-		return name
-	}
-	if id != "" && !isCompositePKID(id) {
-		return id
-	}
-	return ""
-}
-
-// isCompositePKID reports service:pk values such as slack:12. These are not
-// part of the public addressing contract and must not be used or printed.
-func isCompositePKID(s string) bool {
-	i := strings.LastIndex(s, ":")
-	if i <= 0 || i >= len(s)-1 {
-		return false
-	}
-	for _, c := range s[i+1:] {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
+	return name
 }
 
 func extractPublicIdentity(body []byte) (label, service string) {
 	var rec struct {
-		ID          string `json:"id"`
 		Label       string `json:"label"`
 		Name        string `json:"name"`
 		Service     string `json:"service"`
 		Integration *struct {
-			ID      string `json:"id"`
 			Label   string `json:"label"`
 			Name    string `json:"name"`
 			Service string `json:"service"`
@@ -716,11 +695,11 @@ func extractPublicIdentity(body []byte) (label, service string) {
 	if err := json.Unmarshal(body, &rec); err != nil {
 		return "", ""
 	}
-	label = preferPublicLabel(rec.Label, rec.Name, rec.ID)
+	label = publicLabel(rec.Label, rec.Name)
 	service = rec.Service
 	if rec.Integration != nil {
 		if label == "" {
-			label = preferPublicLabel(rec.Integration.Label, rec.Integration.Name, rec.Integration.ID)
+			label = publicLabel(rec.Integration.Label, rec.Integration.Name)
 		}
 		if service == "" {
 			service = rec.Integration.Service

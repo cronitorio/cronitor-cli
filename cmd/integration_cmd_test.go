@@ -140,14 +140,8 @@ func TestIntegration_ListTableAndFilters(t *testing.T) {
 			t.Errorf("expected table header %q, got:\n%s", header, output)
 		}
 	}
-	if strings.Contains(output, " ID ") || strings.Contains(output, "ID  ") || strings.HasPrefix(strings.TrimSpace(output), "ID") {
-		t.Errorf("list table must not use an ID column, got:\n%s", output)
-	}
 	if !strings.Contains(output, "Workspace") || !strings.Contains(output, "slack") {
 		t.Errorf("expected integration row, got:\n%s", output)
-	}
-	if strings.Contains(output, "slack:") {
-		t.Errorf("must not print composite pk ids, got:\n%s", output)
 	}
 }
 
@@ -331,9 +325,6 @@ func TestIntegration_Create_FormatJSON_ParseableOnly(t *testing.T) {
 	if !strings.Contains(trimmed, "Alerts") {
 		t.Errorf("expected create payload label in JSON stdout, got:\n%s", output)
 	}
-	if strings.Contains(trimmed, "discord:") {
-		t.Errorf("JSON stdout must not teach composite pk ids, got:\n%s", output)
-	}
 }
 
 func TestIntegration_Delete_Force(t *testing.T) {
@@ -471,9 +462,6 @@ func TestIntegration_ListJSONOutputToFile(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "Workspace") {
 		t.Errorf("expected file to contain Workspace, got %s", data)
-	}
-	if strings.Contains(string(data), "slack:") {
-		t.Errorf("file must not teach composite pk ids, got %s", data)
 	}
 	if strings.Contains(output, `"Workspace"`) {
 		t.Error("expected stdout not to contain JSON when writing to a file")
