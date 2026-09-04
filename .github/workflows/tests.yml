@@ -66,6 +66,14 @@ jobs:
           export BATS_PATH="$(which bats)"
           $BATS_PATH *.bats
 
+      - name: Delete monitors created by this run
+        if: always()
+        working-directory: tests
+        shell: bash
+        env:
+          CRONITOR_API_KEY: "${{ secrets.CRONITOR_API_KEY }}"
+        run: ./cleanup-ci-monitors.sh
+
 
   linux-tests:
     name: Run Linux tests
@@ -114,3 +122,10 @@ jobs:
           echo "::add-mask::$CRONITOR_API_KEY"
           export BATS_PATH="$(which bats)"
           sudo -E -n -- $BATS_PATH *.bats
+
+      - name: Delete monitors created by this run
+        if: always()
+        working-directory: tests
+        env:
+          CRONITOR_API_KEY: "${{ secrets.CRONITOR_API_KEY }}"
+        run: ./cleanup-ci-monitors.sh
