@@ -203,17 +203,24 @@ cronitor configure
 
 `cronitor configure` prints `API Key: Set` / `Ping API Key: Set` (or `Not Set`). It never prints complete keys. Dashboard passwords are shown as `********`.
 
-Credential-bearing config files are written as **0600** (owner-only) on Unix. An existing file — including a world-readable **0644** system file — is still **read** for `exec` / `ping`. The next `configure`, signup, or dashboard save **rewrites** it as `0600` and prints a warning that other users will lose read access.
+New config files are created **owner-only** (`0600` on Unix; an owner-restricted ACL on Windows). An existing file keeps its current permissions when saved, so upgrading never changes which users can read it. `exec` and `ping` read the file exactly as before.
 
 Default paths are unchanged: `/etc/cronitor/cronitor.json` (Linux/macOS) and `%SystemDrive%\ProgramData\Cronitor\cronitor.json` (Windows).
 
-If non-root cron or another account still needs credentials after a save:
+If an existing file is readable by other users, `configure` prints a note after saving. To make it owner-only:
 
-1. **Preferred:** inject `CRONITOR_API_KEY` / `CRONITOR_PING_API_KEY` in the crontab or service environment (not in the JSON file). On Windows, set them on the scheduled task or Windows service.
-2. **Shared file:** after the save you may `chmod 0640` and `chgrp` a dedicated group (Unix), or grant that service account read on the file ACL (Windows). The next Cronitor save will set owner-only again.
-3. **Per-user:** a user-owned `0600` file via `--config` / `CRONITOR_CONFIG` for jobs that run as that user.
+```
+cronitor configure --restrict
+```
 
-On Windows, writes apply an owner-restricted ACL (Administrators and SYSTEM still have access — a platform limitation). Unix 0600 bits are not applied. Existing open ACLs are not a reason to fail the write.
+Jobs that run as another user then need credentials from somewhere else:
+
+1. **Preferred:** set `CRONITOR_API_KEY` / `CRONITOR_PING_API_KEY` in the crontab or service environment. On Windows, set them on the scheduled task or Windows service.
+2. **Per-user file:** a user-owned `0600` file via `--config` / `CRONITOR_CONFIG`.
+
+If the config file exists but cannot be read, the CLI prints one warning to stderr naming the path instead of running unconfigured.
+
+On Windows, new files get an owner-restricted ACL (Administrators and SYSTEM keep access, a platform limitation). Existing files keep their ACL unless `--restrict` is passed.
 
 ## MCP Server (AI Integration)
 
