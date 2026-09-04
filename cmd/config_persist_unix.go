@@ -36,3 +36,8 @@ func persistReplaceFile(tmpName, dest string) error {
 func persistPreserveAccess(tmpName, _ string, existing os.FileInfo) error {
 	return os.Chmod(tmpName, existing.Mode().Perm())
 }
+
+// configReadableByOthers reports group or other read bits on the file.
+func configReadableByOthers(_ string, info os.FileInfo) bool {
+	return info.Mode().Perm()&0044 != 0
+}

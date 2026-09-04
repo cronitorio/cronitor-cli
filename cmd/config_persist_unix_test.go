@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/viper"
 )
 
 func TestPersistConfigFile_NewFileIsOwnerOnly(t *testing.T) {
@@ -99,5 +101,95 @@ func TestPersistConfigFile_Existing0600DoesNotWarn(t *testing.T) {
 	})
 	if strings.Contains(stderr, "WARNING") {
 		t.Errorf("did not expect access-narrowed warning for 0600 file, stderr:\n%s", stderr)
+	}
+}
+
+func TestPersistConfigFileMode_RestrictNarrowsExisting0644(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	if err := os.WriteFile(path, []byte(`{"CRONITOR_HOSTNAME":"shared"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr := captureOutput(t, func() {
+		if err := persistConfigFileMode(path, []byte(`{"CRONITOR_HOSTNAME":"shared"}`), true); err != nil {
+			t.Errorf("restricted persist should succeed: %v", err)
+		}
+	})
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Fatalf("restricted save left mode %#o, want 0600", perm)
+	}
+	if strings.Contains(stderr, "readable by other users") {
+		t.Errorf("no shared-access notice expected after --restrict, stderr:\n%s", stderr)
+	}
+}
+
+func TestPersistConfigFile_SharedReadableNotice(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	if err := os.WriteFile(path, []byte(`{"CRONITOR_HOSTNAME":"shared"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr := captureOutput(t, func() {
+		if err := persistConfigFile(path, []byte(`{"CRONITOR_HOSTNAME":"shared","CRONITOR_API_KEY":"test-api-key-not-real"}`)); err != nil {
+			t.Errorf("persist should succeed: %v", err)
+		}
+	})
+	for _, want := range []string{"readable by other users", "--restrict", "CRONITOR_API_KEY"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("expected %q in shared-access notice, stderr:\n%s", want, stderr)
+		}
+	}
+	if strings.Contains(stderr, "WARNING") {
+		t.Errorf("this is a notice, not a warning, stderr:\n%s", stderr)
+	}
+	if strings.Contains(stderr, testAPIKey) {
+		t.Error("notice leaked API key")
+	}
+}
+
+func TestPersistConfigFile_NewFileNoNotice(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	_, stderr := captureOutput(t, func() {
+		if err := persistConfigFile(path, []byte(`{"CRONITOR_HOSTNAME":"new"}`)); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if stderr != "" {
+		t.Errorf("expected no output for a new owner-only file, stderr:\n%s", stderr)
+	}
+}
+
+func TestConfigure_RestrictFlagNarrowsExistingFile(t *testing.T) {
+	resetConfigureTestState(t)
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	if err := os.WriteFile(path, []byte(`{"CRONITOR_HOSTNAME":"shared"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	viper.Set(varConfig, path)
+	configureRestrict = true
+	t.Cleanup(func() { configureRestrict = false })
+
+	captureOutput(t, func() {
+		configureCmd.Run(configureCmd, []string{})
+	})
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Fatalf("configure --restrict left mode %#o, want 0600", perm)
 	}
 }

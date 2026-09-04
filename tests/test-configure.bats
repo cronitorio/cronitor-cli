@@ -153,6 +153,26 @@ teardown() {
   grep "CRONITOR_HOSTNAME" "$CLI_CONFIGFILE_ALTERNATE" | grep -q "$MSG"
 }
 
+@test "Configure --restrict makes an existing 0644 config owner-only" {
+  skip_if_windows
+  printf '%s\n' '{"CRONITOR_HOSTNAME":"keep-me"}' > "$CLI_CONFIGFILE_ALTERNATE"
+  chmod 644 "$CLI_CONFIGFILE_ALTERNATE"
+  CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --restrict >/dev/null 2>&1
+  perms=$(stat -c '%a' "$CLI_CONFIGFILE_ALTERNATE")
+  [ "$perms" = "600" ]
+  grep "CRONITOR_HOSTNAME" "$CLI_CONFIGFILE_ALTERNATE" | grep -q "keep-me"
+}
+
+@test "Configure notes when an existing config is readable by other users" {
+  skip_if_windows
+  printf '%s\n' '{"CRONITOR_HOSTNAME":"keep-me"}' > "$CLI_CONFIGFILE_ALTERNATE"
+  chmod 644 "$CLI_CONFIGFILE_ALTERNATE"
+  run env CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --hostname bats-host
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "readable by other users"
+  echo "$output" | grep -q -- "--restrict"
+}
+
 @test "Configure preserves hostname when writing a new API key" {
   CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --hostname "$MSG" >/dev/null
   CRONITOR_CONFIG=$CLI_CONFIGFILE_ALTERNATE ../cronitor $CRONITOR_ARGS configure --api-key "test-api-key-not-real" >/dev/null

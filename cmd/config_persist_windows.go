@@ -123,3 +123,11 @@ func sddlContainsWorldAllow(sddl string) bool {
 	}
 	return false
 }
+
+// configReadableByOthers reports an allow ACE for Everyone, Users, or
+// Authenticated Users. An unreadable ACL is treated as not shared so the
+// notice never fires on a guess.
+func configReadableByOthers(path string, _ os.FileInfo) bool {
+	shared, err := windowsGrantsWorldRead(path)
+	return err == nil && shared
+}

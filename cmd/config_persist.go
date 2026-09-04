@@ -20,6 +20,14 @@ const configMigrationGuidance = `Use --config or CRONITOR_CONFIG if you need a u
 Preferred: inject CRONITOR_API_KEY and CRONITOR_PING_API_KEY in the crontab or service environment (do not store keys in the JSON file).
 On Windows, set those variables on the scheduled task or Windows service. A later save rewrites the JSON file as owner-only.`
 
+// configSharedReadableNotice is printed to stderr after a save leaves a
+// credential file readable by users other than its owner. It never changes
+// the file; it tells the operator how to, and what jobs need if they do.
+const configSharedReadableNotice = `Note: this configuration file is readable by other users on this host.
+It may contain your API key. To make it owner-only run:
+  cronitor configure --restrict
+Jobs that run as another user then need CRONITOR_API_KEY (and CRONITOR_PING_API_KEY if set) in their crontab or service environment, or their own file via --config / CRONITOR_CONFIG.`
+
 // persistTestHook is invoked after the temp file is fully written and closed,
 // immediately before the atomic rename. Tests set this to simulate a failure
 // that must leave the previous valid file in place.
@@ -89,7 +97,13 @@ func persistConfigFileMode(path string, data []byte, restrict bool) error {
 	}
 
 	ownerOnly := !exists || restrict
-	return atomicWriteConfigFile(path, data, info, exists, ownerOnly)
+	if err := atomicWriteConfigFile(path, data, info, exists, ownerOnly); err != nil {
+		return err
+	}
+	if !ownerOnly && configReadableByOthers(path, info) {
+		fmt.Fprintf(os.Stderr, "\n%s\n%s\n\n", path, configSharedReadableNotice)
+	}
+	return nil
 }
 
 func atomicWriteConfigFile(path string, data []byte, existing os.FileInfo, exists, ownerOnly bool) error {

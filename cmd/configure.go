@@ -44,11 +44,10 @@ By default, configuration files are system-wide for ease of use in cron jobs and
   MacOS        /etc/cronitor/cronitor.json
   Windows      %SystemDrive%\ProgramData\Cronitor\cronitor.json
 
-Credential-bearing config files are written with mode 0600 (owner-only). Existing files remain readable at their current mode (including 0644) until someone saves. The next configure/signup/dash save rewrites the file as 0600 and prints a warning that other users will lose read access.
+New config files are created owner-only (mode 0600; owner-restricted ACL on Windows). An existing file keeps its current permissions when saved, so upgrading never changes which users can read it. If the file is readable by other users, configure prints a note after saving.
 
-Preferred: inject CRONITOR_API_KEY and CRONITOR_PING_API_KEY in the crontab or service environment instead of storing keys in the JSON file.
-If you need a shared file after a save, chmod 0640 and chgrp a dedicated group yourself (the next Cronitor save will set 0600 again).
-Per-user: --config or CRONITOR_CONFIG pointing at a user-owned 0600 file.
+To make an existing file owner-only, run: cronitor configure --restrict
+Jobs that run as another user then need CRONITOR_API_KEY (and CRONITOR_PING_API_KEY if set) in their crontab or service environment, or their own file via --config / CRONITOR_CONFIG.
 
 CronitorCLI configuration can be supplied from a file, environment variables, or command line flags.
 You can use a default config file for some things and environment variables or command line arguments for others -- the goal is flexibility.
@@ -170,15 +169,18 @@ Example setting common exclude text for use with 'cronitor discover':
 		}
 
 		configPath := configFilePath()
-		if err := persistConfigFile(configPath, b); err != nil {
+		if err := persistConfigFileMode(configPath, b, configureRestrict); err != nil {
 			fmt.Fprintf(os.Stderr, "\nERROR: %v\n\n", err)
 			os.Exit(126)
 		}
 	},
 }
 
+var configureRestrict bool
+
 func init() {
 	RootCmd.AddCommand(configureCmd)
+	configureCmd.Flags().BoolVar(&configureRestrict, "restrict", false, "Make the config file owner-only (0600 / owner-restricted ACL), even if it already exists with broader access")
 	configureCmd.Flags().StringSliceP("exclude-from-name", "e", []string{}, "Substring to always exclude from generated monitor name e.g. $ cronitor configure -e '> /dev/null' -e '/path/to/app'")
 	configureCmd.Flags().String("dash-username", "", "Username for the dashboard authentication")
 	configureCmd.Flags().String("dash-password", "", "Password for the dashboard authentication (appears in shell history and process lists; prefer CRONITOR_DASH_PASS)")
