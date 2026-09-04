@@ -44,6 +44,9 @@ func withConnectTest(t *testing.T, mockURL string) func() {
 	viper.Set("CRONITOR_LOG", "")
 	return func() {
 		cleanup()
+		// Tests elsewhere call Execute on a subcommand, which re-runs the root
+		// with whatever args were last set. Leave something inert behind.
+		RootCmd.SetArgs([]string{"--help"})
 		resetConnectFlags()
 		resetIntegrationFlags()
 		resetSecretRedaction()
