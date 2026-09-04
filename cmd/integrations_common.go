@@ -45,104 +45,74 @@ func redactSecretsLog(msg string) {
 	log(redactIntegrationLogMessage(msg))
 }
 
+// redactIntegrationLogMessage scrubs one client log line. Values the user
+// typed or passed with --field are replaced wherever they appear. In a
+// "Request Body" line every value under "fields" is a credential, so the whole
+// map is blanked. Everywhere else, including the catalogue response whose
+// "fields" map holds labels, only secret-named keys are redacted.
 func redactIntegrationLogMessage(msg string) string {
 	for _, secret := range integrationSecretValues {
 		if secret != "" {
 			msg = strings.ReplaceAll(msg, secret, "[REDACTED]")
 		}
 	}
-	if idx := strings.Index(msg, "{"); idx >= 0 {
-		if redacted, ok := redactSecretJSON(msg[idx:]); ok {
-			msg = msg[:idx] + redacted
-		}
+	idx := strings.Index(msg, "{")
+	if idx < 0 {
+		return msg
 	}
-	return msg
-}
-
-func redactSecretJSON(s string) (string, bool) {
 	var v interface{}
-	if json.Unmarshal([]byte(s), &v) != nil {
-		return s, false
+	if json.Unmarshal([]byte(msg[idx:]), &v) != nil {
+		return msg
 	}
-	redactSecretWalk(v)
+	redactSecretWalk(v, strings.HasPrefix(msg, "Request Body:"))
 	out, err := json.Marshal(v)
 	if err != nil {
-		return s, false
+		return msg
 	}
-	return string(out), true
+	return msg[:idx] + string(out)
 }
 
-func redactSecretWalk(v interface{}) {
+func redactSecretWalk(v interface{}, requestBody bool) {
 	switch node := v.(type) {
 	case map[string]interface{}:
 		for k, child := range node {
-			if strings.EqualFold(k, "fields") {
-				redactRequestFieldsObject(child)
+			if requestBody && strings.EqualFold(k, "fields") {
+				redactAllValues(child)
 				continue
 			}
 			if isSecretFieldKey(k) && isScalar(child) {
 				node[k] = "[REDACTED]"
 				continue
 			}
-			redactSecretWalk(child)
+			redactSecretWalk(child, requestBody)
 		}
 	case []interface{}:
 		for _, child := range node {
-			redactSecretWalk(child)
+			redactSecretWalk(child, requestBody)
 		}
 	}
 }
 
-// redactRequestFieldsObject redacts secret values in a request-body fields map
-// ({"api_key":"secret"} or nested {"auth":{"token":"S"}}). Catalogue field
-// metadata objects ({"api_key":{"label":"...","required":true,"secret":true}})
-// are left intact via a public-metadata key allowlist.
-func redactRequestFieldsObject(v interface{}) {
+// redactAllValues blanks every scalar under a request-body fields map,
+// including nested objects and arrays.
+func redactAllValues(v interface{}) {
 	switch node := v.(type) {
 	case map[string]interface{}:
-		if isCatalogueFieldMetadata(node) {
-			return
-		}
 		for k, child := range node {
-			switch child.(type) {
-			case map[string]interface{}, []interface{}:
-				redactRequestFieldsObject(child)
-			default:
+			if isScalar(child) {
 				node[k] = "[REDACTED]"
+			} else {
+				redactAllValues(child)
 			}
 		}
 	case []interface{}:
 		for i, child := range node {
-			switch child.(type) {
-			case map[string]interface{}, []interface{}:
-				redactRequestFieldsObject(child)
-			default:
+			if isScalar(child) {
 				node[i] = "[REDACTED]"
+			} else {
+				redactAllValues(child)
 			}
 		}
-	}
-}
-
-func isCatalogueFieldMetadata(m map[string]interface{}) bool {
-	if len(m) == 0 {
-		return false
-	}
-	hasMetadata := false
-	for k := range m {
-		if !isCatalogueMetadataKey(k) {
-			return false
-		}
-		hasMetadata = true
-	}
-	return hasMetadata
-}
-
-func isCatalogueMetadataKey(k string) bool {
-	switch strings.ToLower(k) {
-	case "label", "name", "secret", "required", "help", "prompt", "type", "placeholder", "description":
-		return true
-	default:
-		return false
 	}
 }
 
@@ -177,7 +147,6 @@ type catalogueField struct {
 	Key    string
 	Label  string
 	Secret bool
-	Help   string
 }
 
 type integrationRecord struct {
@@ -244,84 +213,27 @@ func parseFieldFlags(fields []string) (map[string]string, error) {
 	return out, nil
 }
 
+// parseCatalogueFields reads the catalogue's fields map, which is
+// {"<key>": "<label>"}. Keys are returned in sorted order.
 func parseCatalogueFields(raw json.RawMessage) []catalogueField {
-	if len(raw) == 0 || string(raw) == "null" || string(raw) == "{}" || string(raw) == "[]" {
+	var asMap map[string]string
+	if len(raw) == 0 || json.Unmarshal(raw, &asMap) != nil {
 		return nil
 	}
-
-	var asMap map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &asMap); err == nil {
-		keys := make([]string, 0, len(asMap))
-		for k := range asMap {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		fields := make([]catalogueField, 0, len(keys))
-		for _, k := range keys {
-			f := catalogueField{Key: k, Label: k, Secret: catalogueFieldIsSecret(k)}
-			var obj struct {
-				Label  string `json:"label"`
-				Name   string `json:"name"`
-				Secret *bool  `json:"secret"`
-				Help   string `json:"help"`
-				Prompt string `json:"prompt"`
-			}
-			if json.Unmarshal(asMap[k], &obj) == nil && (obj.Label != "" || obj.Name != "" || obj.Secret != nil || obj.Help != "" || obj.Prompt != "") {
-				if obj.Label != "" {
-					f.Label = obj.Label
-				} else if obj.Name != "" {
-					f.Label = obj.Name
-				} else if obj.Prompt != "" {
-					f.Label = obj.Prompt
-				}
-				if obj.Secret != nil {
-					f.Secret = *obj.Secret
-				}
-				f.Help = obj.Help
-			} else {
-				var s string
-				if json.Unmarshal(asMap[k], &s) == nil && s != "" {
-					f.Label = s
-				}
-			}
-			fields = append(fields, f)
-		}
-		return fields
+	keys := make([]string, 0, len(asMap))
+	for k := range asMap {
+		keys = append(keys, k)
 	}
-
-	var asArr []struct {
-		Key    string `json:"key"`
-		Name   string `json:"name"`
-		Label  string `json:"label"`
-		Secret *bool  `json:"secret"`
-		Help   string `json:"help"`
-	}
-	if err := json.Unmarshal(raw, &asArr); err == nil {
-		fields := make([]catalogueField, 0, len(asArr))
-		for _, item := range asArr {
-			key := item.Key
-			if key == "" {
-				key = item.Name
-			}
-			if key == "" {
-				continue
-			}
-			f := catalogueField{Key: key, Label: key, Secret: catalogueFieldIsSecret(key)}
-			if item.Label != "" {
-				f.Label = item.Label
-			} else if item.Name != "" && item.Key != "" {
-				f.Label = item.Name
-			}
-			if item.Secret != nil {
-				f.Secret = *item.Secret
-			}
-			f.Help = item.Help
-			fields = append(fields, f)
+	sort.Strings(keys)
+	fields := make([]catalogueField, 0, len(keys))
+	for _, k := range keys {
+		label := asMap[k]
+		if label == "" {
+			label = k
 		}
-		return fields
+		fields = append(fields, catalogueField{Key: k, Label: label, Secret: catalogueFieldIsSecret(k)})
 	}
-
-	return nil
+	return fields
 }
 
 func fetchCatalogue(client *lib.APIClient) ([]catalogueService, []byte, error) {
@@ -544,18 +456,11 @@ func promptCatalogueFields(fields []catalogueField, provided map[string]string) 
 		if _, ok := out[field.Key]; ok {
 			continue
 		}
-		label := field.Label
-		if label == "" {
-			label = field.Key
-		}
-		if field.Help != "" {
-			fmt.Fprintln(os.Stderr, field.Help)
-		}
 		read := readSecretFn
 		if !field.Secret {
 			read = readLineFn
 		}
-		val, err := read(fmt.Sprintf("%s: ", label))
+		val, err := read(fmt.Sprintf("%s: ", field.Label))
 		if err != nil {
 			return nil, fmt.Errorf("field %q not provided (use --field %s=<value> or run in a terminal)", field.Key, field.Key)
 		}

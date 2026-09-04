@@ -103,7 +103,7 @@ func catalogueJSON() string {
     {"service":"slack","service_name":"Slack","type":"oauth","method":"oauth","fields":{},"available":true},
     {"service":"pagerduty","service_name":"PagerDuty","type":"oauth","method":"oauth","fields":{},"available":true},
     {"service":"discord","service_name":"Discord","type":"Messaging","method":"apikey","fields":{"key":"Webhook URL"},"available":true},
-    {"service":"opsgenie","service_name":"Opsgenie","type":"api_key","method":"api_key","fields":{"api_key":{"label":"API Key","secret":true,"required":true}},"available":true},
+    {"service":"opsgenie","service_name":"Opsgenie","type":"Messaging","method":"apikey","fields":{"key":"API Key"},"available":true},
     {"service":"webhook","service_name":"Webhook","type":"Messaging","method":"apikey","fields":{"key":"URL"},"available":true},
     {"service":"telegram","service_name":"Telegram","type":"Messaging","method":"link","fields":{"type":"Type"},"available":true}
   ]
@@ -175,7 +175,7 @@ func TestConnect_APIKey_FieldFlag_SecretsAbsentFromStdout(t *testing.T) {
 	cleanup := withConnectTest(t, server.URL)
 	defer cleanup()
 
-	output, code, err := executeWithExit("connect", "opsgenie", "--name", "On-call", "--field", "api_key="+secret)
+	output, code, err := executeWithExit("connect", "opsgenie", "--name", "On-call", "--field", "key="+secret)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -200,8 +200,8 @@ func TestConnect_APIKey_FieldFlag_SecretsAbsentFromStdout(t *testing.T) {
 		t.Errorf("expected name On-call, got %#v", payload["name"])
 	}
 	fields, _ := payload["fields"].(map[string]interface{})
-	if fields["api_key"] != secret {
-		t.Errorf("expected fields.api_key in request, got %#v", payload["fields"])
+	if fields["key"] != secret {
+		t.Errorf("expected fields.key in request, got %#v", payload["fields"])
 	}
 }
 
@@ -723,7 +723,7 @@ func TestConnect_SecretsRedactedFromVerboseAndLog(t *testing.T) {
 
 	verbose = true
 	viper.Set(varLog, logFile)
-	output, code, err := executeWithExit("--verbose", "--log", logFile, "connect", "opsgenie", "--name", "On-call", "--field", "api_key="+secret)
+	output, code, err := executeWithExit("--verbose", "--log", logFile, "connect", "opsgenie", "--name", "On-call", "--field", "key="+secret)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -740,8 +740,8 @@ func TestConnect_SecretsRedactedFromVerboseAndLog(t *testing.T) {
 	if strings.Contains(string(data), secret) {
 		t.Errorf("secret leaked to --log file:\n%s", data)
 	}
-	if !strings.Contains(string(data), `"label":"API Key"`) {
-		t.Errorf("catalogue fields metadata must remain visible as \"label\":\"API Key\" under --verbose/--log, got:\n%s", data)
+	if !strings.Contains(string(data), `"key":"API Key"`) {
+		t.Errorf("catalogue field labels must remain visible under --verbose/--log, got:\n%s", data)
 	}
 }
 
@@ -765,29 +765,27 @@ func TestParseCatalogueFields_ServerStringShape(t *testing.T) {
 	}
 }
 
-func TestRedactRequestFields_NestedSecretsAndCatalogueMetadata(t *testing.T) {
-	request := `{"service":"webhook","fields":{"auth":{"token":"nested-token-secret"},"urls":["array-secret-value"],"api_key":"scalar-secret"}}`
-	redacted, ok := redactSecretJSON(request)
-	if !ok {
-		t.Fatal("expected request JSON to be redacted")
+func TestRedactLog_RequestFieldsBlanketAndResponseByKeyName(t *testing.T) {
+	request := `Request Body: {"service":"webhook","fields":{"auth":{"token":"nested-token-secret"},"urls":["array-secret-value"],"key":"scalar-secret"}}`
+	redacted := redactIntegrationLogMessage(request)
+	for _, leak := range []string{"nested-token-secret", "array-secret-value", "scalar-secret"} {
+		if strings.Contains(redacted, leak) {
+			t.Errorf("request field secret leaked: %s", redacted)
+		}
 	}
-	if strings.Contains(redacted, "nested-token-secret") || strings.Contains(redacted, "array-secret-value") || strings.Contains(redacted, "scalar-secret") {
-		t.Errorf("nested field secrets leaked: %s", redacted)
-	}
-	if !strings.Contains(redacted, "[REDACTED]") {
-		t.Errorf("expected [REDACTED] placeholders, got %s", redacted)
+	if !strings.HasPrefix(redacted, "Request Body: ") || !strings.Contains(redacted, "[REDACTED]") {
+		t.Errorf("expected prefixed, redacted request line, got %s", redacted)
 	}
 
-	catalogue := `{"services":[{"service":"opsgenie","fields":{"api_key":{"label":"API Key","secret":true,"required":true}}}]}`
-	kept, ok := redactSecretJSON(catalogue)
-	if !ok {
-		t.Fatal("expected catalogue JSON to parse")
+	catalogue := `Response Body: {"services":[{"service":"webhook","fields":{"key":"URL"}},{"service":"telegram","fields":{"type":"Type"}}]}`
+	kept := redactIntegrationLogMessage(catalogue)
+	if !strings.Contains(kept, `"key":"URL"`) || !strings.Contains(kept, `"type":"Type"`) {
+		t.Errorf("catalogue labels in a response must stay readable, got %s", kept)
 	}
-	if !strings.Contains(kept, `"label":"API Key"`) {
-		t.Errorf("catalogue metadata label was redacted: %s", kept)
-	}
-	if !strings.Contains(kept, `"required":true`) {
-		t.Errorf("catalogue metadata required flag was redacted: %s", kept)
+
+	response := `Response Body: {"label":"Hook","metadata":{"api_key":"echoed-secret"}}`
+	if got := redactIntegrationLogMessage(response); strings.Contains(got, "echoed-secret") {
+		t.Errorf("secret-named keys in a response must still be redacted, got %s", got)
 	}
 }
 
