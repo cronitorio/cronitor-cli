@@ -1337,3 +1337,24 @@ func TestVersionHeader_ViperPriority_EnvOverridesConfig(t *testing.T) {
 		t.Errorf("expected override version 2025-11-28, got %q", cv)
 	}
 }
+
+func TestAPIResponse_ParseError_FieldValidationMap(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"duplicate name", `{"name": ["name must be unique"]}`, "name: name must be unique"},
+		{"two fields sorted", `{"name": ["name must be unique"], "identifier": ["identifier must be unique"]}`, "identifier: identifier must be unique; name: name must be unique"},
+		{"invalid fields list", `{"error": "invalid_fields", "fields": ["url"]}`, "invalid_fields: url"},
+		{"plain error still wins", `{"error": "unknown_service"}`, "unknown_service"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := &lib.APIResponse{StatusCode: 400, Body: []byte(tc.body)}
+			if got := resp.ParseError(); got != tc.want {
+				t.Errorf("ParseError() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
