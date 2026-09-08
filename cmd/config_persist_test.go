@@ -298,3 +298,45 @@ func TestPersistConfigFile_WriteFailureLeavesOriginal(t *testing.T) {
 		}
 	}
 }
+
+func TestSaveSignupCredentials_ReplacesLowercaseKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	// The shape viper.WriteConfig produced in older releases.
+	existing := `{"cronitor_api_key":"old-key-not-real","cronitor_ping_api_key":"old-ping-not-real","cronitor_hostname":"keep-host"}`
+	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
+		t.Fatal(err)
+	}
+	prev := viper.GetString(varConfig)
+	viper.Set(varConfig, path)
+	t.Cleanup(func() {
+		viper.Set(varConfig, prev)
+		viper.Set(varApiKey, "")
+		viper.Set(varPingApiKey, "")
+	})
+
+	if err := saveSignupCredentials("new-key-not-real", "new-ping-not-real"); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("file is not JSON: %s", data)
+	}
+	if got["CRONITOR_API_KEY"] != "new-key-not-real" || got["CRONITOR_PING_API_KEY"] != "new-ping-not-real" {
+		t.Errorf("new keys not written: %s", data)
+	}
+	for _, stale := range []string{"cronitor_api_key", "cronitor_ping_api_key"} {
+		if _, ok := got[stale]; ok {
+			t.Errorf("stale lowercase credential %q left in file: %s", stale, data)
+		}
+	}
+	if strings.Contains(string(data), "old-key-not-real") || strings.Contains(string(data), "old-ping-not-real") {
+		t.Errorf("old credentials still present: %s", data)
+	}
+	if got["cronitor_hostname"] != "keep-host" {
+		t.Errorf("unrelated lowercase key must be kept: %s", data)
+	}
+}

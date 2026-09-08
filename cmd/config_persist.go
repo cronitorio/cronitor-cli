@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -243,6 +244,13 @@ func saveSignupCredentials(respApiKey, respPingApiKey string) error {
 		return wrapPersistWriteError(path, err)
 	} else {
 		return persistCurrentConfig()
+	}
+	// Older viper.WriteConfig files used lowercase names. Drop any spelling
+	// of the two credential keys so the file never carries a stale copy.
+	for k := range merged {
+		if strings.EqualFold(k, varApiKey) || strings.EqualFold(k, varPingApiKey) {
+			delete(merged, k)
+		}
 	}
 	merged[varApiKey] = respApiKey
 	merged[varPingApiKey] = respPingApiKey
