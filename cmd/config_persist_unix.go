@@ -3,6 +3,8 @@
 package cmd
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"syscall"
 )
@@ -16,12 +18,20 @@ func persistLockdownNewFile(path string) error {
 	return os.Chmod(path, configModeOwnerOnly)
 }
 
+// persistPreserveOwner keeps the replaced file's owner and group when the
+// writer is allowed to. A non-root user rewriting a group-writable file it
+// does not own gets EPERM from chown; that write used to succeed in place,
+// so ownership falls to the writer instead of failing the save.
 func persistPreserveOwner(tmpName string, existing os.FileInfo) error {
 	stat, ok := existing.Sys().(*syscall.Stat_t)
 	if !ok {
 		return nil
 	}
-	return os.Chown(tmpName, int(stat.Uid), int(stat.Gid))
+	err := os.Chown(tmpName, int(stat.Uid), int(stat.Gid))
+	if err != nil && errors.Is(err, fs.ErrPermission) {
+		return nil
+	}
+	return err
 }
 
 func persistReplaceFile(tmpName, dest string) error {
