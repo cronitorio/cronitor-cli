@@ -203,7 +203,7 @@ cronitor configure
 
 `cronitor configure` prints `API Key: Set` / `Ping API Key: Set` (or `Not Set`). It never prints complete keys. Dashboard passwords are shown as `********`.
 
-New config files are created **owner-only** (`0600` on Unix; an owner-restricted ACL on Windows). An existing file keeps its current permissions when saved, so upgrading never changes which users can read it. `exec` and `ping` read the file exactly as before.
+New config files are created **owner-only** (`0600` on Unix; an owner-restricted ACL on Windows), and `configure` prints a note saying so the first time. An existing file keeps its current permissions when saved, so upgrading never changes which users can read it. `exec` and `ping` read the file exactly as before.
 
 Default paths are unchanged: `/etc/cronitor/cronitor.json` (Linux/macOS) and `%SystemDrive%\ProgramData\Cronitor\cronitor.json` (Windows).
 

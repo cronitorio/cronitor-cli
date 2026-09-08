@@ -28,6 +28,13 @@ It may contain your API key. To make it owner-only run:
   cronitor configure --restrict
 Jobs that run as another user then need CRONITOR_API_KEY (and CRONITOR_PING_API_KEY if set) in their crontab or service environment, or their own file via --config / CRONITOR_CONFIG.`
 
+// configNewFileNotice is printed to stderr once, when a credential file is
+// created. New files are owner-only, which differs from the world-readable
+// files older releases wrote, so an operator with jobs on other accounts
+// learns about it at the moment of creation rather than from a failing job.
+const configNewFileNotice = `Note: created this configuration file owner-only (mode 0600), so other users on this host cannot read it.
+If jobs run as another user, give them CRONITOR_API_KEY (and CRONITOR_PING_API_KEY if set) in their crontab or service environment, point them at their own file with --config / CRONITOR_CONFIG, or chmod this file yourself to share it.`
+
 // persistTestHook is invoked after the temp file is fully written and closed,
 // immediately before the atomic rename. Tests set this to simulate a failure
 // that must leave the previous valid file in place.
@@ -100,7 +107,10 @@ func persistConfigFileMode(path string, data []byte, restrict bool) error {
 	if err := atomicWriteConfigFile(path, data, info, exists, ownerOnly); err != nil {
 		return err
 	}
-	if !ownerOnly && configReadableByOthers(path, info) {
+	switch {
+	case !exists:
+		fmt.Fprintf(os.Stderr, "\n%s\n%s\n\n", path, configNewFileNotice)
+	case !ownerOnly && configReadableByOthers(path, info):
 		fmt.Fprintf(os.Stderr, "\n%s\n%s\n\n", path, configSharedReadableNotice)
 	}
 	return nil

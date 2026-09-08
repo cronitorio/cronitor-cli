@@ -157,15 +157,38 @@ func TestPersistConfigFile_SharedReadableNotice(t *testing.T) {
 	}
 }
 
-func TestPersistConfigFile_NewFileNoNotice(t *testing.T) {
+func TestPersistConfigFile_NewFileNotice(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cronitor.json")
 	_, stderr := captureOutput(t, func() {
-		if err := persistConfigFile(path, []byte(`{"CRONITOR_HOSTNAME":"new"}`)); err != nil {
+		if err := persistConfigFile(path, []byte(`{"CRONITOR_API_KEY":"test-api-key-not-real"}`)); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, want := range []string{"owner-only", "other users", "CRONITOR_API_KEY", "chmod"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("expected %q in new-file notice, stderr:\n%s", want, stderr)
+		}
+	}
+	if strings.Contains(stderr, "readable by other users") {
+		t.Errorf("new owner-only file must not get the shared-access notice, stderr:\n%s", stderr)
+	}
+	if strings.Contains(stderr, testAPIKey) {
+		t.Error("new-file notice leaked API key")
+	}
+}
+
+func TestPersistConfigFile_RestrictedSaveIsQuiet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	if err := persistConfigFile(path, []byte(`{"CRONITOR_HOSTNAME":"owned"}`)); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr := captureOutput(t, func() {
+		if err := persistConfigFile(path, []byte(`{"CRONITOR_HOSTNAME":"owned","CRONITOR_ENV":"prod"}`)); err != nil {
 			t.Fatal(err)
 		}
 	})
 	if stderr != "" {
-		t.Errorf("expected no output for a new owner-only file, stderr:\n%s", stderr)
+		t.Errorf("saving an existing 0600 file must print nothing, stderr:\n%s", stderr)
 	}
 }
 
