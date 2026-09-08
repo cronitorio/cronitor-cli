@@ -219,3 +219,44 @@ func TestPrintCronitorEnvSources_RedactsValuesAndUnrelatedNames(t *testing.T) {
 		t.Errorf("expected allowlisted name with Set, got:\n%s", stdout)
 	}
 }
+
+func TestSaveSignupCredentials_PreservesKeysOutsideConfigFileStruct(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	existing := `{"CRONITOR_HOSTNAME":"keep-host","CRONITOR_MCP_INSTANCE":"team-a","custom_setting":{"nested":true}}`
+	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	prev := viper.GetString(varConfig)
+	viper.Set(varConfig, path)
+	t.Cleanup(func() {
+		viper.Set(varConfig, prev)
+		viper.Set(varApiKey, "")
+		viper.Set(varPingApiKey, "")
+	})
+
+	if err := saveSignupCredentials("signup-api-key-not-real", "signup-ping-key-not-real"); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("file is not JSON: %s", data)
+	}
+	if got["CRONITOR_API_KEY"] != "signup-api-key-not-real" || got["CRONITOR_PING_API_KEY"] != "signup-ping-key-not-real" {
+		t.Errorf("keys not written: %s", data)
+	}
+	if got["CRONITOR_HOSTNAME"] != "keep-host" {
+		t.Errorf("hostname dropped: %s", data)
+	}
+	if got["CRONITOR_MCP_INSTANCE"] != "team-a" {
+		t.Errorf("setting outside ConfigFile struct dropped: %s", data)
+	}
+	if _, ok := got["custom_setting"]; !ok {
+		t.Errorf("unknown key dropped: %s", data)
+	}
+}

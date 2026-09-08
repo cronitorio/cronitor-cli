@@ -251,10 +251,33 @@ func persistCurrentConfig() error {
 	return persistConfigFile(configFilePath(), b)
 }
 
+// saveSignupCredentials stores the keys returned by signup. It merges them
+// into the existing file's JSON so settings the ConfigFile struct does not
+// model (extra keys, MCP instance config) survive, matching what
+// viper.WriteConfig preserved before.
 func saveSignupCredentials(respApiKey, respPingApiKey string) error {
 	viper.Set(varApiKey, respApiKey)
 	viper.Set(varPingApiKey, respPingApiKey)
-	return persistCurrentConfig()
+
+	path := configFilePath()
+	merged := map[string]interface{}{}
+	if data, err := os.ReadFile(path); err == nil {
+		if json.Unmarshal(data, &merged) != nil {
+			// Unparseable existing file: fall back to the known schema.
+			return persistCurrentConfig()
+		}
+	} else if !os.IsNotExist(err) {
+		return wrapPersistWriteError(path, err)
+	} else {
+		return persistCurrentConfig()
+	}
+	merged[varApiKey] = respApiKey
+	merged[varPingApiKey] = respPingApiKey
+	b, err := json.MarshalIndent(merged, "", "    ")
+	if err != nil {
+		return err
+	}
+	return persistConfigFile(path, b)
 }
 
 func formatSignupPersistError(writeErr error) error {
