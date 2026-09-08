@@ -4,17 +4,15 @@ package cmd
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 
 	"golang.org/x/sys/unix"
 )
 
-// persistCloneXattrs copies every extended attribute from src to dst. On Linux
-// this is how POSIX ACLs travel (system.posix_acl_access). Attributes the
-// writer is not allowed to set, such as security.* labels, are skipped; an
-// ACL that cannot be copied fails the save, because dropping it would change
-// who can read the credentials.
+// persistCloneXattrs copies extended attributes from src to dst, other than
+// the access ACL, which persistSyncACL handles so that it can also remove an
+// inherited one. Attributes the writer is not allowed to set, such as
+// security.* labels, are skipped.
 func persistCloneXattrs(src, dst string) error {
 	names, err := listXattrs(src)
 	if err != nil {
@@ -24,20 +22,15 @@ func persistCloneXattrs(src, dst string) error {
 		return err
 	}
 	for _, name := range names {
+		if isACLXattr(name) {
+			continue
+		}
 		value, err := getXattr(src, name)
 		if err != nil {
-			if isACLXattr(name) {
-				return fmt.Errorf("cannot read ACL %s: %w", name, err)
-			}
 			continue
 		}
-		if err := unix.Setxattr(dst, name, value, 0); err != nil {
-			if isACLXattr(name) {
-				return fmt.Errorf("cannot preserve ACL %s on the replacement file: %w", name, err)
-			}
-			// security.*, trusted.*, and similar need privileges we may lack.
-			continue
-		}
+		// security.*, trusted.*, and similar need privileges we may lack.
+		_ = unix.Setxattr(dst, name, value, 0)
 	}
 	return nil
 }

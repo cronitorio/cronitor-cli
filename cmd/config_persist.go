@@ -117,6 +117,12 @@ func persistConfigFileMode(path string, data []byte, restrict bool) error {
 	return nil
 }
 
+// persistCreateTemp makes the staging file next to the destination so the
+// final rename stays on one filesystem.
+func persistCreateTemp(path string) (*os.File, error) {
+	return os.CreateTemp(filepath.Dir(path), ".cronitor-config-*.tmp")
+}
+
 // persistWriteFn writes the config bytes to the temp file. Tests replace it
 // to simulate a failing write and prove the previous file is untouched.
 var persistWriteFn = func(f *os.File, data []byte) (int, error) {
@@ -129,11 +135,12 @@ var persistWriteFn = func(f *os.File, data []byte) (int, error) {
 //
 // For a plain save of an existing file the temp is given the existing file's
 // access first: mode bits, owner and group where the writer may set them,
-// extended attributes (which is where Linux keeps POSIX ACLs), and on macOS
-// the file is cloned so its ACL comes along. For a new file, or --restrict,
-// the temp is owner-only and carries nothing over, so ACL grants are dropped.
+// extended attributes, and an access ACL that matches the original exactly,
+// including removing one the temp inherited from the directory when the
+// original has none. For a new file, or --restrict, the temp is owner-only
+// with any inherited ACL removed, so no grant survives.
 func atomicWriteConfigFile(path string, data []byte, existing os.FileInfo, exists, ownerOnly bool) error {
-	tmp, err := persistCreateTemp(path, existing, exists && !ownerOnly)
+	tmp, err := persistCreateTemp(path)
 	if err != nil {
 		return wrapPersistWriteError(path, err)
 	}
@@ -147,8 +154,12 @@ func atomicWriteConfigFile(path string, data []byte, existing os.FileInfo, exist
 	}()
 
 	if ownerOnly {
-		// Restrict before the first byte of the secret is written.
+		// Restrict before the first byte of the secret is written, and drop
+		// any ACL the directory's default ACL put on the new file.
 		if err := persistApplyMode(tmp, tmpName, configModeOwnerOnly); err != nil {
+			return wrapPersistWriteError(path, err)
+		}
+		if err := persistClearACL(tmpName); err != nil {
 			return wrapPersistWriteError(path, err)
 		}
 	} else if err := persistCloneAccess(tmpName, path, existing); err != nil {

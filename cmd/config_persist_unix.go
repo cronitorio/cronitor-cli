@@ -25,15 +25,31 @@ func persistReplaceFile(tmpName, dest string) error {
 }
 
 // persistCloneAccess gives the replacement file the access of the file it
-// replaces: mode bits, owner and group, and extended attributes.
+// replaces: mode bits, owner and group, extended attributes, and an access
+// ACL identical to the original's (or none). The mode is checked afterwards
+// because applying an ACL can rewrite the group bits.
 func persistCloneAccess(tmpName, src string, existing os.FileInfo) error {
-	if err := os.Chmod(tmpName, existing.Mode().Perm()); err != nil {
+	want := existing.Mode().Perm()
+	if err := os.Chmod(tmpName, want); err != nil {
 		return err
 	}
 	if err := persistCloneOwner(tmpName, existing); err != nil {
 		return err
 	}
-	return persistCloneXattrs(src, tmpName)
+	if err := persistCloneXattrs(src, tmpName); err != nil {
+		return err
+	}
+	if err := persistSyncACL(src, tmpName); err != nil {
+		return err
+	}
+	info, err := os.Stat(tmpName)
+	if err != nil {
+		return err
+	}
+	if got := info.Mode().Perm(); got != want {
+		return fmt.Errorf("replacement file mode is %#o, want %#o", got, want)
+	}
+	return nil
 }
 
 // persistCloneOwner keeps the previous owner and group. Only root may give a

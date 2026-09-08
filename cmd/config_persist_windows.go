@@ -5,7 +5,6 @@ package cmd
 import (
 	"os"
 	"os/user"
-	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/windows"
@@ -37,10 +36,9 @@ func persistReplaceFile(tmpName, dest string) error {
 	return windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING)
 }
 
-// persistCreateTemp makes the staging file next to the destination.
-func persistCreateTemp(path string, _ os.FileInfo, _ bool) (*os.File, error) {
-	return os.CreateTemp(filepath.Dir(path), ".cronitor-config-*.tmp")
-}
+// persistClearACL is not needed on Windows: the owner-only DACL applied to
+// the temp file is protected, so nothing is inherited from the directory.
+func persistClearACL(_ string) error { return nil }
 
 // persistCloneAccess copies the existing file's DACL onto the replacement so
 // a save does not change who can read the configuration.
