@@ -27,13 +27,17 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install web dependencies
         shell: bash
         run: |
           cd web
           npm install
+
+      - name: Test dependency fixes
+        shell: bash
+        run: cd web && npm run test:dependencies
 
       - name: Build web assets
         shell: bash
@@ -89,12 +93,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install web dependencies
         run: |
           cd web
           npm install
+
+      - name: Test dependency fixes
+        run: cd web && npm run test:dependencies
 
       - name: Build web assets
         run: |
