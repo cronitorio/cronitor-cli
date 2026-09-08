@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -214,5 +215,45 @@ func TestConfigure_RestrictFlagNarrowsExistingFile(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0600 {
 		t.Fatalf("configure --restrict left mode %#o, want 0600", perm)
+	}
+}
+
+func TestPersistConfigFile_ExistingFileKeepsOwnerGroupAndInode(t *testing.T) {
+	if os.Getuid() != 0 {
+		t.Skip("needs root to set up a file owned by another user")
+	}
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	if err := os.WriteFile(path, []byte(`{"CRONITOR_HOSTNAME":"shared"}`), 0660); err != nil {
+		t.Fatal(err)
+	}
+	// nobody:nogroup, group-writable: the shape of a shared team config.
+	if err := os.Chown(path, 65534, 65534); err != nil {
+		t.Skipf("cannot chown to nobody: %v", err)
+	}
+	if err := os.Chmod(path, 0660); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := persistConfigFile(path, []byte(`{"CRONITOR_HOSTNAME":"shared","CRONITOR_API_KEY":"test-api-key-not-real"}`)); err != nil {
+		t.Fatalf("persist should succeed: %v", err)
+	}
+
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs, as := before.Sys().(*syscall.Stat_t), after.Sys().(*syscall.Stat_t)
+	if as.Uid != bs.Uid || as.Gid != bs.Gid {
+		t.Errorf("owner changed: before %d:%d after %d:%d", bs.Uid, bs.Gid, as.Uid, as.Gid)
+	}
+	if as.Ino != bs.Ino {
+		t.Errorf("inode changed (%d -> %d); an existing file must be updated in place so ACLs and xattrs survive", bs.Ino, as.Ino)
+	}
+	if perm := after.Mode().Perm(); perm != 0660 {
+		t.Errorf("mode changed to %#o, want 0660", perm)
 	}
 }

@@ -10,23 +10,16 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// persistApplyMode is a no-op for Unix mode bits on Windows. Owner-restricted
-// ACLs are applied via persistLockdownNewFile.
-//
-// Platform limitation: Windows does not honor 0600/0640 the way Unix does.
-// os.Chmod only toggles the read-only attribute and is not used here.
-func persistApplyMode(_ *os.File, _ string, _ os.FileMode) error {
-	return nil
+// persistApplyMode restricts a freshly created temp file before any secret
+// is written to it. Unix mode bits mean nothing here; a temp file in
+// %ProgramData% would otherwise inherit that folder's ACL, which usually
+// grants BUILTIN\Users read, for the duration of the write.
+func persistApplyMode(_ *os.File, tmpName string, _ os.FileMode) error {
+	return applyOwnerOnlyACL(tmpName)
 }
 
 func persistLockdownNewFile(path string) error {
 	return applyOwnerOnlyACL(path)
-}
-
-func persistPreserveOwner(_ string, _ os.FileInfo) error {
-	// Windows replace keeps the destination name; owner-only ACL is applied
-	// to the replacement file. The writing user is the new owner.
-	return nil
 }
 
 func persistReplaceFile(tmpName, dest string) error {
@@ -43,23 +36,10 @@ func persistReplaceFile(tmpName, dest string) error {
 	return windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING)
 }
 
-// persistPreserveAccess copies the existing file's DACL onto the replacement
-// so a save does not change who can read the configuration.
-func persistPreserveAccess(tmpName, dest string, _ os.FileInfo) error {
-	sd, err := windows.GetNamedSecurityInfo(dest, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
-	if err != nil {
-		return err
-	}
-	dacl, _, err := sd.DACL()
-	if err != nil {
-		return err
-	}
-	return windows.SetNamedSecurityInfo(
-		tmpName,
-		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil, nil, dacl, nil,
-	)
+// persistOpenExisting opens an existing config file for an in-place rewrite,
+// which keeps its DACL exactly as the operator left it.
+func persistOpenExisting(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
 }
 
 func applyOwnerOnlyACL(path string) error {
