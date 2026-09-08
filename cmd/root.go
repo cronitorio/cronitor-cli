@@ -130,7 +130,22 @@ func initConfig() {
 		if path == "" {
 			path = configFilePath()
 		}
-		fmt.Fprintf(os.Stderr, "Warning: could not read config file %s: %v\n", path, err)
+		fmt.Fprintf(os.Stderr, "Warning: could not read config file %s (%s)\n", path, configReadFailureReason(err))
+	}
+}
+
+// configReadFailureReason classifies a config read error without repeating
+// the parser's diagnostic, which for some formats quotes the offending line
+// and could echo a stored secret.
+func configReadFailureReason(err error) string {
+	var pathErr *fs.PathError
+	switch {
+	case errors.Is(err, fs.ErrPermission):
+		return "permission denied"
+	case errors.As(err, &pathErr):
+		return "file could not be opened"
+	default:
+		return "file is not valid JSON"
 	}
 }
 

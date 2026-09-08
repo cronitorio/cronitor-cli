@@ -215,3 +215,37 @@ func TestInitConfig_ReportsUnreadableConfigFile(t *testing.T) {
 		t.Errorf("missing config file must stay silent, stderr:\n%s", stderr)
 	}
 }
+
+func TestInitConfig_UnreadableWarningDoesNotEchoFileContents(t *testing.T) {
+	prev := viper.GetString(varConfig)
+	t.Cleanup(func() {
+		viper.Set(varConfig, prev)
+		viper.SetConfigFile("")
+	})
+
+	// Malformed JSON that still contains a secret-looking value. Parser
+	// diagnostics must not reproduce any of the file's text.
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	if err := os.WriteFile(path, []byte(`{"CRONITOR_API_KEY": "`+testAPIKey+`" trailing garbage`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	viper.Set(varConfig, path)
+	_, stderr := captureOutput(t, initConfig)
+	if !strings.Contains(stderr, "could not read") || !strings.Contains(stderr, path) {
+		t.Errorf("expected unreadable-config warning naming the path, stderr:\n%s", stderr)
+	}
+	if strings.Contains(stderr, testAPIKey) || strings.Contains(stderr, "trailing garbage") {
+		t.Errorf("warning echoed file contents:\n%s", stderr)
+	}
+
+	// Same check through a parser that quotes source lines in its errors.
+	yamlPath := filepath.Join(t.TempDir(), "cronitor.yaml")
+	if err := os.WriteFile(yamlPath, []byte("CRONITOR_API_KEY: "+testAPIKey+"\n  bad: [unclosed\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	viper.Set(varConfig, yamlPath)
+	_, stderr = captureOutput(t, initConfig)
+	if strings.Contains(stderr, testAPIKey) || strings.Contains(stderr, "unclosed") {
+		t.Errorf("warning echoed yaml file contents:\n%s", stderr)
+	}
+}
