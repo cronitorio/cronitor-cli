@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -79,8 +80,8 @@ func init() {
 	// will be global for your application.
 	RootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", cfgFile, "Config file")
 	RootCmd.PersistentFlags().StringVar(&environment, "env", environment, "Cronitor Environment")
-	RootCmd.PersistentFlags().StringVarP(&apiKey, "api-key", "k", apiKey, "Cronitor API Key")
-	RootCmd.PersistentFlags().StringVarP(&pingApiKey, "ping-api-key", "p", pingApiKey, "Ping API Key")
+	RootCmd.PersistentFlags().StringVarP(&apiKey, "api-key", "k", apiKey, "Cronitor API Key (appears in shell history and process lists; prefer CRONITOR_API_KEY)")
+	RootCmd.PersistentFlags().StringVarP(&pingApiKey, "ping-api-key", "p", pingApiKey, "Ping API Key (appears in shell history and process lists; prefer CRONITOR_PING_API_KEY)")
 	RootCmd.PersistentFlags().StringVarP(&hostname, "hostname", "n", hostname, "A unique identifier for this host (default: system hostname)")
 	RootCmd.PersistentFlags().StringVarP(&debugLog, "log", "l", debugLog, "Write debug logs to supplied file")
 	RootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", verbose, "Verbose output")
@@ -119,10 +120,41 @@ func initConfig() {
 		viper.SetConfigName("cronitor")
 	}
 
-	// If a config file is found, read it in.
+	// If a config file is found, read it in. A missing file is normal. A file
+	// that exists but cannot be read (permissions, a directory, bad JSON) is
+	// reported once so a job does not silently run without its settings.
 	if err := viper.ReadInConfig(); err == nil {
 		log("Reading config from " + viper.ConfigFileUsed())
+	} else if !configFileMissing(err) {
+		path := configFile
+		if path == "" {
+			path = configFilePath()
+		}
+		fmt.Fprintf(os.Stderr, "Warning: could not read config file %s (%s)\n", path, configReadFailureReason(err))
 	}
+}
+
+// configReadFailureReason classifies a config read error without repeating
+// the parser's diagnostic, which for some formats quotes the offending line
+// and could echo a stored secret.
+func configReadFailureReason(err error) string {
+	var pathErr *fs.PathError
+	switch {
+	case errors.Is(err, fs.ErrPermission):
+		return "permission denied"
+	case errors.As(err, &pathErr):
+		return "file could not be opened"
+	default:
+		return "file is not valid JSON"
+	}
+}
+
+func configFileMissing(err error) bool {
+	var notFound viper.ConfigFileNotFoundError
+	if errors.As(err, &notFound) {
+		return true
+	}
+	return errors.Is(err, fs.ErrNotExist)
 }
 
 func sendPing(endpoint string, uniqueIdentifier string, message string, series string, timestamp float64, duration *float64, exitCode *int, metrics map[string]int, schedule string, group *sync.WaitGroup) {

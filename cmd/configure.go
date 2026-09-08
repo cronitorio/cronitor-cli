@@ -3,9 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -46,62 +44,41 @@ By default, configuration files are system-wide for ease of use in cron jobs and
   MacOS        /etc/cronitor/cronitor.json
   Windows      %SystemDrive%\ProgramData\Cronitor\cronitor.json
 
+New config files are created owner-only (mode 0600; owner-restricted ACL on Windows). An existing file keeps its current permissions when saved, so upgrading never changes which users can read it. If the file is readable by other users, configure prints a note after saving.
+
+To make an existing file owner-only, run: cronitor configure --restrict
+Jobs that run as another user then need CRONITOR_API_KEY (and CRONITOR_PING_API_KEY if set) in their crontab or service environment, or their own file via --config / CRONITOR_CONFIG.
+
 CronitorCLI configuration can be supplied from a file, environment variables, or command line flags.
 You can use a default config file for some things and environment variables or command line arguments for others -- the goal is flexibility.
 
+WARNING: --api-key, --ping-api-key, and --dash-password appear in shell history and process lists. Prefer environment variables set outside the transcript (export CRONITOR_API_KEY=... in your profile, crontab, or service unit).
+
 Environment variables that are read:
   CRONITOR_API_KEY
+  CRONITOR_PING_API_KEY
   CRONITOR_CONFIG
   CRONITOR_EXCLUDE_TEXT
   CRONITOR_HOSTNAME
   CRONITOR_LOG
-  CRONITOR_PING_API_KEY
+  CRONITOR_ENV
+  CRONITOR_DASH_USER
+  CRONITOR_DASH_PASS
+  CRONITOR_ALLOWED_IPS
   CRONITOR_USERS
+  CRONITOR_API_VERSION
+  CRONITOR_CORS_ALLOWED_ORIGINS
+  CRONITOR_MCP_ENABLED
 
-Example setting your API Key:
-  $ cronitor configure --api-key 4319e94e890a013dbaca57c2df2ff60c2
+Example setting your API key (preferred):
+  $ export CRONITOR_API_KEY
+  $ cronitor configure
 
 Example setting common exclude text for use with 'cronitor discover':
   $ cronitor configure -e "/var/app/code/path/" -e "/var/app/bin/" -e "> /dev/null"`,
 	Run: func(cmd *cobra.Command, args []string) {
 
-		configData := ConfigFile{}
-		configData.ApiKey = viper.GetString(varApiKey)
-		configData.PingApiAuthKey = viper.GetString(varPingApiKey)
-		configData.ExcludeText = viper.GetStringSlice(varExcludeText)
-		configData.Hostname = viper.GetString(varHostname)
-		configData.Log = viper.GetString(varLog)
-		configData.Env = viper.GetString(varEnv)
-		configData.DashUsername = viper.GetString(varDashUsername)
-		configData.DashPassword = viper.GetString(varDashPassword)
-		configData.AllowedIPs = viper.GetString(varAllowedIPs)
-		configData.CorsAllowedOrigins = viper.GetString("CRONITOR_CORS_ALLOWED_ORIGINS")
-		configData.Users = viper.GetString(varUsers)
-		configData.ApiVersion = viper.GetString(varApiVersion)
-		configData.MCPEnabled = viper.GetBool(varMCPEnabled)
-
-		// Load MCP instances if configured
-		if viper.IsSet("mcp_instances") {
-			// Get the raw config and manually convert
-			rawInstances := viper.GetStringMap("mcp_instances")
-			configData.MCPInstances = make(map[string]MCPInstanceConfig)
-
-			for name, rawConfig := range rawInstances {
-				if configMap, ok := rawConfig.(map[string]interface{}); ok {
-					instance := MCPInstanceConfig{}
-					if url, ok := configMap["url"].(string); ok {
-						instance.URL = url
-					}
-					if username, ok := configMap["username"].(string); ok {
-						instance.Username = username
-					}
-					if password, ok := configMap["password"].(string); ok {
-						instance.Password = password
-					}
-					configData.MCPInstances[name] = instance
-				}
-			}
-		}
+		configData := configFromViper()
 
 		fmt.Println("\nConfiguration File:")
 		fmt.Println(configFilePath())
@@ -110,18 +87,10 @@ Example setting common exclude text for use with 'cronitor discover':
 		fmt.Println(Version)
 
 		fmt.Println("\nAPI Key:")
-		if configData.ApiKey == "" {
-			fmt.Println("Not Set")
-		} else {
-			fmt.Println(configData.ApiKey)
-		}
+		fmt.Println(secretPresenceLabel(configData.ApiKey))
 
 		fmt.Println("\nPing API Key:")
-		if configData.PingApiAuthKey == "" {
-			fmt.Println("Not Set")
-		} else {
-			fmt.Println(configData.PingApiAuthKey)
-		}
+		fmt.Println(secretPresenceLabel(configData.PingApiAuthKey))
 
 		fmt.Println("\nEnvironment:")
 		if configData.Env == "" {
@@ -184,15 +153,13 @@ Example setting common exclude text for use with 'cronitor discover':
 		if len(configData.MCPInstances) > 0 {
 			fmt.Println("\nMCP Instances:")
 			for name, instance := range configData.MCPInstances {
+				// Print name and URL only; never print MCP instance passwords.
 				fmt.Printf("  %s: %s\n", name, instance.URL)
 			}
 		}
 
 		if verbose {
-			fmt.Println("\nEnviornment Variables:")
-			for _, pair := range os.Environ() {
-				fmt.Println(pair)
-			}
+			printCronitorEnvSources()
 		}
 
 		b, err := json.MarshalIndent(configData, "", "    ")
@@ -202,33 +169,23 @@ Example setting common exclude text for use with 'cronitor discover':
 		}
 
 		configPath := configFilePath()
-		configDir := filepath.Dir(configPath)
-
-		// Create the directory for the config file
-		if err := os.MkdirAll(configDir, os.ModePerm); err != nil {
-			fmt.Fprintf(os.Stderr,
-				"\nERROR: The configuration directory %s could not be created; check permissions and try again.\n\n",
-				configDir)
-			os.Exit(126)
-		}
-
-		if err := ioutil.WriteFile(configPath, b, 0644); err != nil {
-			fmt.Fprintf(os.Stderr,
-				"\nERROR: The configuration file %s could not be written; check permissions and try again. "+
-					"\n       By default, configuration files are system-wide for ease of use in cron jobs and scripts. Specify an alternate config file using the --config argument or CRONITOR_CONFIG environment variable.\n\n",
-				configPath)
+		if err := persistConfigFileMode(configPath, b, configureRestrict); err != nil {
+			fmt.Fprintf(os.Stderr, "\nERROR: %v\n\n", err)
 			os.Exit(126)
 		}
 	},
 }
 
+var configureRestrict bool
+
 func init() {
 	RootCmd.AddCommand(configureCmd)
+	configureCmd.Flags().BoolVar(&configureRestrict, "restrict", false, "Make the config file owner-only (0600 / owner-restricted ACL), even if it already exists with broader access")
 	configureCmd.Flags().StringSliceP("exclude-from-name", "e", []string{}, "Substring to always exclude from generated monitor name e.g. $ cronitor configure -e '> /dev/null' -e '/path/to/app'")
 	configureCmd.Flags().String("dash-username", "", "Username for the dashboard authentication")
-	configureCmd.Flags().String("dash-password", "", "Password for the dashboard authentication")
+	configureCmd.Flags().String("dash-password", "", "Password for the dashboard authentication (appears in shell history and process lists; prefer CRONITOR_DASH_PASS)")
 	configureCmd.Flags().String("allowed-ips", "", "Comma-separated list of allowed IP addresses/CIDR ranges (e.g. 192.168.1.0/24,10.0.0.1)")
-	configureCmd.Flags().String("ping-api-key", "", "Your Cronitor Ping API key")
+	configureCmd.Flags().String("ping-api-key", "", "Your Cronitor Ping API key (appears in shell history and process lists; prefer CRONITOR_PING_API_KEY)")
 	configureCmd.Flags().String("log", "", "Path to debug log file")
 	configureCmd.Flags().String("env", "", "Environment name (e.g. staging, production)")
 	configureCmd.Flags().String("users", "", "Comma-separated list of users whose crontabs to include")

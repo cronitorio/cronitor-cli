@@ -174,7 +174,7 @@ Example where you perform a dry-run without any crontab modifications:
 				lipgloss.NewStyle().Bold(true).Render("New user?"),
 				lipgloss.NewStyle().Italic(true).Render("cronitor signup"),
 				lipgloss.NewStyle().Bold(true).Render("Existing user?"),
-				lipgloss.NewStyle().Italic(true).Render("cronitor configure --api-key <key>")), 1)
+				lipgloss.NewStyle().Italic(true).Render("export CRONITOR_API_KEY and run cronitor configure")), 1)
 		}
 
 		// Handle --file flag for bulk monitor import from YAML/JSON file

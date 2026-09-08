@@ -158,7 +158,7 @@ cronitor environment delete <key>
 | `--page <n>` | Page number for paginated results |
 | `-d, --data <json>` | JSON data for create/update |
 | `-f, --file <path>` | Read JSON or YAML from a file |
-| `-k, --api-key <key>` | Cronitor API key |
+| `-k, --api-key <key>` | Cronitor API key (appears in shell history and process lists; prefer `CRONITOR_API_KEY`) |
 
 ## Crontab Guru Dashboard
 
@@ -180,13 +180,47 @@ ssh -L 9000:localhost:9000 user@your-server
 
 Access control & options
 ```
-# Set login credentials for the dashboard
-cronitor configure --dash-username USER --dash-password PASS
+# Set login credentials via environment variables (preferred).
+# --dash-username / --dash-password work but appear in shell history and process lists.
+export CRONITOR_DASH_USER=USER
+export CRONITOR_DASH_PASS=PASS
+cronitor configure
 
 # Optionally, restrict which system users' crontabs are loaded
 cronitor configure --users user1,user2
 ```
 For systemd and Docker examples, and security best‑practices, see the full [Dashboard documentation](https://crontab.guru/dashboard.html).
+
+## Configuration and secrets
+
+Do not put API keys, ping keys, or dashboard passwords on the command line. Those flags (`--api-key`, `--ping-api-key`, `--dash-password`) remain for compatibility but appear in shell history and process lists. Set credentials in the environment instead:
+
+```
+export CRONITOR_API_KEY
+export CRONITOR_PING_API_KEY
+cronitor configure
+```
+
+`cronitor configure` prints `API Key: Set` / `Ping API Key: Set` (or `Not Set`). It never prints complete keys. Dashboard passwords are shown as `********`.
+
+New config files are created **owner-only** (`0600` on Unix; an owner-restricted ACL on Windows), and `configure` prints a note saying so the first time. An existing file keeps its current permissions when saved, so upgrading never changes which users can read it. `exec` and `ping` read the file exactly as before.
+
+Default paths are unchanged: `/etc/cronitor/cronitor.json` (Linux/macOS) and `%SystemDrive%\ProgramData\Cronitor\cronitor.json` (Windows).
+
+If an existing file is readable by other users, `configure` prints a note after saving. To make it owner-only:
+
+```
+cronitor configure --restrict
+```
+
+Jobs that run as another user then need credentials from somewhere else:
+
+1. **Preferred:** set `CRONITOR_API_KEY` / `CRONITOR_PING_API_KEY` in the crontab or service environment. On Windows, set them on the scheduled task or Windows service.
+2. **Per-user file:** a user-owned `0600` file via `--config` / `CRONITOR_CONFIG`.
+
+If the config file exists but cannot be read, the CLI prints one warning to stderr naming the path instead of running unconfigured.
+
+On Windows, new files get an owner-restricted ACL (Administrators and SYSTEM keep access, a platform limitation). Existing files keep their ACL unless `--restrict` is passed.
 
 ## MCP Server (AI Integration)
 

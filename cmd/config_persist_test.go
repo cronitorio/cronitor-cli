@@ -1,0 +1,342 @@
+package cmd
+
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/spf13/viper"
+)
+
+const (
+	testAPIKey    = "test-api-key-not-real"
+	testPingKey   = "test-ping-key-not-real"
+	testDashPass  = "test-dash-password-not-real"
+	testAWSSecret = "fake-aws-secret-value-not-real"
+)
+
+func TestPersistConfigFile_PreservesNonSecretSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	first := ConfigFile{
+		ApiKey:      "old-key-not-real",
+		Hostname:    "keep-hostname",
+		Env:         "keep-env",
+		ExcludeText: []string{"/keep/exclude"},
+	}
+	b, err := json.MarshalIndent(first, "", "    ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := persistConfigFile(path, b); err != nil {
+		t.Fatalf("initial persist: %v", err)
+	}
+
+	first.ApiKey = testAPIKey
+	b, err = json.MarshalIndent(first, "", "    ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := persistConfigFile(path, b); err != nil {
+		t.Fatalf("update persist: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got ConfigFile
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Hostname != "keep-hostname" {
+		t.Errorf("hostname: got %q", got.Hostname)
+	}
+	if got.Env != "keep-env" {
+		t.Errorf("env: got %q", got.Env)
+	}
+	if len(got.ExcludeText) != 1 || got.ExcludeText[0] != "/keep/exclude" {
+		t.Errorf("exclude-text: got %#v", got.ExcludeText)
+	}
+	if got.ApiKey != testAPIKey {
+		t.Errorf("api key: got %q", got.ApiKey)
+	}
+}
+
+func TestPersistConfigFile_AtomicFailureLeavesOriginal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	original := []byte(`{"CRONITOR_HOSTNAME":"original-valid"}`)
+	if err := persistConfigFile(path, original); err != nil {
+		t.Fatalf("initial persist: %v", err)
+	}
+
+	persistTestHook = func() error {
+		return errors.New("simulated write failure")
+	}
+	defer func() { persistTestHook = nil }()
+
+	err := persistConfigFile(path, []byte(`{"CRONITOR_HOSTNAME":"should-not-be-written"}`))
+	if err == nil {
+		t.Fatal("expected persist to fail")
+	}
+	if !strings.Contains(err.Error(), "CRONITOR_CONFIG") {
+		t.Errorf("error should mention CRONITOR_CONFIG, got: %v", err)
+	}
+	if strings.Contains(err.Error(), testAPIKey) {
+		t.Errorf("error leaked a key: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(original) {
+		t.Fatalf("original file changed after failed write:\n%s", data)
+	}
+
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".cronitor-config-") {
+			t.Errorf("temp file left behind: %s", e.Name())
+		}
+	}
+}
+
+func TestPersistConfigFile_RejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.json")
+	if err := os.WriteFile(target, []byte(`{"CRONITOR_HOSTNAME":"via-symlink"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "cronitor.json")
+	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink not permitted: %v", err)
+		}
+		t.Fatal(err)
+	}
+
+	err := persistConfigFile(link, []byte(`{"CRONITOR_HOSTNAME":"replaced"}`))
+	if err == nil {
+		t.Fatal("expected symlink persist to fail")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "symlink") {
+		t.Errorf("expected symlink error, got: %v", err)
+	}
+
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "via-symlink") {
+		t.Errorf("symlink target was modified: %s", data)
+	}
+}
+
+func TestFormatSignupPersistError_OmitsKeysAndSuggestsRecovery(t *testing.T) {
+	err := formatSignupPersistError(errors.New("write failed"))
+	msg := err.Error()
+	for _, leak := range []string{testAPIKey, testPingKey, "--api-key " + testAPIKey, "sudo cronitor configure --api-key"} {
+		if strings.Contains(msg, leak) {
+			t.Errorf("signup persist error contained %q: %s", leak, msg)
+		}
+	}
+	if !strings.Contains(msg, "account was created") {
+		t.Errorf("expected account-created recovery text, got: %s", msg)
+	}
+	if !strings.Contains(msg, "https://cronitor.io") {
+		t.Errorf("expected website sign-in guidance, got: %s", msg)
+	}
+	if !strings.Contains(msg, "CRONITOR_CONFIG") {
+		t.Errorf("expected CRONITOR_CONFIG guidance, got: %s", msg)
+	}
+}
+
+func TestSignupSuccessClientMessage_OmitsKeys(t *testing.T) {
+	body := signupSuccessClientMessage()
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(encoded)
+	if strings.Contains(s, "api_key") || strings.Contains(s, "ping_api_key") {
+		t.Errorf("signup client JSON must not include key fields: %s", s)
+	}
+	if strings.Contains(s, testAPIKey) || strings.Contains(s, testPingKey) {
+		t.Errorf("signup client JSON leaked keys: %s", s)
+	}
+}
+
+func TestSaveSignupCredentials_ErrorOmitsReturnedKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "not-a-file")
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	prev := viper.GetString(varConfig)
+	viper.Set(varConfig, path)
+	t.Cleanup(func() { viper.Set(varConfig, prev) })
+
+	apiKey := "signup-api-key-must-not-leak"
+	pingKey := "signup-ping-key-must-not-leak"
+	err := saveSignupCredentials(apiKey, pingKey)
+	if err == nil {
+		t.Fatal("expected persist to fail when the config path is a directory")
+	}
+	wrapped := formatSignupPersistError(err)
+	msg := wrapped.Error()
+	if strings.Contains(msg, apiKey) || strings.Contains(msg, pingKey) {
+		t.Fatalf("signup persist error leaked keys: %s", msg)
+	}
+	if !strings.Contains(msg, "could not be saved") {
+		t.Errorf("expected safe recovery message, got: %s", msg)
+	}
+}
+
+func TestPrintCronitorEnvSources_RedactsValuesAndUnrelatedNames(t *testing.T) {
+	t.Setenv("CRONITOR_API_KEY", testAPIKey)
+	t.Setenv("AWS_SECRET_ACCESS_KEY", testAWSSecret)
+
+	stdout, stderr := captureOutput(t, printCronitorEnvSources)
+	combined := stdout + stderr
+	if strings.Contains(combined, testAPIKey) {
+		t.Error("verbose env output leaked CRONITOR_API_KEY value")
+	}
+	if strings.Contains(combined, testAWSSecret) {
+		t.Error("verbose env output leaked AWS secret value")
+	}
+	if strings.Contains(combined, "AWS_SECRET_ACCESS_KEY") {
+		t.Error("verbose env output listed unrelated AWS_SECRET_ACCESS_KEY")
+	}
+	if !strings.Contains(stdout, "CRONITOR_API_KEY: Set") {
+		t.Errorf("expected allowlisted name with Set, got:\n%s", stdout)
+	}
+}
+
+func TestSaveSignupCredentials_PreservesKeysOutsideConfigFileStruct(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	existing := `{"CRONITOR_HOSTNAME":"keep-host","CRONITOR_MCP_INSTANCE":"team-a","custom_setting":{"nested":true}}`
+	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	prev := viper.GetString(varConfig)
+	viper.Set(varConfig, path)
+	t.Cleanup(func() {
+		viper.Set(varConfig, prev)
+		viper.Set(varApiKey, "")
+		viper.Set(varPingApiKey, "")
+	})
+
+	if err := saveSignupCredentials("signup-api-key-not-real", "signup-ping-key-not-real"); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("file is not JSON: %s", data)
+	}
+	if got["CRONITOR_API_KEY"] != "signup-api-key-not-real" || got["CRONITOR_PING_API_KEY"] != "signup-ping-key-not-real" {
+		t.Errorf("keys not written: %s", data)
+	}
+	if got["CRONITOR_HOSTNAME"] != "keep-host" {
+		t.Errorf("hostname dropped: %s", data)
+	}
+	if got["CRONITOR_MCP_INSTANCE"] != "team-a" {
+		t.Errorf("setting outside ConfigFile struct dropped: %s", data)
+	}
+	if _, ok := got["custom_setting"]; !ok {
+		t.Errorf("unknown key dropped: %s", data)
+	}
+}
+
+func TestPersistConfigFile_WriteFailureLeavesOriginal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	original := []byte(`{"CRONITOR_HOSTNAME":"original-valid"}`)
+	if err := persistConfigFile(path, original); err != nil {
+		t.Fatalf("initial persist: %v", err)
+	}
+
+	// Fail the data write itself, not a hook placed before it, so a
+	// truncate-then-write implementation cannot pass this by accident.
+	oldWrite := persistWriteFn
+	persistWriteFn = func(f *os.File, data []byte) (int, error) {
+		n, _ := f.Write(data[:len(data)/2])
+		return n, errors.New("simulated disk full")
+	}
+	t.Cleanup(func() { persistWriteFn = oldWrite })
+
+	err := persistConfigFile(path, []byte(`{"CRONITOR_HOSTNAME":"should-not-be-written-at-all"}`))
+	if err == nil {
+		t.Fatal("expected persist to fail")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(original) {
+		t.Fatalf("original file changed after a failed write:\n%s", data)
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".cronitor-config-") {
+			t.Errorf("temp file left behind: %s", e.Name())
+		}
+	}
+}
+
+func TestSaveSignupCredentials_ReplacesLowercaseKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	// The shape viper.WriteConfig produced in older releases.
+	existing := `{"cronitor_api_key":"old-key-not-real","cronitor_ping_api_key":"old-ping-not-real","cronitor_hostname":"keep-host"}`
+	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
+		t.Fatal(err)
+	}
+	prev := viper.GetString(varConfig)
+	viper.Set(varConfig, path)
+	t.Cleanup(func() {
+		viper.Set(varConfig, prev)
+		viper.Set(varApiKey, "")
+		viper.Set(varPingApiKey, "")
+	})
+
+	if err := saveSignupCredentials("new-key-not-real", "new-ping-not-real"); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("file is not JSON: %s", data)
+	}
+	if got["CRONITOR_API_KEY"] != "new-key-not-real" || got["CRONITOR_PING_API_KEY"] != "new-ping-not-real" {
+		t.Errorf("new keys not written: %s", data)
+	}
+	for _, stale := range []string{"cronitor_api_key", "cronitor_ping_api_key"} {
+		if _, ok := got[stale]; ok {
+			t.Errorf("stale lowercase credential %q left in file: %s", stale, data)
+		}
+	}
+	if strings.Contains(string(data), "old-key-not-real") || strings.Contains(string(data), "old-ping-not-real") {
+		t.Errorf("old credentials still present: %s", data)
+	}
+	if got["cronitor_hostname"] != "keep-host" {
+		t.Errorf("unrelated lowercase key must be kept: %s", data)
+	}
+}
