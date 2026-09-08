@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/spf13/viper"
+	"golang.org/x/sys/unix"
 )
 
 func TestPersistConfigFile_NewFileIsOwnerOnly(t *testing.T) {
@@ -218,7 +219,7 @@ func TestConfigure_RestrictFlagNarrowsExistingFile(t *testing.T) {
 	}
 }
 
-func TestPersistConfigFile_ExistingFileKeepsOwnerGroupAndInode(t *testing.T) {
+func TestPersistConfigFile_ExistingFileKeepsOwnerGroupAndXattrs(t *testing.T) {
 	if os.Getuid() != 0 {
 		t.Skip("needs root to set up a file owned by another user")
 	}
@@ -232,6 +233,11 @@ func TestPersistConfigFile_ExistingFileKeepsOwnerGroupAndInode(t *testing.T) {
 	}
 	if err := os.Chmod(path, 0660); err != nil {
 		t.Fatal(err)
+	}
+	// A user xattr stands in for a POSIX ACL, which Linux stores as the
+	// system.posix_acl_access xattr and copies through the same loop.
+	if err := unix.Setxattr(path, "user.cronitor_test", []byte("acl-stand-in"), 0); err != nil {
+		t.Skipf("xattrs unsupported here: %v", err)
 	}
 	before, err := os.Stat(path)
 	if err != nil {
@@ -250,10 +256,40 @@ func TestPersistConfigFile_ExistingFileKeepsOwnerGroupAndInode(t *testing.T) {
 	if as.Uid != bs.Uid || as.Gid != bs.Gid {
 		t.Errorf("owner changed: before %d:%d after %d:%d", bs.Uid, bs.Gid, as.Uid, as.Gid)
 	}
-	if as.Ino != bs.Ino {
-		t.Errorf("inode changed (%d -> %d); an existing file must be updated in place so ACLs and xattrs survive", bs.Ino, as.Ino)
-	}
 	if perm := after.Mode().Perm(); perm != 0660 {
 		t.Errorf("mode changed to %#o, want 0660", perm)
+	}
+	buf := make([]byte, 64)
+	n, err := unix.Getxattr(path, "user.cronitor_test", buf)
+	if err != nil || string(buf[:n]) != "acl-stand-in" {
+		t.Errorf("xattr not preserved across save: n=%d err=%v", n, err)
+	}
+}
+
+func TestPersistConfigFileMode_RestrictDropsXattrsAndACLs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	if err := os.WriteFile(path, []byte(`{"CRONITOR_HOSTNAME":"shared"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Setxattr(path, "user.cronitor_grant", []byte("everyone-read"), 0); err != nil {
+		t.Skipf("xattrs unsupported here: %v", err)
+	}
+
+	if err := persistConfigFileMode(path, []byte(`{"CRONITOR_HOSTNAME":"shared"}`), true); err != nil {
+		t.Fatalf("restricted persist should succeed: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Errorf("restrict left mode %#o, want 0600", perm)
+	}
+	buf := make([]byte, 64)
+	if _, err := unix.Getxattr(path, "user.cronitor_grant", buf); err == nil {
+		t.Error("--restrict must not carry ACL-style grants (xattrs) onto the owner-only file")
 	}
 }

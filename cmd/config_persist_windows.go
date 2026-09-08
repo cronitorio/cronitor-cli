@@ -5,6 +5,7 @@ package cmd
 import (
 	"os"
 	"os/user"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/windows"
@@ -36,10 +37,28 @@ func persistReplaceFile(tmpName, dest string) error {
 	return windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING)
 }
 
-// persistOpenExisting opens an existing config file for an in-place rewrite,
-// which keeps its DACL exactly as the operator left it.
-func persistOpenExisting(path string) (*os.File, error) {
-	return os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
+// persistCreateTemp makes the staging file next to the destination.
+func persistCreateTemp(path string, _ os.FileInfo, _ bool) (*os.File, error) {
+	return os.CreateTemp(filepath.Dir(path), ".cronitor-config-*.tmp")
+}
+
+// persistCloneAccess copies the existing file's DACL onto the replacement so
+// a save does not change who can read the configuration.
+func persistCloneAccess(tmpName, src string, _ os.FileInfo) error {
+	sd, err := windows.GetNamedSecurityInfo(src, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	return windows.SetNamedSecurityInfo(
+		tmpName,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil, nil, dacl, nil,
+	)
 }
 
 func applyOwnerOnlyACL(path string) error {

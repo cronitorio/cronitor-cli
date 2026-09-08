@@ -116,19 +116,23 @@ func persistConfigFileMode(path string, data []byte, restrict bool) error {
 	return nil
 }
 
-func atomicWriteConfigFile(path string, data []byte, existing os.FileInfo, exists, ownerOnly bool) error {
-	if exists {
-		return updateConfigFileInPlace(path, data, ownerOnly)
-	}
-	return createConfigFileOwnerOnly(path, data)
+// persistWriteFn writes the config bytes to the temp file. Tests replace it
+// to simulate a failing write and prove the previous file is untouched.
+var persistWriteFn = func(f *os.File, data []byte) (int, error) {
+	return f.Write(data)
 }
 
-// createConfigFileOwnerOnly writes a brand-new credential file through an
-// owner-only temp file and an atomic rename, so the key is never visible in a
-// file with broader access and a crash leaves no partial file behind.
-func createConfigFileOwnerOnly(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".cronitor-config-*.tmp")
+// atomicWriteConfigFile stages the new content in a sibling temp file and
+// renames it over the destination, so readers see either the old file or the
+// new one and a failed write leaves the old file intact.
+//
+// For a plain save of an existing file the temp is given the existing file's
+// access first: mode bits, owner and group where the writer may set them,
+// extended attributes (which is where Linux keeps POSIX ACLs), and on macOS
+// the file is cloned so its ACL comes along. For a new file, or --restrict,
+// the temp is owner-only and carries nothing over, so ACL grants are dropped.
+func atomicWriteConfigFile(path string, data []byte, existing os.FileInfo, exists, ownerOnly bool) error {
+	tmp, err := persistCreateTemp(path, existing, exists && !ownerOnly)
 	if err != nil {
 		return wrapPersistWriteError(path, err)
 	}
@@ -141,12 +145,16 @@ func createConfigFileOwnerOnly(path string, data []byte) error {
 		}
 	}()
 
-	// Restrict the temp file before the first byte of the secret is written.
-	// CreateTemp already gives 0600 on Unix; Windows needs the DACL applied.
-	if err := persistApplyMode(tmp, tmpName, configModeOwnerOnly); err != nil {
+	if ownerOnly {
+		// Restrict before the first byte of the secret is written.
+		if err := persistApplyMode(tmp, tmpName, configModeOwnerOnly); err != nil {
+			return wrapPersistWriteError(path, err)
+		}
+	} else if err := persistCloneAccess(tmpName, path, existing); err != nil {
 		return wrapPersistWriteError(path, err)
 	}
-	if _, err := tmp.Write(data); err != nil {
+
+	if _, err := persistWriteFn(tmp, data); err != nil {
 		return wrapPersistWriteError(path, err)
 	}
 	if err := tmp.Sync(); err != nil {
@@ -166,41 +174,6 @@ func createConfigFileOwnerOnly(path string, data []byte) error {
 		return wrapPersistWriteError(path, err)
 	}
 	renamed = true
-	return nil
-}
-
-// updateConfigFileInPlace rewrites an existing credential file through its
-// own inode, the way ioutil.WriteFile did before this helper existed. Owner,
-// group, mode bits, ACLs, and extended attributes are untouched because the
-// file is never replaced. Only --restrict changes access, after the write.
-func updateConfigFileInPlace(path string, data []byte, restrict bool) error {
-	if persistTestHook != nil {
-		if err := persistTestHook(); err != nil {
-			return wrapPersistWriteError(path, err)
-		}
-	}
-
-	f, err := persistOpenExisting(path)
-	if err != nil {
-		return wrapPersistWriteError(path, err)
-	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return wrapPersistWriteError(path, err)
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return wrapPersistWriteError(path, err)
-	}
-	if err := f.Close(); err != nil {
-		return wrapPersistWriteError(path, err)
-	}
-
-	if restrict {
-		if err := persistLockdownNewFile(path); err != nil {
-			return fmt.Errorf("configuration saved to %s, but it could not be made owner-only: %w", path, err)
-		}
-	}
 	return nil
 }
 

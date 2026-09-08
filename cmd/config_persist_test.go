@@ -260,3 +260,41 @@ func TestSaveSignupCredentials_PreservesKeysOutsideConfigFileStruct(t *testing.T
 		t.Errorf("unknown key dropped: %s", data)
 	}
 }
+
+func TestPersistConfigFile_WriteFailureLeavesOriginal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	original := []byte(`{"CRONITOR_HOSTNAME":"original-valid"}`)
+	if err := persistConfigFile(path, original); err != nil {
+		t.Fatalf("initial persist: %v", err)
+	}
+
+	// Fail the data write itself, not a hook placed before it, so a
+	// truncate-then-write implementation cannot pass this by accident.
+	oldWrite := persistWriteFn
+	persistWriteFn = func(f *os.File, data []byte) (int, error) {
+		n, _ := f.Write(data[:len(data)/2])
+		return n, errors.New("simulated disk full")
+	}
+	t.Cleanup(func() { persistWriteFn = oldWrite })
+
+	err := persistConfigFile(path, []byte(`{"CRONITOR_HOSTNAME":"should-not-be-written-at-all"}`))
+	if err == nil {
+		t.Fatal("expected persist to fail")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(original) {
+		t.Fatalf("original file changed after a failed write:\n%s", data)
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".cronitor-config-") {
+			t.Errorf("temp file left behind: %s", e.Name())
+		}
+	}
+}

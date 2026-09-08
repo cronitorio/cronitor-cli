@@ -3,6 +3,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"syscall"
 )
@@ -16,10 +17,6 @@ func persistLockdownNewFile(path string) error {
 	return os.Chmod(path, configModeOwnerOnly)
 }
 
-// persistPreserveOwner keeps the replaced file's owner and group when the
-// writer is allowed to. A non-root user rewriting a group-writable file it
-// does not own gets EPERM from chown; that write used to succeed in place,
-// so ownership falls to the writer instead of failing the save.
 func persistReplaceFile(tmpName, dest string) error {
 	// rename(2) replaces a regular file and does not follow a dest symlink
 	// (it replaces the symlink inode). Callers reject unexpected symlinks
@@ -27,10 +24,38 @@ func persistReplaceFile(tmpName, dest string) error {
 	return os.Rename(tmpName, dest)
 }
 
-// persistOpenExisting opens an existing config file for an in-place rewrite.
-// O_NOFOLLOW backs up the Lstat symlink check against a race.
-func persistOpenExisting(path string) (*os.File, error) {
-	return os.OpenFile(path, os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0)
+// persistCloneAccess gives the replacement file the access of the file it
+// replaces: mode bits, owner and group, and extended attributes.
+func persistCloneAccess(tmpName, src string, existing os.FileInfo) error {
+	if err := os.Chmod(tmpName, existing.Mode().Perm()); err != nil {
+		return err
+	}
+	if err := persistCloneOwner(tmpName, existing); err != nil {
+		return err
+	}
+	return persistCloneXattrs(src, tmpName)
+}
+
+// persistCloneOwner keeps the previous owner and group. Only root may give a
+// file away, so a non-root writer falls back to keeping just the group, which
+// is what shared access depends on. If even the group cannot be kept and the
+// mode grants the group anything, the save is refused rather than silently
+// cutting other group members off.
+func persistCloneOwner(tmpName string, existing os.FileInfo) error {
+	stat, ok := existing.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+	uid, gid := int(stat.Uid), int(stat.Gid)
+	if os.Chown(tmpName, uid, gid) == nil {
+		return nil
+	}
+	if err := os.Chown(tmpName, -1, gid); err != nil {
+		if existing.Mode().Perm()&0070 != 0 {
+			return fmt.Errorf("cannot keep group %d on the replacement file, which other group members depend on: %w", gid, err)
+		}
+	}
+	return nil
 }
 
 // configReadableByOthers reports group or other read bits on the file.
