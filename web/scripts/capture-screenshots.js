@@ -1,10 +1,10 @@
-const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function captureScreenshots() {
+  const { default: puppeteer } = await import('puppeteer');
   // Create screenshots directory if it doesn't exist
   const screenshotsDir = path.join(__dirname, '../public/screenshots');
   if (!fs.existsSync(screenshotsDir)) {
@@ -106,4 +106,4 @@ if (require.main === module) {
   captureScreenshots().catch(console.error);
 }
 
-module.exports = { captureScreenshots }; 
+module.exports = { captureScreenshots };
