@@ -241,7 +241,9 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	pingSent := false
 	uri := ""
 	for i := 1; i <= 6; i++ {
-		if dev {
+		if lib.PingHostOverride != "" {
+			pingApiHost = lib.PingHostOverride
+		} else if dev {
 			pingApiHost = "http://localhost:8000"
 		} else if i > 2 && pingApiHost == "https://cronitor.link" {
 			pingApiHost = "https://cronitor.io"
@@ -250,7 +252,7 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 		}
 
 		// After 2 failed attempts, take a brief random break before trying again
-		if i > 2 {
+		if i > 2 && lib.PingHostOverride == "" {
 			time.Sleep(time.Second * time.Duration(float32(i)*1.5*rand.Float32()))
 		}
 
@@ -433,6 +435,7 @@ func isPathToDirectory(path string) bool {
 }
 
 func log(msg string) {
+	msg = redactSecrets(msg)
 	debugLog := viper.GetString(varLog)
 	if len(debugLog) > 0 {
 		f, _ := os.OpenFile(debugLog, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
@@ -446,6 +449,7 @@ func log(msg string) {
 }
 
 func fatal(msg string, exitCode int) {
+	msg = redactSecrets(msg)
 	debugLog := viper.GetString(varLog)
 	if len(debugLog) > 0 {
 		f, _ := os.OpenFile(debugLog, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
@@ -455,6 +459,21 @@ func fatal(msg string, exitCode int) {
 
 	fmt.Fprintln(os.Stderr, msg)
 	os.Exit(exitCode)
+}
+
+// redactSecrets removes remembered secrets and the configured API / ping keys
+// from log lines, verbose output, and errors.
+func redactSecrets(msg string) string {
+	msg = redactIntegrationLogMessage(msg)
+	for _, secret := range []string{
+		viper.GetString(varApiKey),
+		viper.GetString(varPingApiKey),
+	} {
+		if secret != "" {
+			msg = strings.ReplaceAll(msg, secret, "[REDACTED]")
+		}
+	}
+	return msg
 }
 
 func makeStamp() float64 {

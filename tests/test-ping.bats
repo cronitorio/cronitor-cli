@@ -35,7 +35,7 @@ teardown() {
 @test "Ping with ping api key" {
   KEY="XXXXXXXXXX"
   ../cronitor $CRONITOR_ARGS ping d3x0c1 --run --ping-api-key $KEY --log $CLI_LOGFILE
-  grep -q "Sending ping" $CLI_LOGFILE && grep -q "${KEY}" $CLI_LOGFILE
+  grep -q "Sending ping" $CLI_LOGFILE && grep -q "\\[REDACTED\\]" $CLI_LOGFILE && ! grep -q "${KEY}" $CLI_LOGFILE
 }
 
 @test "Ping integration test" {

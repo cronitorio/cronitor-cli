@@ -293,11 +293,7 @@ func (api CronitorApi) GetRawResponse(url string) ([]byte, error) {
 }
 
 func (api CronitorApi) Url() string {
-	if api.IsDev {
-		return "http://dev.cronitor.io/api/monitors"
-	} else {
-		return "https://cronitor.io/api/monitors"
-	}
+	return APIBaseURL(api.IsDev) + "/monitors"
 }
 
 func (api CronitorApi) send(method string, url string, body string) ([]byte, error, int) {
@@ -397,7 +393,7 @@ func gzipLogData(logData string) *bytes.Buffer {
 }
 
 func getPresignedUrl(apiKey string, postBody []byte) ([]byte, error) {
-	url := "https://cronitor.io/api/logs/presign"
+	url := APIBaseURL(false) + "/logs/presign"
 
 	api := CronitorApi{
 		ApiKey:    apiKey,

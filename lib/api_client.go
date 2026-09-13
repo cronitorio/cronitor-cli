@@ -18,6 +18,23 @@ import (
 // When non-empty, NewAPIClient uses this instead of the default base URL.
 var BaseURLOverride string
 
+// PingHostOverride allows tests to point telemetry pings at a mock host
+// instead of https://cronitor.link. Production is unchanged when empty.
+var PingHostOverride string
+
+// APIBaseURL returns the Cronitor REST API root (/api), honoring test
+// overrides and --use-dev. Paths such as /cli/machine-credentials are
+// appended to this value.
+func APIBaseURL(isDev bool) string {
+	if BaseURLOverride != "" {
+		return strings.TrimRight(BaseURLOverride, "/")
+	}
+	if isDev {
+		return "http://dev.cronitor.io/api"
+	}
+	return "https://cronitor.io/api"
+}
+
 // APIClient provides a generic interface for Cronitor API operations
 type APIClient struct {
 	BaseURL   string
@@ -44,15 +61,8 @@ type PaginatedResponse struct {
 
 // NewAPIClient creates a new API client with the given configuration
 func NewAPIClient(isDev bool, logger func(string)) *APIClient {
-	baseURL := "https://cronitor.io/api"
-	if BaseURLOverride != "" {
-		baseURL = BaseURLOverride
-	} else if isDev {
-		baseURL = "http://dev.cronitor.io/api"
-	}
-
 	return &APIClient{
-		BaseURL:   baseURL,
+		BaseURL:   APIBaseURL(isDev),
 		ApiKey:    viper.GetString("CRONITOR_API_KEY"),
 		UserAgent: "CronitorCLI",
 		IsDev:     isDev,

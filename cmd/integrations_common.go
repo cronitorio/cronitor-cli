@@ -676,6 +676,6 @@ func printConnected(label, service string, raw []byte, format, outputPath string
 }
 
 func failAndExit(msg string) {
-	Error(msg)
+	Error(redactSecrets(msg))
 	exitFn(1)
 }

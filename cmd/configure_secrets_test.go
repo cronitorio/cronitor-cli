@@ -32,6 +32,8 @@ func resetConfigureTestState(t *testing.T) {
 	viper.Set(varAllowedIPs, "")
 	viper.Set(varApiVersion, "")
 	viper.Set(varMCPEnabled, false)
+	viper.Set(varAuthManaged, false)
+	viper.Set(varMachineCredentialName, "")
 	viper.Set("CRONITOR_CORS_ALLOWED_ORIGINS", "")
 	viper.Set("mcp_instances", nil)
 	prevConfig := viper.GetString(varConfig)
