@@ -352,19 +352,20 @@ func GetCurrentMachineCredential(apiBase, apiKey string) (*MachineCredential, er
 }
 
 // DeleteCurrentMachineCredential calls DELETE /api/cli/machine-credentials/current.
-// 204 is the frozen success status; 404 means already gone.
+// Only a 2xx response is confirmed revocation. 401 means the key is already
+// invalid. 403 (refused) and 404 (missing route or unknown) do not prove delete.
 func DeleteCurrentMachineCredential(apiBase, apiKey string) error {
 	status, body, err := doCLIAuthBasic(http.MethodDelete, machineCredentialsCurrentURL(apiBase), apiKey, nil)
 	if err != nil {
 		return err
 	}
-	if status == http.StatusNoContent || status == http.StatusOK || status == http.StatusNotFound {
+	if status >= 200 && status < 300 {
 		return nil
 	}
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return nil
+	if status == http.StatusUnauthorized {
+		return &CredentialGoneError{Status: status}
 	}
-	return fmt.Errorf("failed to revoke machine credential (%d): %s", status, sanitizeAPIError(body))
+	return &CredentialRevokeUnconfirmedError{Status: status, Detail: sanitizeAPIError(body)}
 }
 
 // CredentialGoneError means the stored key is no longer valid remotely.
@@ -374,6 +375,23 @@ type CredentialGoneError struct {
 
 func (e *CredentialGoneError) Error() string {
 	return "machine credential is no longer valid"
+}
+
+// CredentialRevokeUnconfirmedError means DELETE did not confirm revocation.
+// 403 can be a refusal; 404 can mean the route is missing during rollout.
+type CredentialRevokeUnconfirmedError struct {
+	Status int
+	Detail string
+}
+
+func (e *CredentialRevokeUnconfirmedError) Error() string {
+	if e == nil {
+		return "could not revoke machine credential"
+	}
+	if e.Detail != "" && e.Detail != "request failed" {
+		return fmt.Sprintf("could not revoke machine credential (%d): %s", e.Status, e.Detail)
+	}
+	return fmt.Sprintf("could not revoke machine credential (%d)", e.Status)
 }
 
 func machineCredentialsURL(apiBase string) string {

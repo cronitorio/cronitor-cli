@@ -245,6 +245,53 @@ func TestDeleteCurrentMachineCredential_204(t *testing.T) {
 	}
 }
 
+func TestDeleteCurrentMachineCredential_401AlreadyInvalid(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(401)
+		io.WriteString(w, `{"error":"unauthorized"}`)
+	}))
+	defer server.Close()
+
+	err := lib.DeleteCurrentMachineCredential(server.URL+"/api", testMachineKey)
+	if _, ok := err.(*lib.CredentialGoneError); !ok {
+		t.Fatalf("expected CredentialGoneError, got %v", err)
+	}
+}
+
+func TestDeleteCurrentMachineCredential_403Unconfirmed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(403)
+		io.WriteString(w, `{"error":"forbidden"}`)
+	}))
+	defer server.Close()
+
+	err := lib.DeleteCurrentMachineCredential(server.URL+"/api", testMachineKey)
+	unconf, ok := err.(*lib.CredentialRevokeUnconfirmedError)
+	if !ok {
+		t.Fatalf("expected CredentialRevokeUnconfirmedError, got %v", err)
+	}
+	if unconf.Status != 403 {
+		t.Errorf("status %d", unconf.Status)
+	}
+}
+
+func TestDeleteCurrentMachineCredential_404Unconfirmed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(404)
+		io.WriteString(w, `{"error":"not found"}`)
+	}))
+	defer server.Close()
+
+	err := lib.DeleteCurrentMachineCredential(server.URL+"/api", testMachineKey)
+	unconf, ok := err.(*lib.CredentialRevokeUnconfirmedError)
+	if !ok {
+		t.Fatalf("expected CredentialRevokeUnconfirmedError, got %v", err)
+	}
+	if unconf.Status != 404 {
+		t.Errorf("status %d", unconf.Status)
+	}
+}
+
 func TestGetCurrentMachineCredential_Gone(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)

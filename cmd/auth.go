@@ -68,9 +68,14 @@ var authStatusCmd = &cobra.Command{
 var authLogoutCmd = &cobra.Command{
 	Use:   "logout",
 	Short: "Revoke the machine credential and remove it locally",
-	Long: `Revoke the current machine credential on Cronitor and remove
-CRONITOR_API_KEY, CRONITOR_AUTH_MANAGED, and CRONITOR_MACHINE_CREDENTIAL_NAME
-from the resolved config file. Other settings are kept.`,
+	Long: `Revoke the machine credential stored in the resolved config file
+and remove CRONITOR_API_KEY, CRONITOR_AUTH_MANAGED, and
+CRONITOR_MACHINE_CREDENTIAL_NAME. Other settings are kept.
+
+Logout reads the stored key and ownership metadata together from the config
+file. An explicit --api-key or CRONITOR_API_KEY that differs from the stored
+key is refused so a session override cannot revoke one credential and erase
+another. Other commands keep the usual flag/env/config precedence.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		runAuthLogout()
 	},
@@ -87,7 +92,7 @@ func init() {
 	authLoginCmd.Flags().StringVar(&authTimeout, "timeout", "", "Maximum time to wait for authorization (default: device expiry)")
 
 	authLogoutCmd.Flags().BoolVar(&authYes, "yes", false, "Revoke without prompting")
-	authLogoutCmd.Flags().BoolVar(&authForce, "force", false, "Remove a locally configured API key that was not installed by auth login")
+	authLogoutCmd.Flags().BoolVar(&authForce, "force", false, "Remove the local API key without a confirmed remote revocation, or remove a key that was not installed by auth login")
 }
 
 func resetAuthFlags() {
@@ -100,6 +105,16 @@ func resetAuthFlags() {
 	_ = authLoginCmd.Flags().Set("timeout", "")
 	_ = authLogoutCmd.Flags().Set("yes", "false")
 	_ = authLogoutCmd.Flags().Set("force", "false")
+}
+
+func resetAPIKeyFlag() {
+	f := RootCmd.PersistentFlags().Lookup("api-key")
+	if f == nil {
+		return
+	}
+	_ = f.Value.Set("")
+	f.Changed = false
+	apiKey = ""
 }
 
 func runAuthLogin() {
@@ -278,24 +293,102 @@ func confirmInstallOrReplace() error {
 }
 
 func configHasAPIKey() bool {
-	path := configFilePath()
-	data, err := os.ReadFile(path)
+	return readStoredAuthFromConfig().APIKey != ""
+}
+
+// storedAuth is the API key and ownership metadata as one unit from the
+// resolved config file. Destructive auth operations use this instead of
+// viper's flag/env/config merge so a session override cannot revoke key B
+// while clearing managed installation A.
+type storedAuth struct {
+	APIKey  string
+	Managed bool
+	Name    string
+}
+
+func readStoredAuthFromConfig() storedAuth {
+	var out storedAuth
+	data, err := os.ReadFile(configFilePath())
 	if err != nil {
-		return false
+		return out
 	}
 	var raw map[string]interface{}
 	if json.Unmarshal(data, &raw) != nil {
-		return false
+		return out
 	}
 	for k, v := range raw {
-		if !strings.EqualFold(k, varApiKey) {
-			continue
-		}
-		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
-			return true
+		switch {
+		case strings.EqualFold(k, varApiKey):
+			if s, ok := v.(string); ok {
+				out.APIKey = strings.TrimSpace(s)
+			}
+		case strings.EqualFold(k, varAuthManaged):
+			out.Managed = truthyJSON(v)
+		case strings.EqualFold(k, varMachineCredentialName):
+			if s, ok := v.(string); ok {
+				out.Name = strings.TrimSpace(s)
+			}
 		}
 	}
+	return out
+}
+
+func truthyJSON(v interface{}) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		switch strings.ToLower(strings.TrimSpace(t)) {
+		case "1", "true", "yes", "on":
+			return true
+		}
+	case float64:
+		return t != 0
+	case json.Number:
+		n, err := t.Float64()
+		return err == nil && n != 0
+	}
 	return false
+}
+
+// explicitAPIKeyOverride reports a key supplied by --api-key or
+// CRONITOR_API_KEY, not the viper merge. Empty values are ignored.
+func explicitAPIKeyOverride() (key, source string, ok bool) {
+	if f := RootCmd.PersistentFlags().Lookup("api-key"); f != nil && f.Changed {
+		if v := strings.TrimSpace(f.Value.String()); v != "" {
+			return v, "--api-key", true
+		}
+	}
+	if v, exists := os.LookupEnv(varApiKey); exists {
+		if v = strings.TrimSpace(v); v != "" {
+			return v, varApiKey, true
+		}
+	}
+	return "", "", false
+}
+
+// clearManagedAuthMetadataIfReplacingKey drops CRONITOR_AUTH_MANAGED and
+// CRONITOR_MACHINE_CREDENTIAL_NAME when configure is about to persist a
+// different API key than the one stored in the file (flag or environment).
+func clearManagedAuthMetadataIfReplacingKey(cmd *cobra.Command) {
+	stored := readStoredAuthFromConfig()
+	replacing := false
+	if flag := cmd.Flags().Lookup("api-key"); flag != nil && flag.Changed {
+		replacing = true
+	}
+	if envKey, exists := os.LookupEnv(varApiKey); exists {
+		if envKey = strings.TrimSpace(envKey); envKey != "" && envKey != stored.APIKey {
+			replacing = true
+		}
+	}
+	if strings.TrimSpace(viper.GetString(varApiKey)) != stored.APIKey {
+		replacing = true
+	}
+	if !replacing {
+		return
+	}
+	viper.Set(varAuthManaged, false)
+	viper.Set(varMachineCredentialName, "")
 }
 
 func confirmAuthAction(prompt string) bool {
@@ -363,9 +456,21 @@ func runAuthStatus() {
 }
 
 func runAuthLogout() {
-	apiKey := strings.TrimSpace(viper.GetString(varApiKey))
-	managed := viper.GetBool(varAuthManaged)
-	name := viper.GetString(varMachineCredentialName)
+	stored := readStoredAuthFromConfig()
+	if override, source, ok := explicitAPIKeyOverride(); ok && override != stored.APIKey {
+		rememberSecret(override)
+		if stored.APIKey != "" {
+			rememberSecret(stored.APIKey)
+		}
+		if stored.APIKey != "" || stored.Managed {
+			failAndExit(fmt.Sprintf("%s does not match the API key stored in the config file. Unset the override to log out of this host's machine credential.", source))
+			return
+		}
+	}
+
+	apiKey := stored.APIKey
+	managed := stored.Managed
+	name := stored.Name
 
 	if apiKey == "" && !managed {
 		fmt.Println("Not logged in")
@@ -390,8 +495,25 @@ func runAuthLogout() {
 
 	if managed && apiKey != "" {
 		rememberSecret(apiKey)
-		if err := lib.DeleteCurrentMachineCredential(lib.APIBaseURL(dev), apiKey); err != nil {
-			failAndExit(redactSecrets(err.Error()))
+		err := lib.DeleteCurrentMachineCredential(lib.APIBaseURL(dev), apiKey)
+		if err != nil {
+			if _, gone := err.(*lib.CredentialGoneError); gone {
+				if clearErr := clearAuthManagedCredential(); clearErr != nil {
+					failAndExit(redactSecrets(clearErr.Error()))
+					return
+				}
+				fmt.Println("Machine credential is no longer valid remotely. Removed local copy.")
+				return
+			}
+			if authForce {
+				if clearErr := clearAuthManagedCredential(); clearErr != nil {
+					failAndExit(redactSecrets(clearErr.Error()))
+					return
+				}
+				fmt.Println("Removed local credential. Remote revocation was not confirmed.")
+				return
+			}
+			failAndExit(redactSecrets(err.Error()) + " Local credential was not removed.")
 			return
 		}
 	}

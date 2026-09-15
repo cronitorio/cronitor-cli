@@ -19,10 +19,11 @@ import (
 type exitSentinel int
 
 type recordedRequest struct {
-	Method string
-	Path   string
-	Query  string
-	Body   string
+	Method   string
+	Path     string
+	Query    string
+	Body     string
+	AuthUser string
 }
 
 func withConnectTest(t *testing.T, mockURL string) func() {

@@ -53,10 +53,23 @@ func newAuthFake() *authFake {
 	}
 }
 
+func (f *authFake) deleteUsers() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var users []string
+	for _, req := range f.requests {
+		if req.Method == "DELETE" && req.Path == "/api/cli/machine-credentials/current" {
+			users = append(users, req.AuthUser)
+		}
+	}
+	return users
+}
+
 func (f *authFake) handler(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
+	user, _, _ := r.BasicAuth()
 	f.mu.Lock()
-	f.requests = append(f.requests, recordedRequest{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, Body: string(body)})
+	f.requests = append(f.requests, recordedRequest{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, Body: string(body), AuthUser: user})
 	path := r.URL.Path
 	method := r.Method
 	authz := r.Header.Get("Authorization")
@@ -165,7 +178,11 @@ func withAuthTest(t *testing.T, fake *authFake) (serverURL string, cleanup func(
 	verbose = false
 	resetSecretRedaction()
 	resetAuthFlags()
+	resetAPIKeyFlag()
 	authYes = true
+	if _, ok := os.LookupEnv(varApiKey); ok {
+		t.Setenv(varApiKey, "")
+	}
 	viper.Set(varConfig, cfg)
 	viper.Set(varApiKey, "")
 	viper.Set(varAuthManaged, false)
@@ -188,6 +205,7 @@ func withAuthTest(t *testing.T, fake *authFake) (serverURL string, cleanup func(
 		verbose = oldVerbose
 		resetSecretRedaction()
 		resetAuthFlags()
+		resetAPIKeyFlag()
 		viper.Set(varApiKey, oldAPIKey)
 		viper.Set(varAuthManaged, oldManaged)
 		viper.Set(varMachineCredentialName, oldName)
@@ -604,6 +622,379 @@ func TestAuthLogout_UnmanagedRequiresForce(t *testing.T) {
 	}
 	if !strings.Contains(stdout+stderr, "not installed by auth login") {
 		t.Errorf("message: %s %s", stdout, stderr)
+	}
+}
+
+const (
+	authStoredKey = authTestMachineKey
+	authEnvKey    = "cronitor_env_override_SECRET_eeee"
+	authFlagKey   = "cronitor_flag_override_SECRET_ffff"
+)
+
+func writeManagedAuthConfig(t *testing.T, key, name string) {
+	t.Helper()
+	raw, err := json.Marshal(map[string]interface{}{
+		"CRONITOR_API_KEY":                 key,
+		"CRONITOR_AUTH_MANAGED":            true,
+		"CRONITOR_MACHINE_CREDENTIAL_NAME": name,
+		"CRONITOR_HOSTNAME":                "keep-host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configFilePath(), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	rememberSecret(key)
+}
+
+func assertManagedKeyPreserved(t *testing.T, key string) {
+	t.Helper()
+	cfg := readAuthConfig(t)
+	if cfg["CRONITOR_API_KEY"] != key {
+		t.Fatalf("stored key changed: %#v", cfg["CRONITOR_API_KEY"])
+	}
+	if cfg["CRONITOR_AUTH_MANAGED"] != true {
+		t.Fatalf("managed metadata cleared: %#v", cfg)
+	}
+}
+
+func TestAuthLogout_EnvOverrideDoesNotRevokeWrongKey(t *testing.T) {
+	fake := newAuthFake()
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	writeManagedAuthConfig(t, authStoredKey, authTestCredName)
+	// viper merge would prefer the env key; logout must not follow it.
+	viper.Set(varApiKey, authEnvKey)
+	viper.Set(varAuthManaged, true)
+	viper.Set(varMachineCredentialName, authTestCredName)
+	t.Setenv(varApiKey, authEnvKey)
+	rememberSecret(authEnvKey)
+
+	stdout, stderr, code, _ := executeAuth("auth", "logout", "--yes")
+	if code == 0 {
+		t.Fatalf("expected refusal, got success: %s %s", stdout, stderr)
+	}
+	assertNoSecrets(t, stdout, stderr)
+	if strings.Contains(stdout+stderr, "Logged out") {
+		t.Fatalf("promised logout despite env override: %s %s", stdout, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "CRONITOR_API_KEY") || !strings.Contains(stdout+stderr, "does not match") {
+		t.Errorf("expected override refusal: %s %s", stdout, stderr)
+	}
+	assertManagedKeyPreserved(t, authStoredKey)
+	if users := fake.deleteUsers(); len(users) != 0 {
+		t.Fatalf("DELETE under env override: %#v", users)
+	}
+}
+
+func TestAuthLogout_FlagOverrideDoesNotRevokeWrongKey(t *testing.T) {
+	fake := newAuthFake()
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	writeManagedAuthConfig(t, authStoredKey, authTestCredName)
+	viper.Set(varApiKey, authFlagKey)
+	rememberSecret(authFlagKey)
+
+	stdout, stderr, code, _ := executeAuth("auth", "logout", "--yes", "--api-key", authFlagKey)
+	if code == 0 {
+		t.Fatalf("expected refusal, got success: %s %s", stdout, stderr)
+	}
+	assertNoSecrets(t, stdout, stderr)
+	if strings.Contains(stdout+stderr, "Logged out") {
+		t.Fatalf("promised logout despite flag override: %s %s", stdout, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "--api-key") || !strings.Contains(stdout+stderr, "does not match") {
+		t.Errorf("expected flag refusal: %s %s", stdout, stderr)
+	}
+	assertManagedKeyPreserved(t, authStoredKey)
+	if users := fake.deleteUsers(); len(users) != 0 {
+		t.Fatalf("DELETE under flag override: %#v", users)
+	}
+}
+
+func TestAuthLogout_MatchingEnvOverrideStillRevokesStoredKey(t *testing.T) {
+	fake := newAuthFake()
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	writeManagedAuthConfig(t, authStoredKey, authTestCredName)
+	t.Setenv(varApiKey, authStoredKey)
+	viper.Set(varApiKey, authStoredKey)
+	viper.Set(varAuthManaged, true)
+
+	stdout, stderr, code, err := executeAuth("auth", "logout", "--yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 {
+		t.Fatalf("exit %d %s %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "Logged out") {
+		t.Errorf("expected confirmed logout: %s %s", stdout, stderr)
+	}
+	cfg := readAuthConfig(t)
+	if _, ok := cfg["CRONITOR_API_KEY"]; ok {
+		t.Errorf("key still present: %#v", cfg)
+	}
+	if users := fake.deleteUsers(); len(users) != 1 || users[0] != authStoredKey {
+		t.Fatalf("DELETE users %#v", users)
+	}
+}
+
+func TestAuthLogout_403DoesNotClearLocalOrPromiseSuccess(t *testing.T) {
+	fake := newAuthFake()
+	fake.deleteCode = 403
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	writeManagedAuthConfig(t, authStoredKey, authTestCredName)
+	viper.Set(varApiKey, authStoredKey)
+	viper.Set(varAuthManaged, true)
+
+	stdout, stderr, code, _ := executeAuth("auth", "logout", "--yes")
+	if code == 0 {
+		t.Fatal("expected failure on 403")
+	}
+	assertNoSecrets(t, stdout, stderr)
+	if strings.Contains(stdout+stderr, "Logged out") {
+		t.Fatalf("promised logout on 403: %s %s", stdout, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "403") || !strings.Contains(stdout+stderr, "Local credential was not removed") {
+		t.Errorf("expected unconfirmed revoke message: %s %s", stdout, stderr)
+	}
+	assertManagedKeyPreserved(t, authStoredKey)
+}
+
+func TestAuthLogout_404DoesNotClearLocalOrPromiseSuccess(t *testing.T) {
+	fake := newAuthFake()
+	fake.deleteCode = 404
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	writeManagedAuthConfig(t, authStoredKey, authTestCredName)
+	viper.Set(varApiKey, authStoredKey)
+	viper.Set(varAuthManaged, true)
+
+	stdout, stderr, code, _ := executeAuth("auth", "logout", "--yes")
+	if code == 0 {
+		t.Fatal("expected failure on 404")
+	}
+	assertNoSecrets(t, stdout, stderr)
+	if strings.Contains(stdout+stderr, "Logged out") {
+		t.Fatalf("promised logout on 404: %s %s", stdout, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "404") || !strings.Contains(stdout+stderr, "Local credential was not removed") {
+		t.Errorf("expected unconfirmed revoke message: %s %s", stdout, stderr)
+	}
+	assertManagedKeyPreserved(t, authStoredKey)
+}
+
+func TestAuthLogout_401ClearsLocalWithoutClaimingRemoteRevoke(t *testing.T) {
+	fake := newAuthFake()
+	fake.deleteCode = 401
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	writeManagedAuthConfig(t, authStoredKey, authTestCredName)
+	viper.Set(varApiKey, authStoredKey)
+	viper.Set(varAuthManaged, true)
+
+	stdout, stderr, code, _ := executeAuth("auth", "logout", "--yes")
+	if code != 0 {
+		t.Fatalf("exit %d %s %s", code, stdout, stderr)
+	}
+	assertNoSecrets(t, stdout, stderr)
+	if strings.Contains(stdout+stderr, "Logged out") {
+		t.Fatalf("must not claim remote logout on 401: %s %s", stdout, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "no longer valid remotely") {
+		t.Errorf("expected already-invalid message: %s %s", stdout, stderr)
+	}
+	cfg := readAuthConfig(t)
+	if _, ok := cfg["CRONITOR_API_KEY"]; ok {
+		t.Errorf("401 should clear a locally stored invalid key: %#v", cfg)
+	}
+}
+
+func TestAuthLogout_ViperSetWithoutEnvStillRevokesStoredKey(t *testing.T) {
+	fake := newAuthFake()
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	writeManagedAuthConfig(t, authStoredKey, authTestCredName)
+	// Ordinary SDK/viper override of the key, no flag and no process env.
+	viper.Set(varApiKey, authEnvKey)
+	viper.Set(varAuthManaged, true)
+	rememberSecret(authEnvKey)
+
+	stdout, stderr, code, err := executeAuth("auth", "logout", "--yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 {
+		t.Fatalf("exit %d %s %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "Logged out") {
+		t.Errorf("expected confirmed logout of the stored key: %s %s", stdout, stderr)
+	}
+	if users := fake.deleteUsers(); len(users) != 1 || users[0] != authStoredKey {
+		t.Fatalf("DELETE must use the config key, not the viper override: %#v", users)
+	}
+	cfg := readAuthConfig(t)
+	if _, ok := cfg["CRONITOR_API_KEY"]; ok {
+		t.Errorf("stored key should be cleared: %#v", cfg)
+	}
+}
+
+func TestAuthLogout_ForceDoesNotBypassEnvOverrideRefusal(t *testing.T) {
+	fake := newAuthFake()
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	writeManagedAuthConfig(t, authStoredKey, authTestCredName)
+	t.Setenv(varApiKey, authEnvKey)
+	viper.Set(varApiKey, authEnvKey)
+	rememberSecret(authEnvKey)
+
+	stdout, stderr, code, _ := executeAuth("auth", "logout", "--yes", "--force")
+	if code == 0 {
+		t.Fatalf("expected refusal, got success: %s %s", stdout, stderr)
+	}
+	if strings.Contains(stdout+stderr, "Logged out") {
+		t.Fatalf("force must not promise logout on override mismatch: %s %s", stdout, stderr)
+	}
+	assertManagedKeyPreserved(t, authStoredKey)
+	if users := fake.deleteUsers(); len(users) != 0 {
+		t.Fatalf("DELETE under env override with --force: %#v", users)
+	}
+}
+
+func TestAuthLogout_EmptyEnvDoesNotBlockStoredLogout(t *testing.T) {
+	fake := newAuthFake()
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	writeManagedAuthConfig(t, authStoredKey, authTestCredName)
+	t.Setenv(varApiKey, "")
+	viper.Set(varApiKey, authStoredKey)
+	viper.Set(varAuthManaged, true)
+
+	stdout, stderr, code, err := executeAuth("auth", "logout", "--yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 {
+		t.Fatalf("exit %d %s %s", code, stdout, stderr)
+	}
+	if users := fake.deleteUsers(); len(users) != 1 || users[0] != authStoredKey {
+		t.Fatalf("DELETE users %#v", users)
+	}
+}
+
+func TestAuthLogout_EnvOnlyKeyIsNotLoggedIn(t *testing.T) {
+	fake := newAuthFake()
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	t.Setenv(varApiKey, authEnvKey)
+	viper.Set(varApiKey, authEnvKey)
+	rememberSecret(authEnvKey)
+
+	stdout, stderr, code, _ := executeAuth("auth", "logout", "--yes")
+	if code != 0 {
+		t.Fatalf("env-only key should be not-logged-in, exit %d %s %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "Not logged in") {
+		t.Errorf("message: %s %s", stdout, stderr)
+	}
+	if users := fake.deleteUsers(); len(users) != 0 {
+		t.Fatalf("must not DELETE an env-only key: %#v", users)
+	}
+}
+
+func TestAuthLogout_ReadsCaseInsensitiveConfigKeys(t *testing.T) {
+	fake := newAuthFake()
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	raw := `{
+		"cronitor_api_key": "` + authStoredKey + `",
+		"cronitor_auth_managed": true,
+		"cronitor_machine_credential_name": "` + authTestCredName + `"
+	}`
+	if err := os.WriteFile(configFilePath(), []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rememberSecret(authStoredKey)
+
+	stdout, stderr, code, err := executeAuth("auth", "logout", "--yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 {
+		t.Fatalf("exit %d %s %s", code, stdout, stderr)
+	}
+	if users := fake.deleteUsers(); len(users) != 1 || users[0] != authStoredKey {
+		t.Fatalf("DELETE users %#v", users)
+	}
+}
+
+func TestAuthLogout_ForceRemovesUnmanaged(t *testing.T) {
+	fake := newAuthFake()
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	if err := os.WriteFile(configFilePath(), []byte(`{"CRONITOR_API_KEY":"manual-key-not-from-auth","CRONITOR_HOSTNAME":"keep-host"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	viper.Set(varApiKey, "manual-key-not-from-auth")
+
+	stdout, stderr, code, _ := executeAuth("auth", "logout", "--yes", "--force")
+	if code != 0 {
+		t.Fatalf("exit %d %s %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "Logged out") {
+		t.Errorf("expected local logout: %s %s", stdout, stderr)
+	}
+	if users := fake.deleteUsers(); len(users) != 0 {
+		t.Fatalf("unmanaged --force must not DELETE remotely: %#v", users)
+	}
+	cfg := readAuthConfig(t)
+	if _, ok := cfg["CRONITOR_API_KEY"]; ok {
+		t.Errorf("key still present: %#v", cfg)
+	}
+	if cfg["CRONITOR_HOSTNAME"] != "keep-host" {
+		t.Errorf("lost hostname: %#v", cfg)
+	}
+}
+
+func TestAuthLogout_403ForceRemovesLocalOnly(t *testing.T) {
+	fake := newAuthFake()
+	fake.deleteCode = 403
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	writeManagedAuthConfig(t, authStoredKey, authTestCredName)
+	viper.Set(varApiKey, authStoredKey)
+	viper.Set(varAuthManaged, true)
+
+	stdout, stderr, code, _ := executeAuth("auth", "logout", "--yes", "--force")
+	if code != 0 {
+		t.Fatalf("exit %d %s %s", code, stdout, stderr)
+	}
+	assertNoSecrets(t, stdout, stderr)
+	if strings.Contains(stdout+stderr, "Logged out") {
+		t.Fatalf("must not claim remote logout when force-clearing after 403: %s %s", stdout, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "Remote revocation was not confirmed") {
+		t.Errorf("expected local-only message: %s %s", stdout, stderr)
+	}
+	cfg := readAuthConfig(t)
+	if _, ok := cfg["CRONITOR_API_KEY"]; ok {
+		t.Errorf("force should remove local key: %#v", cfg)
 	}
 }
 

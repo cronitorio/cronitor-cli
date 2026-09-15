@@ -79,10 +79,7 @@ Example setting your API key (preferred):
 Example setting common exclude text for use with 'cronitor discover':
   $ cronitor configure -e "/var/app/code/path/" -e "/var/app/bin/" -e "> /dev/null"`,
 	Run: func(cmd *cobra.Command, args []string) {
-		if flag := cmd.Flags().Lookup("api-key"); flag != nil && flag.Changed {
-			viper.Set(varAuthManaged, false)
-			viper.Set(varMachineCredentialName, "")
-		}
+		clearManagedAuthMetadataIfReplacingKey(cmd)
 
 		configData := configFromViper()
 
