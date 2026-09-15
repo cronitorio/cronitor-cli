@@ -33,9 +33,9 @@ States:
   --tick      Send a heartbeat (for heartbeat monitors)
 
 Metrics (for --complete or --fail):
-  count:<name>        Event count
-  duration:<name>     Duration in seconds
-  error_count:<name>  Error count
+  --metric accepts comma-separated name=value pairs (integer values).
+  Built-in names: count, error_count
+  Custom names (e.g. queue_depth) are sent the same way.
 
 Examples:
   Report job started:
@@ -47,8 +47,8 @@ Examples:
   Report failure with exit code and message:
     cronitor ping d3x0c1 --fail --status-code 1 --msg "Connection refused"
 
-  Send custom metrics:
-    cronitor ping d3x0c1 --complete --metric "count:processed=100,error_count:failed=2"
+  Send custom metrics alongside built-ins:
+    cronitor ping d3x0c1 --complete --metric "queue_depth=42,count=100"
 
   Correlate run/complete events:
     cronitor ping d3x0c1 --run --series "job-123"
@@ -119,7 +119,7 @@ func getEndpointFromFlag() string {
 	return ""
 }
 
-// parseMetrics parses metric strings like "count:processed=100,error_count:failed=2"
+// parseMetrics parses comma-separated name=value pairs (e.g. "queue_depth=42,count=100").
 func parseMetrics(metricStr string) map[string]int {
 	metrics := make(map[string]int)
 	parts := strings.Split(metricStr, ",")
@@ -128,7 +128,7 @@ func parseMetrics(metricStr string) map[string]int {
 		if part == "" {
 			continue
 		}
-		// Format: type:name=value (e.g., count:processed=100)
+		// Format: name=value (key is everything before '=', integer value)
 		eqIdx := strings.LastIndex(part, "=")
 		if eqIdx == -1 {
 			continue
@@ -157,5 +157,5 @@ func init() {
 	pingCmd.Flags().StringVar(&series, "series", "", "Unique ID to correlate run/complete events")
 	pingCmd.Flags().IntVar(&pingStatusCode, "status-code", 0, "Exit/status code")
 	pingCmd.Flags().Float64Var(&pingDuration, "duration", 0, "Execution duration in seconds")
-	pingCmd.Flags().StringVar(&pingMetrics, "metric", "", "Custom metrics: type:name=value (comma-separated)")
+	pingCmd.Flags().StringVar(&pingMetrics, "metric", "", "Custom metrics: comma-separated name=value (e.g. queue_depth=42,count=100)")
 }
