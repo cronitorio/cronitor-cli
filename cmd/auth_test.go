@@ -224,6 +224,7 @@ func executeAuth(args ...string) (stdout, stderr string, code int, err error) {
 	exitFn = func(c int) { panic(exitSentinel(c)) }
 	defer func() { exitFn = oldExit }()
 
+	resetCobraHelpFlags(RootCmd)
 	RootCmd.SetArgs(args)
 	var execErr error
 	stdout, stderr = testutil.CaptureStdoutStderr(func() {
@@ -372,8 +373,15 @@ func TestSignupCommandSharesAuthLoginRunE(t *testing.T) {
 }
 
 func TestSignup_HelpNotesAuthLoginAlias(t *testing.T) {
-	_, cleanup := withAuthTest(t, newAuthFake())
-	defer cleanup()
+	if !strings.Contains(strings.ToLower(signupCmd.Short), "alias") {
+		t.Errorf("signup Short should say it is an alias: %s", signupCmd.Short)
+	}
+	if !strings.Contains(signupCmd.Long, "alias for auth login") {
+		t.Errorf("signup Long should note it is an alias for auth login:\n%s", signupCmd.Long)
+	}
+	if !strings.Contains(authLoginCmd.Long, "signup is an alias") {
+		t.Errorf("auth login Long should mention the signup alias:\n%s", authLoginCmd.Long)
+	}
 
 	stdout, stderr, code, err := executeAuth("signup", "--help")
 	if err != nil {
@@ -386,7 +394,7 @@ func TestSignup_HelpNotesAuthLoginAlias(t *testing.T) {
 	if !strings.Contains(help, "alias") || !strings.Contains(help, "auth login") {
 		t.Errorf("signup help should note it is an alias for auth login:\n%s", help)
 	}
-	if strings.Contains(help, "Full Name") || strings.Contains(help, "email") && strings.Contains(help, "password") {
+	if strings.Contains(help, "Full Name") || (strings.Contains(help, "email") && strings.Contains(help, "password")) {
 		t.Errorf("signup help still describes the old TUI sign-up path:\n%s", help)
 	}
 }

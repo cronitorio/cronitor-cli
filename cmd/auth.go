@@ -119,6 +119,23 @@ func resetAuthLoginFlags(cmd *cobra.Command) {
 	_ = cmd.Flags().Set("timeout", "")
 }
 
+func resetCobraHelpFlags(cmd *cobra.Command) {
+	if cmd == nil {
+		return
+	}
+	if f := cmd.Flags().Lookup("help"); f != nil {
+		_ = f.Value.Set("false")
+		f.Changed = false
+	}
+	if f := cmd.PersistentFlags().Lookup("help"); f != nil {
+		_ = f.Value.Set("false")
+		f.Changed = false
+	}
+	for _, child := range cmd.Commands() {
+		resetCobraHelpFlags(child)
+	}
+}
+
 func resetAuthFlags() {
 	authYes = false
 	authNoBrowser = false
@@ -128,6 +145,7 @@ func resetAuthFlags() {
 	resetAuthLoginFlags(signupCmd)
 	_ = authLogoutCmd.Flags().Set("yes", "false")
 	_ = authLogoutCmd.Flags().Set("force", "false")
+	resetCobraHelpFlags(RootCmd)
 }
 
 func runAuthLoginE(cmd *cobra.Command, args []string) error {
