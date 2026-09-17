@@ -18,7 +18,7 @@ const (
 	SlowDownIncrement       = 5 * time.Second
 	DefaultDeviceExpiry     = 300 * time.Second
 	DefaultWorkOSClientID   = "client_cronitor_cli"
-	DefaultWorkOSAuthKitURL = "https://login.cronitor.io"
+	DefaultWorkOSAuthKitURL = "https://auth.cronitor.io"
 
 	envWorkOSClientID   = "CRONITOR_WORKOS_CLIENT_ID"
 	envWorkOSAuthKitURL = "CRONITOR_WORKOS_AUTHKIT_URL"
@@ -131,7 +131,8 @@ func parseOrganization(raw json.RawMessage) string {
 	return ""
 }
 
-// WorkOSAuthKitURL is the public Connect issuer (no trailing slash).
+// WorkOSAuthKitURL is the public AuthKit Connect issuer (no trailing slash).
+// The production default is the AuthKit custom domain https://auth.cronitor.io.
 func WorkOSAuthKitURL() string {
 	if WorkOSAuthKitURLOverride != "" {
 		return strings.TrimRight(WorkOSAuthKitURLOverride, "/")

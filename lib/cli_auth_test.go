@@ -304,3 +304,56 @@ func TestGetCurrentMachineCredential_Gone(t *testing.T) {
 		t.Fatalf("expected CredentialGoneError, got %v", err)
 	}
 }
+
+func withClearedAuthKitURL(t *testing.T) {
+	t.Helper()
+	old := lib.WorkOSAuthKitURLOverride
+	lib.WorkOSAuthKitURLOverride = ""
+	t.Cleanup(func() { lib.WorkOSAuthKitURLOverride = old })
+	t.Setenv("CRONITOR_WORKOS_AUTHKIT_URL", "")
+}
+
+func TestWorkOSAuthKitURL_DefaultIsAuthCronitor(t *testing.T) {
+	withClearedAuthKitURL(t)
+
+	const want = "https://auth.cronitor.io"
+	if lib.DefaultWorkOSAuthKitURL != want {
+		t.Errorf("DefaultWorkOSAuthKitURL = %q, want %q", lib.DefaultWorkOSAuthKitURL, want)
+	}
+	if got := lib.WorkOSAuthKitURL(); got != want {
+		t.Errorf("WorkOSAuthKitURL() = %q, want %q", got, want)
+	}
+}
+
+func TestWorkOSAuthKitURL_EmptyAndWhitespaceEnvUseDefault(t *testing.T) {
+	withClearedAuthKitURL(t)
+
+	for _, env := range []string{"", "   ", "\t"} {
+		t.Setenv("CRONITOR_WORKOS_AUTHKIT_URL", env)
+		if got := lib.WorkOSAuthKitURL(); got != lib.DefaultWorkOSAuthKitURL {
+			t.Errorf("env %q: WorkOSAuthKitURL() = %q, want default %q", env, got, lib.DefaultWorkOSAuthKitURL)
+		}
+	}
+}
+
+func TestWorkOSAuthKitURL_OverrideAndEnvPrecedence(t *testing.T) {
+	old := lib.WorkOSAuthKitURLOverride
+	t.Cleanup(func() { lib.WorkOSAuthKitURLOverride = old })
+
+	t.Setenv("CRONITOR_WORKOS_AUTHKIT_URL", "https://env.example/authkit/")
+	lib.WorkOSAuthKitURLOverride = ""
+	if got := lib.WorkOSAuthKitURL(); got != "https://env.example/authkit" {
+		t.Errorf("env override: got %q", got)
+	}
+
+	lib.WorkOSAuthKitURLOverride = "https://override.example/authkit/"
+	if got := lib.WorkOSAuthKitURL(); got != "https://override.example/authkit" {
+		t.Errorf("test override should win over env: got %q", got)
+	}
+
+	lib.WorkOSAuthKitURLOverride = ""
+	t.Setenv("CRONITOR_WORKOS_AUTHKIT_URL", "")
+	if got := lib.WorkOSAuthKitURL(); got != "https://auth.cronitor.io" {
+		t.Errorf("cleared override/env must fall back to AuthKit default: got %q", got)
+	}
+}
