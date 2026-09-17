@@ -117,6 +117,16 @@ var syncFile string         // Path to YAML/JSON file for bulk monitor import
 // To deprecate this feature we are hijacking this flag that will trigger removal of auto-discover lines from existing user's crontabs.
 var noAutoDiscover = true
 
+func discoverMissingAPIKeyGuidance() string {
+	return fmt.Sprintf("\n%s\n\n%s Run %s to sign in with device authorization (%s is an alias).\n\n%s Copy an SDK key from https://cronitor.io/app/settings/api and save it with %s\n\n",
+		color.New(color.FgRed, color.Bold).Sprint("Add your API key before running sync."),
+		lipgloss.NewStyle().Bold(true).Render("New user?"),
+		lipgloss.NewStyle().Italic(true).Render("cronitor auth login"),
+		lipgloss.NewStyle().Italic(true).Render("cronitor signup"),
+		lipgloss.NewStyle().Bold(true).Render("Existing user?"),
+		lipgloss.NewStyle().Italic(true).Render("export CRONITOR_API_KEY and run cronitor configure"))
+}
+
 var discoverCmd = &cobra.Command{
 	Use:     "sync <optional path>",
 	Aliases: []string{"discover"},
@@ -169,12 +179,7 @@ Example where you perform a dry-run without any crontab modifications:
 		processingMultipleCrontabs = false
 
 		if len(viper.GetString(varApiKey)) < 10 {
-			fatal(fmt.Sprintf("\n%s\n\n%s Run %s to create an account.\n\n%s Copy an SDK key from https://cronitor.io/app/settings/api and save it with %s\n\n",
-				color.New(color.FgRed, color.Bold).Sprint("Add your API key before running sync."),
-				lipgloss.NewStyle().Bold(true).Render("New user?"),
-				lipgloss.NewStyle().Italic(true).Render("cronitor signup"),
-				lipgloss.NewStyle().Bold(true).Render("Existing user?"),
-				lipgloss.NewStyle().Italic(true).Render("export CRONITOR_API_KEY and run cronitor configure")), 1)
+			fatal(discoverMissingAPIKeyGuidance(), 1)
 		}
 
 		// Handle --file flag for bulk monitor import from YAML/JSON file

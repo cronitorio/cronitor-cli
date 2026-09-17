@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -333,6 +334,119 @@ func TestAuthLogin_InstallsMachineCredential(t *testing.T) {
 	}
 	if !sawCreate {
 		t.Fatal("did not POST machine-credentials")
+	}
+}
+
+func TestSignupCommandSharesAuthLoginRunE(t *testing.T) {
+	cmd, args, err := RootCmd.Find([]string{"signup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd != signupCmd {
+		t.Fatalf("Find(signup) = %q, want signupCmd", cmd.CommandPath())
+	}
+	if len(args) != 0 {
+		t.Fatalf("Find leftover args: %v", args)
+	}
+	if signupCmd.RunE == nil || authLoginCmd.RunE == nil {
+		t.Fatal("signup and auth login must use RunE")
+	}
+	if reflect.ValueOf(signupCmd.RunE).Pointer() != reflect.ValueOf(authLoginCmd.RunE).Pointer() {
+		t.Fatal("signup must share auth login RunE")
+	}
+	alias, aliasArgs, err := RootCmd.Find([]string{"auth", "signup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alias != authLoginCmd {
+		t.Fatalf("Find(auth signup) = %q, want auth login", alias.CommandPath())
+	}
+	if len(aliasArgs) != 0 {
+		t.Fatalf("auth signup leftover args: %v", aliasArgs)
+	}
+	for _, name := range []string{"yes", "no-browser", "timeout"} {
+		if signupCmd.Flags().Lookup(name) == nil {
+			t.Errorf("signup missing login flag --%s", name)
+		}
+	}
+}
+
+func TestSignup_HelpNotesAuthLoginAlias(t *testing.T) {
+	_, cleanup := withAuthTest(t, newAuthFake())
+	defer cleanup()
+
+	stdout, stderr, code, err := executeAuth("signup", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 {
+		t.Fatalf("exit %d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	help := stdout + stderr
+	if !strings.Contains(help, "alias") || !strings.Contains(help, "auth login") {
+		t.Errorf("signup help should note it is an alias for auth login:\n%s", help)
+	}
+	if strings.Contains(help, "Full Name") || strings.Contains(help, "email") && strings.Contains(help, "password") {
+		t.Errorf("signup help still describes the old TUI sign-up path:\n%s", help)
+	}
+}
+
+func TestSignup_InstallsMachineCredentialViaAuthLogin(t *testing.T) {
+	fake := newAuthFake()
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	var opened []string
+	openBrowserFn = func(u string) { opened = append(opened, u) }
+
+	stdout, stderr, code, err := executeAuth("signup", "--yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 {
+		t.Fatalf("exit %d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	assertNoSecrets(t, stdout, stderr)
+	if !strings.Contains(stdout, authTestUserCode) {
+		t.Errorf("expected user_code in output:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "https://login.example/device") {
+		t.Errorf("expected verification URI:\n%s", stdout)
+	}
+
+	cfg := readAuthConfig(t)
+	if cfg["CRONITOR_API_KEY"] != authTestMachineKey {
+		t.Errorf("stored key: %#v", cfg["CRONITOR_API_KEY"])
+	}
+	if cfg["CRONITOR_AUTH_MANAGED"] != true {
+		t.Errorf("auth managed: %#v", cfg["CRONITOR_AUTH_MANAGED"])
+	}
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	var sawDevice, sawCreate, sawLegacySignup bool
+	for _, req := range fake.requests {
+		switch {
+		case req.Method == "POST" && req.Path == "/oauth2/device_authorization":
+			sawDevice = true
+		case req.Method == "POST" && req.Path == "/api/cli/machine-credentials":
+			sawCreate = true
+		case strings.Contains(req.Path, "sign-up") || strings.Contains(req.Path, "signup"):
+			sawLegacySignup = true
+			t.Errorf("signup command hit old signup path: %s %s", req.Method, req.Path)
+		}
+	}
+	if !sawDevice {
+		t.Fatal("signup did not POST device_authorization")
+	}
+	if !sawCreate {
+		t.Fatal("signup did not POST machine-credentials")
+	}
+	if sawLegacySignup {
+		t.Fatal("signup used the legacy website sign-up key mint")
+	}
+	if len(opened) != 1 {
+		t.Errorf("browser: %#v", opened)
 	}
 }
 

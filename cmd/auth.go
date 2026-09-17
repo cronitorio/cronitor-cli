@@ -25,6 +25,12 @@ var (
 	authForce     bool
 )
 
+const authLoginLong = `Start WorkOS device authorization, then exchange the approved session
+for a Cronitor machine credential stored in the resolved config file.
+
+The user code and verification URL are printed. The device polling code,
+access token, and API key are never printed.`
+
 var authCmd = &cobra.Command{
 	Use:   "auth",
 	Short: "Log in, show status, or log out",
@@ -36,6 +42,7 @@ as CRONITOR_API_KEY. WorkOS tokens are used once to create that credential
 and are then discarded. They are never refreshed or written to disk.
 
   cronitor auth login
+  cronitor signup        (alias for auth login)
   cronitor auth status
   cronitor auth logout`,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -44,16 +51,21 @@ and are then discarded. They are never refreshed or written to disk.
 }
 
 var authLoginCmd = &cobra.Command{
-	Use:   "login",
-	Short: "Log in and install a machine credential",
-	Long: `Start WorkOS device authorization, then exchange the approved session
-for a Cronitor machine credential stored in the resolved config file.
+	Use:     "login",
+	Aliases: []string{"signup"},
+	Short:   "Log in and install a machine credential",
+	Long:    authLoginLong + "\n\ncronitor signup is an alias for this command.",
+	RunE:    runAuthLoginE,
+}
 
-The user code and verification URL are printed. The device polling code,
-access token, and API key are never printed.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		runAuthLogin()
-	},
+// signupCmd is a top-level alias for auth login. It shares RunE and flags so
+// `cronitor signup` is the same device-auth path — no separate TUI or
+// website sign-up key mint.
+var signupCmd = &cobra.Command{
+	Use:   "signup",
+	Short: "Alias for auth login",
+	Long:  "signup is an alias for auth login.\n\n" + authLoginLong,
+	RunE:  runAuthLoginE,
 }
 
 var authStatusCmd = &cobra.Command{
@@ -83,16 +95,28 @@ another. Other commands keep the usual flag/env/config precedence.`,
 
 func init() {
 	RootCmd.AddCommand(authCmd)
+	RootCmd.AddCommand(signupCmd)
 	authCmd.AddCommand(authLoginCmd)
 	authCmd.AddCommand(authStatusCmd)
 	authCmd.AddCommand(authLogoutCmd)
 
-	authLoginCmd.Flags().BoolVar(&authYes, "yes", false, "Install or replace a machine credential without prompting")
-	authLoginCmd.Flags().BoolVar(&authNoBrowser, "no-browser", false, "Print the verification URL without opening a browser")
-	authLoginCmd.Flags().StringVar(&authTimeout, "timeout", "", "Maximum time to wait for authorization (default: device expiry)")
+	addAuthLoginFlags(authLoginCmd)
+	addAuthLoginFlags(signupCmd)
 
 	authLogoutCmd.Flags().BoolVar(&authYes, "yes", false, "Revoke without prompting")
 	authLogoutCmd.Flags().BoolVar(&authForce, "force", false, "Remove the local API key without a confirmed remote revocation, or remove a key that was not installed by auth login")
+}
+
+func addAuthLoginFlags(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&authYes, "yes", false, "Install or replace a machine credential without prompting")
+	cmd.Flags().BoolVar(&authNoBrowser, "no-browser", false, "Print the verification URL without opening a browser")
+	cmd.Flags().StringVar(&authTimeout, "timeout", "", "Maximum time to wait for authorization (default: device expiry)")
+}
+
+func resetAuthLoginFlags(cmd *cobra.Command) {
+	_ = cmd.Flags().Set("yes", "false")
+	_ = cmd.Flags().Set("no-browser", "false")
+	_ = cmd.Flags().Set("timeout", "")
 }
 
 func resetAuthFlags() {
@@ -100,11 +124,15 @@ func resetAuthFlags() {
 	authNoBrowser = false
 	authTimeout = ""
 	authForce = false
-	_ = authLoginCmd.Flags().Set("yes", "false")
-	_ = authLoginCmd.Flags().Set("no-browser", "false")
-	_ = authLoginCmd.Flags().Set("timeout", "")
+	resetAuthLoginFlags(authLoginCmd)
+	resetAuthLoginFlags(signupCmd)
 	_ = authLogoutCmd.Flags().Set("yes", "false")
 	_ = authLogoutCmd.Flags().Set("force", "false")
+}
+
+func runAuthLoginE(cmd *cobra.Command, args []string) error {
+	runAuthLogin()
+	return nil
 }
 
 func resetAPIKeyFlag() {

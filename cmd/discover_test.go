@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/cronitorio/cronitor-cli/lib"
@@ -217,5 +218,21 @@ func TestCreateDefaultNameAutoDiscover(t *testing.T) {
 	expected := "[localhost] Auto discover /discover/test"
 	if defaultName != expected {
 		t.Errorf("Auto discover test failed, got: %s, expected: %s.", defaultName, expected)
+	}
+}
+
+func TestDiscoverMissingAPIKeyGuidancePointsAtAuthLogin(t *testing.T) {
+	msg := discoverMissingAPIKeyGuidance()
+	if !strings.Contains(msg, "cronitor auth login") {
+		t.Errorf("missing-key copy should point at auth login:\n%s", msg)
+	}
+	if !strings.Contains(msg, "cronitor signup") {
+		t.Errorf("missing-key copy should still mention signup as an alias:\n%s", msg)
+	}
+	if !strings.Contains(msg, "device authorization") || !strings.Contains(msg, "alias") {
+		t.Errorf("missing-key copy should describe the device-auth alias, not a separate sign-up:\n%s", msg)
+	}
+	if strings.Contains(msg, "to create an account") {
+		t.Errorf("missing-key copy still implies the old website sign-up path:\n%s", msg)
 	}
 }
