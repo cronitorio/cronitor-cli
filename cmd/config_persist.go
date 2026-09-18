@@ -58,6 +58,10 @@ var cronitorEnvAllowlist = []string{
 	"CRONITOR_API_VERSION",
 	"CRONITOR_CORS_ALLOWED_ORIGINS",
 	"CRONITOR_MCP_ENABLED",
+	"CRONITOR_AUTH_MANAGED",
+	"CRONITOR_MACHINE_CREDENTIAL_NAME",
+	"CRONITOR_WORKOS_CLIENT_ID",
+	"CRONITOR_WORKOS_AUTHKIT_URL",
 }
 
 func wrapPersistWriteError(path string, err error) error {
@@ -203,6 +207,8 @@ func configFromViper() ConfigFile {
 	configData.CorsAllowedOrigins = viper.GetString("CRONITOR_CORS_ALLOWED_ORIGINS")
 	configData.Users = viper.GetString(varUsers)
 	configData.ApiVersion = viper.GetString(varApiVersion)
+	configData.AuthManaged = viper.GetBool(varAuthManaged)
+	configData.MachineCredentialName = viper.GetString(varMachineCredentialName)
 	configData.MCPEnabled = viper.GetBool(varMCPEnabled)
 
 	if viper.IsSet("mcp_instances") {

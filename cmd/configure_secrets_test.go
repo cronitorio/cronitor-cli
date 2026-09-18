@@ -32,6 +32,9 @@ func resetConfigureTestState(t *testing.T) {
 	viper.Set(varAllowedIPs, "")
 	viper.Set(varApiVersion, "")
 	viper.Set(varMCPEnabled, false)
+	viper.Set(varAuthManaged, false)
+	viper.Set(varMachineCredentialName, "")
+	resetAPIKeyFlag()
 	viper.Set("CRONITOR_CORS_ALLOWED_ORIGINS", "")
 	viper.Set("mcp_instances", nil)
 	prevConfig := viper.GetString(varConfig)
@@ -247,5 +250,148 @@ func TestInitConfig_UnreadableWarningDoesNotEchoFileContents(t *testing.T) {
 	_, stderr = captureOutput(t, initConfig)
 	if strings.Contains(stderr, testAPIKey) || strings.Contains(stderr, "unclosed") {
 		t.Errorf("warning echoed yaml file contents:\n%s", stderr)
+	}
+}
+
+func writeManagedConfigureFile(t *testing.T, path, key, name string) {
+	t.Helper()
+	raw, err := json.MarshalIndent(map[string]interface{}{
+		"CRONITOR_API_KEY":                 key,
+		"CRONITOR_AUTH_MANAGED":            true,
+		"CRONITOR_MACHINE_CREDENTIAL_NAME": name,
+		"CRONITOR_HOSTNAME":                "keep-host",
+	}, "", "    ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readConfigureFile(t *testing.T, path string) ConfigFile {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got ConfigFile
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func executeConfigure(t *testing.T, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	oldExit := exitFn
+	code = 0
+	exitFn = func(c int) { panic(exitSentinel(c)) }
+	defer func() { exitFn = oldExit }()
+
+	RootCmd.SetArgs(args)
+	stdout, stderr = captureOutput(t, func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				if c, ok := rec.(exitSentinel); ok {
+					code = int(c)
+					return
+				}
+				panic(rec)
+			}
+		}()
+		if err := RootCmd.Execute(); err != nil && code == 0 {
+			t.Errorf("execute: %v", err)
+		}
+	})
+	return stdout, stderr, code
+}
+
+func TestConfigure_EnvSuppliedKeyClearsManagedMetadata(t *testing.T) {
+	resetConfigureTestState(t)
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	envKey := "cronitor_env_configure_SECRET_not-real"
+	writeManagedConfigureFile(t, path, testAPIKey, "cli-testhost")
+
+	t.Setenv(varApiKey, envKey)
+	viper.Set(varConfig, path)
+	viperUnset(varApiKey, varAuthManaged, varMachineCredentialName, varHostname, varEnv, varPingApiKey)
+	viper.AutomaticEnv()
+
+	if got := viper.GetString(varApiKey); got != envKey {
+		t.Fatalf("viper did not take real env key, got %q", got)
+	}
+
+	stdout, stderr, code := executeConfigure(t, "configure", "--config", path)
+	if code != 0 {
+		t.Fatalf("exit %d %s %s", code, stdout, stderr)
+	}
+
+	got := readConfigureFile(t, path)
+	if got.ApiKey != envKey {
+		t.Errorf("persisted key %q, want env key", got.ApiKey)
+	}
+	if got.AuthManaged {
+		t.Error("managed metadata should be cleared when configure persists an env-supplied key")
+	}
+	if got.MachineCredentialName != "" {
+		t.Errorf("stale credential name kept: %q", got.MachineCredentialName)
+	}
+	if got.Hostname != "keep-host" {
+		t.Errorf("lost hostname: %q", got.Hostname)
+	}
+}
+
+func TestConfigure_EnvSameKeyKeepsManagedMetadata(t *testing.T) {
+	resetConfigureTestState(t)
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	writeManagedConfigureFile(t, path, testAPIKey, "cli-testhost")
+
+	t.Setenv(varApiKey, testAPIKey)
+	viper.Set(varConfig, path)
+	viperUnset(varApiKey, varAuthManaged, varMachineCredentialName, varHostname, varEnv, varPingApiKey)
+	viper.AutomaticEnv()
+
+	stdout, stderr, code := executeConfigure(t, "configure", "--config", path)
+	if code != 0 {
+		t.Fatalf("exit %d %s %s", code, stdout, stderr)
+	}
+
+	got := readConfigureFile(t, path)
+	if got.ApiKey != testAPIKey {
+		t.Errorf("key: %q", got.ApiKey)
+	}
+	if !got.AuthManaged {
+		t.Error("same env key must keep managed metadata")
+	}
+	if got.MachineCredentialName != "cli-testhost" {
+		t.Errorf("name: %q", got.MachineCredentialName)
+	}
+}
+
+func TestConfigure_ApiKeyFlagClearsManagedMetadata(t *testing.T) {
+	resetConfigureTestState(t)
+	path := filepath.Join(t.TempDir(), "cronitor.json")
+	writeManagedConfigureFile(t, path, testAPIKey, "cli-testhost")
+	viper.Set(varConfig, path)
+	viper.Set(varApiKey, testAPIKey)
+	viper.Set(varAuthManaged, true)
+	viper.Set(varMachineCredentialName, "cli-testhost")
+	viper.Set(varHostname, "keep-host")
+
+	stdout, stderr, code := executeConfigure(t, "configure", "--config", path, "--api-key", testAPIKey)
+	if code != 0 {
+		t.Fatalf("exit %d %s %s", code, stdout, stderr)
+	}
+
+	got := readConfigureFile(t, path)
+	if got.ApiKey != testAPIKey {
+		t.Errorf("key: %q", got.ApiKey)
+	}
+	if got.AuthManaged {
+		t.Error("--api-key should clear managed metadata even when the value matches")
+	}
+	if got.MachineCredentialName != "" {
+		t.Errorf("stale name kept: %q", got.MachineCredentialName)
 	}
 }

@@ -10,20 +10,22 @@ import (
 )
 
 type ConfigFile struct {
-	ApiKey             string                       `json:"CRONITOR_API_KEY"`
-	PingApiAuthKey     string                       `json:"CRONITOR_PING_API_KEY"`
-	ExcludeText        []string                     `json:"CRONITOR_EXCLUDE_TEXT,omitempty"`
-	Hostname           string                       `json:"CRONITOR_HOSTNAME"`
-	Log                string                       `json:"CRONITOR_LOG"`
-	Env                string                       `json:"CRONITOR_ENV"`
-	DashUsername       string                       `json:"CRONITOR_DASH_USER"`
-	DashPassword       string                       `json:"CRONITOR_DASH_PASS"`
-	AllowedIPs         string                       `json:"CRONITOR_ALLOWED_IPS"`
-	CorsAllowedOrigins string                       `json:"CRONITOR_CORS_ALLOWED_ORIGINS"`
-	Users              string                       `json:"CRONITOR_USERS"`
-	ApiVersion         string                       `json:"CRONITOR_API_VERSION,omitempty"`
-	MCPEnabled         bool                         `json:"CRONITOR_MCP_ENABLED,omitempty"`
-	MCPInstances       map[string]MCPInstanceConfig `json:"mcp_instances,omitempty"`
+	ApiKey                string                       `json:"CRONITOR_API_KEY"`
+	PingApiAuthKey        string                       `json:"CRONITOR_PING_API_KEY"`
+	ExcludeText           []string                     `json:"CRONITOR_EXCLUDE_TEXT,omitempty"`
+	Hostname              string                       `json:"CRONITOR_HOSTNAME"`
+	Log                   string                       `json:"CRONITOR_LOG"`
+	Env                   string                       `json:"CRONITOR_ENV"`
+	DashUsername          string                       `json:"CRONITOR_DASH_USER"`
+	DashPassword          string                       `json:"CRONITOR_DASH_PASS"`
+	AllowedIPs            string                       `json:"CRONITOR_ALLOWED_IPS"`
+	CorsAllowedOrigins    string                       `json:"CRONITOR_CORS_ALLOWED_ORIGINS"`
+	Users                 string                       `json:"CRONITOR_USERS"`
+	ApiVersion            string                       `json:"CRONITOR_API_VERSION,omitempty"`
+	AuthManaged           bool                         `json:"CRONITOR_AUTH_MANAGED,omitempty"`
+	MachineCredentialName string                       `json:"CRONITOR_MACHINE_CREDENTIAL_NAME,omitempty"`
+	MCPEnabled            bool                         `json:"CRONITOR_MCP_ENABLED,omitempty"`
+	MCPInstances          map[string]MCPInstanceConfig `json:"mcp_instances,omitempty"`
 }
 
 type MCPInstanceConfig struct {
@@ -77,6 +79,7 @@ Example setting your API key (preferred):
 Example setting common exclude text for use with 'cronitor discover':
   $ cronitor configure -e "/var/app/code/path/" -e "/var/app/bin/" -e "> /dev/null"`,
 	Run: func(cmd *cobra.Command, args []string) {
+		clearManagedAuthMetadataIfReplacingKey(cmd)
 
 		configData := configFromViper()
 
@@ -88,6 +91,20 @@ Example setting common exclude text for use with 'cronitor discover':
 
 		fmt.Println("\nAPI Key:")
 		fmt.Println(secretPresenceLabel(configData.ApiKey))
+
+		fmt.Println("\nAuth Managed:")
+		if configData.AuthManaged {
+			fmt.Println("Yes")
+		} else {
+			fmt.Println("No")
+		}
+
+		fmt.Println("\nMachine Credential:")
+		if configData.MachineCredentialName == "" {
+			fmt.Println("Not Set")
+		} else {
+			fmt.Println(configData.MachineCredentialName)
+		}
 
 		fmt.Println("\nPing API Key:")
 		fmt.Println(secretPresenceLabel(configData.PingApiAuthKey))
