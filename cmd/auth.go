@@ -15,7 +15,7 @@ import (
 const (
 	varAuthManaged           = "CRONITOR_AUTH_MANAGED"
 	varMachineCredentialName = "CRONITOR_MACHINE_CREDENTIAL_NAME"
-	authLoginTimeoutDefault  = 0
+	authLoginTimeoutDefault  = 5 * time.Minute
 )
 
 var (
@@ -25,19 +25,19 @@ var (
 	authForce     bool
 )
 
-const authLoginLong = `Start WorkOS device authorization, then exchange the approved session
+const authLoginLong = `Start browser authorization with PKCE, then exchange the approved session
 for a Cronitor machine credential stored in the resolved config file.
 
-The user code and verification URL are printed. The device polling code,
-access token, and API key are never printed.`
+For remote machines, use --no-browser and paste the final callback URL
+into this terminal. Authorization codes, tokens, and API keys are never printed.`
 
 var authCmd = &cobra.Command{
 	Use:   "auth",
 	Short: "Log in, show status, or log out",
-	Long: `Authenticate CronitorCLI with WorkOS device authorization.
+	Long: `Authenticate CronitorCLI with browser authorization and PKCE.
 
-Login opens a browser (or prints a verification URL), shows a short user
-code, and after you approve the request stores a host machine credential
+Login opens a browser (or prints an authorization URL with --no-browser),
+and after you approve the request stores a host machine credential
 as CRONITOR_API_KEY. WorkOS tokens are used once to create that credential
 and are then discarded. They are never refreshed or written to disk.
 
@@ -59,7 +59,7 @@ var authLoginCmd = &cobra.Command{
 }
 
 // signupCmd is a top-level alias for auth login. It shares RunE and flags so
-// `cronitor signup` is the same device-auth path — no separate TUI or
+// `cronitor signup` is the same browser-auth path — no separate TUI or
 // website sign-up key mint.
 var signupCmd = &cobra.Command{
 	Use:   "signup",
@@ -109,8 +109,8 @@ func init() {
 
 func addAuthLoginFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&authYes, "yes", false, "Install or replace a machine credential without prompting")
-	cmd.Flags().BoolVar(&authNoBrowser, "no-browser", false, "Print the verification URL without opening a browser")
-	cmd.Flags().StringVar(&authTimeout, "timeout", "", "Maximum time to wait for authorization (default: device expiry)")
+	cmd.Flags().BoolVar(&authNoBrowser, "no-browser", false, "Print the authorization URL and accept callback URL paste-back (remote/headless login)")
+	cmd.Flags().StringVar(&authTimeout, "timeout", "", "Maximum time for browser authorization and token exchange (default: 5m)")
 }
 
 func resetAuthLoginFlags(cmd *cobra.Command) {
@@ -176,32 +176,12 @@ func runAuthLogin() {
 		return
 	}
 
-	device, err := lib.RequestDeviceAuthorization(authKit, clientID, lib.WorkOSScope())
-	if err != nil {
-		failAndExit(redactSecrets(err.Error()))
-		return
-	}
-	rememberSecret(device.DeviceCode)
-
-	printDeviceInstructions(device)
-
-	openURL := device.VerificationURIComplete
-	if openURL == "" {
-		openURL = device.VerificationURI
-	}
-	if !authNoBrowser && openURL != "" {
-		openBrowserFn(openURL)
-	}
-
 	timeout, err := parseAuthTimeout(authTimeout)
 	if err != nil {
 		failAndExit(err.Error())
 		return
 	}
-	expiresAt := nowFn().Add(time.Duration(device.ExpiresIn) * time.Second)
-	interval := lib.PollInterval(device.Interval)
-
-	token, err := pollDeviceGrant(authKit, clientID, device.DeviceCode, interval, timeout, expiresAt)
+	token, err := authorizeBrowser(authKit, clientID, timeout)
 	if err != nil {
 		failAndExit(redactSecrets(err.Error()))
 		return
@@ -227,22 +207,6 @@ func runAuthLogin() {
 	printAuthLoginSuccess(cred)
 }
 
-func printDeviceInstructions(device *lib.DeviceAuthorization) {
-	fmt.Println()
-	fmt.Println("Open this URL in a browser and enter the code:")
-	fmt.Println()
-	fmt.Println("  " + device.VerificationURI)
-	fmt.Println()
-	fmt.Println("  Code: " + device.UserCode)
-	if device.VerificationURIComplete != "" && device.VerificationURIComplete != device.VerificationURI {
-		fmt.Println()
-		fmt.Println("Or open:")
-		fmt.Println("  " + device.VerificationURIComplete)
-	}
-	fmt.Println()
-	Info("Waiting for authorization...")
-}
-
 func printAuthLoginSuccess(cred *lib.MachineCredential) {
 	Success(fmt.Sprintf("Logged in as machine credential %s", cred.Name))
 	if cred.Kind != "" {
@@ -255,53 +219,6 @@ func printAuthLoginSuccess(cred *lib.MachineCredential) {
 		fmt.Printf("Scopes: %s\n", strings.Join(cred.Scopes, ", "))
 	}
 	fmt.Printf("Config: %s\n", configFilePath())
-}
-
-func pollDeviceGrant(authKit, clientID, deviceCode string, interval, timeout time.Duration, expiresAt time.Time) (*lib.DeviceToken, error) {
-	deadline := expiresAt
-	if timeout > 0 {
-		flagDeadline := nowFn().Add(timeout)
-		if deadline.IsZero() || flagDeadline.Before(deadline) {
-			deadline = flagDeadline
-		}
-	}
-	if deadline.IsZero() {
-		deadline = nowFn().Add(lib.DefaultDeviceExpiry)
-	}
-
-	for {
-		if !nowFn().Before(deadline) {
-			return nil, fmt.Errorf("device authorization expired")
-		}
-
-		token, oauthErr, err := lib.ExchangeDeviceToken(authKit, clientID, deviceCode)
-		if err != nil {
-			return nil, err
-		}
-		if token != nil {
-			return token, nil
-		}
-
-		switch oauthErr {
-		case "authorization_pending":
-			// keep polling
-		case "slow_down":
-			interval += lib.SlowDownIncrement
-		case "access_denied":
-			return nil, fmt.Errorf("authorization denied")
-		case "expired_token":
-			return nil, fmt.Errorf("device authorization expired")
-		case "":
-			return nil, fmt.Errorf("device authorization failed")
-		default:
-			return nil, fmt.Errorf("device authorization failed: %s", oauthErr)
-		}
-
-		sleepForPoll(interval, deadline)
-		if !nowFn().Before(deadline) {
-			return nil, fmt.Errorf("device authorization expired")
-		}
-	}
 }
 
 func parseAuthTimeout(raw string) (time.Duration, error) {

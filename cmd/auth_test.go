@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,8 +24,7 @@ import (
 )
 
 const (
-	authTestDeviceCode  = "DEVICE_POLL_CODE_SECRET_do_not_print"
-	authTestUserCode    = "WD-TEST-42"
+	authTestAuthCode    = "AUTHORIZATION_CODE_SECRET_do_not_print"
 	authTestAccessToken = "WORKOS_ACCESS_TOKEN_SECRET_do_not_print"
 	authTestRefreshTok  = "WORKOS_REFRESH_TOKEN_SECRET_do_not_print"
 	authTestMachineKey  = "cronitor_machine_key_SECRET_do_not_print"
@@ -77,16 +79,6 @@ func (f *authFake) handler(w http.ResponseWriter, r *http.Request) {
 	f.mu.Unlock()
 
 	switch {
-	case method == "POST" && path == "/oauth2/device_authorization":
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{
-			"device_code":%q,
-			"user_code":%q,
-			"verification_uri":"https://login.example/device",
-			"verification_uri_complete":"https://login.example/device?user_code=%s",
-			"expires_in":300,
-			"interval":5
-		}`, authTestDeviceCode, authTestUserCode, authTestUserCode)
 	case method == "POST" && path == "/oauth2/token":
 		f.mu.Lock()
 		idx := f.tokenCalls
@@ -99,18 +91,9 @@ func (f *authFake) handler(w http.ResponseWriter, r *http.Request) {
 		}
 		f.mu.Unlock()
 		switch script {
-		case "pending":
-			w.WriteHeader(400)
-			io.WriteString(w, `{"error":"authorization_pending"}`)
-		case "slow_down":
-			w.WriteHeader(400)
-			io.WriteString(w, `{"error":"slow_down"}`)
 		case "denied":
 			w.WriteHeader(400)
 			io.WriteString(w, `{"error":"access_denied"}`)
-		case "expired":
-			w.WriteHeader(400)
-			io.WriteString(w, `{"error":"expired_token"}`)
 		default:
 			fmt.Fprintf(w, `{"access_token":%q,"refresh_token":%q,"token_type":"Bearer","expires_in":300}`, authTestAccessToken, authTestRefreshTok)
 		}
@@ -156,6 +139,7 @@ func withAuthTest(t *testing.T, fake *authFake) (serverURL string, cleanup func(
 	oldPing := lib.PingHostOverride
 	oldExit := exitFn
 	oldSleep := sleepFn
+	oldCallback := readCallbackFn
 	oldOpen := openBrowserFn
 	oldLine := readLineFn
 	oldNow := nowFn
@@ -173,7 +157,8 @@ func withAuthTest(t *testing.T, fake *authFake) (serverURL string, cleanup func(
 	lib.WorkOSClientIDOverride = authTestClientID
 	lib.PingHostOverride = ""
 	sleepFn = func(time.Duration) {}
-	openBrowserFn = func(string) {}
+	openBrowserFn = completeTestBrowserLogin
+	readCallbackFn = func(ctx context.Context, raw string) (string, error) { return testCallback(raw), nil }
 	readLineFn = func(string) (string, error) { return "y", nil }
 	nowFn = time.Now
 	verbose = false
@@ -200,6 +185,7 @@ func withAuthTest(t *testing.T, fake *authFake) (serverURL string, cleanup func(
 		lib.PingHostOverride = oldPing
 		exitFn = oldExit
 		sleepFn = oldSleep
+		readCallbackFn = oldCallback
 		openBrowserFn = oldOpen
 		readLineFn = oldLine
 		nowFn = oldNow
@@ -246,7 +232,7 @@ func executeAuth(args ...string) (stdout, stderr string, code int, err error) {
 func assertNoSecrets(t *testing.T, blobs ...string) {
 	t.Helper()
 	combined := strings.Join(blobs, "\n")
-	for _, secret := range []string{authTestDeviceCode, authTestAccessToken, authTestRefreshTok, authTestMachineKey} {
+	for _, secret := range []string{authTestAuthCode, authTestAccessToken, authTestRefreshTok, authTestMachineKey} {
 		if strings.Contains(combined, secret) {
 			t.Errorf("secret %q leaked:\n%s", secret, combined)
 		}
@@ -272,7 +258,7 @@ func TestAuthLogin_InstallsMachineCredential(t *testing.T) {
 	defer cleanup()
 
 	var opened []string
-	openBrowserFn = func(u string) { opened = append(opened, u) }
+	openBrowserFn = func(u string) { opened = append(opened, u); completeTestBrowserLogin(u) }
 
 	stdout, stderr, code, err := executeAuth("auth", "login", "--yes")
 	if err != nil {
@@ -282,16 +268,13 @@ func TestAuthLogin_InstallsMachineCredential(t *testing.T) {
 		t.Fatalf("exit %d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 	assertNoSecrets(t, stdout, stderr)
-	if !strings.Contains(stdout, authTestUserCode) {
-		t.Errorf("expected user_code in output:\n%s", stdout)
-	}
-	if !strings.Contains(stdout, "https://login.example/device") {
-		t.Errorf("expected verification URI:\n%s", stdout)
+	if !strings.Contains(stdout, "/oauth2/authorize?") {
+		t.Errorf("expected authorization URI:\n%s", stdout)
 	}
 	if !strings.Contains(stdout, authTestCredName) {
 		t.Errorf("expected credential name:\n%s", stdout)
 	}
-	if len(opened) != 1 || !strings.Contains(opened[0], authTestUserCode) {
+	if len(opened) != 1 || !strings.Contains(opened[0], "code_challenge_method=S256") {
 		t.Errorf("browser: %#v", opened)
 	}
 
@@ -306,7 +289,7 @@ func TestAuthLogin_InstallsMachineCredential(t *testing.T) {
 		t.Errorf("name: %#v", cfg["CRONITOR_MACHINE_CREDENTIAL_NAME"])
 	}
 	raw, _ := os.ReadFile(configFilePath())
-	for _, leak := range []string{authTestDeviceCode, authTestAccessToken, authTestRefreshTok} {
+	for _, leak := range []string{authTestAuthCode, authTestAccessToken, authTestRefreshTok} {
 		if strings.Contains(string(raw), leak) {
 			t.Errorf("config persisted WorkOS secret %s", leak)
 		}
@@ -405,7 +388,7 @@ func TestSignup_InstallsMachineCredentialViaAuthLogin(t *testing.T) {
 	defer cleanup()
 
 	var opened []string
-	openBrowserFn = func(u string) { opened = append(opened, u) }
+	openBrowserFn = func(u string) { opened = append(opened, u); completeTestBrowserLogin(u) }
 
 	stdout, stderr, code, err := executeAuth("signup", "--yes")
 	if err != nil {
@@ -415,11 +398,8 @@ func TestSignup_InstallsMachineCredentialViaAuthLogin(t *testing.T) {
 		t.Fatalf("exit %d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 	assertNoSecrets(t, stdout, stderr)
-	if !strings.Contains(stdout, authTestUserCode) {
-		t.Errorf("expected user_code in output:\n%s", stdout)
-	}
-	if !strings.Contains(stdout, "https://login.example/device") {
-		t.Errorf("expected verification URI:\n%s", stdout)
+	if !strings.Contains(stdout, "/oauth2/authorize?") {
+		t.Errorf("expected authorization URI:\n%s", stdout)
 	}
 
 	cfg := readAuthConfig(t)
@@ -432,11 +412,11 @@ func TestSignup_InstallsMachineCredentialViaAuthLogin(t *testing.T) {
 
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
-	var sawDevice, sawCreate, sawLegacySignup bool
+	var sawToken, sawCreate, sawLegacySignup bool
 	for _, req := range fake.requests {
 		switch {
-		case req.Method == "POST" && req.Path == "/oauth2/device_authorization":
-			sawDevice = true
+		case req.Method == "POST" && req.Path == "/oauth2/token":
+			sawToken = true
 		case req.Method == "POST" && req.Path == "/api/cli/machine-credentials":
 			sawCreate = true
 		case strings.Contains(req.Path, "sign-up") || strings.Contains(req.Path, "signup"):
@@ -444,8 +424,8 @@ func TestSignup_InstallsMachineCredentialViaAuthLogin(t *testing.T) {
 			t.Errorf("signup command hit old signup path: %s %s", req.Method, req.Path)
 		}
 	}
-	if !sawDevice {
-		t.Fatal("signup did not POST device_authorization")
+	if !sawToken {
+		t.Fatal("signup did not exchange authorization code")
 	}
 	if !sawCreate {
 		t.Fatal("signup did not POST machine-credentials")
@@ -456,92 +436,6 @@ func TestSignup_InstallsMachineCredentialViaAuthLogin(t *testing.T) {
 	if len(opened) != 1 {
 		t.Errorf("browser: %#v", opened)
 	}
-}
-
-func TestAuthLogin_PendingThenSlowDownThenSuccess(t *testing.T) {
-	fake := newAuthFake()
-	fake.tokenScript = []string{"pending", "slow_down", "ok"}
-	_, cleanup := withAuthTest(t, fake)
-	defer cleanup()
-
-	var sleeps []time.Duration
-	sleepFn = func(d time.Duration) { sleeps = append(sleeps, d) }
-
-	stdout, stderr, code, err := executeAuth("auth", "login", "--yes")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if code != 0 {
-		t.Fatalf("exit %d %s %s", code, stdout, stderr)
-	}
-	assertNoSecrets(t, stdout, stderr)
-	if len(sleeps) < 2 {
-		t.Fatalf("expected polls to sleep, got %#v", sleeps)
-	}
-	if sleeps[0] != 5*time.Second {
-		t.Errorf("first interval: %s", sleeps[0])
-	}
-	if sleeps[1] != 10*time.Second {
-		t.Errorf("slow_down should add 5s, got %s", sleeps[1])
-	}
-}
-
-func TestAuthLogin_AccessDenied(t *testing.T) {
-	fake := newAuthFake()
-	fake.tokenScript = []string{"denied"}
-	_, cleanup := withAuthTest(t, fake)
-	defer cleanup()
-
-	stdout, stderr, code, _ := executeAuth("auth", "login", "--yes")
-	if code == 0 {
-		t.Fatal("expected non-zero exit")
-	}
-	assertNoSecrets(t, stdout, stderr)
-	if !strings.Contains(stdout+stderr, "denied") {
-		t.Errorf("expected denial message: %s %s", stdout, stderr)
-	}
-	if _, err := os.Stat(configFilePath()); err == nil {
-		raw, _ := os.ReadFile(configFilePath())
-		if strings.Contains(string(raw), authTestMachineKey) {
-			t.Fatal("denied login stored a key")
-		}
-	}
-}
-
-func TestAuthLogin_ExpiredToken(t *testing.T) {
-	fake := newAuthFake()
-	fake.tokenScript = []string{"expired"}
-	_, cleanup := withAuthTest(t, fake)
-	defer cleanup()
-
-	stdout, stderr, code, _ := executeAuth("auth", "login", "--yes")
-	if code == 0 {
-		t.Fatal("expected non-zero exit")
-	}
-	assertNoSecrets(t, stdout, stderr)
-	if !strings.Contains(strings.ToLower(stdout+stderr), "expired") {
-		t.Errorf("expected expiry message: %s %s", stdout, stderr)
-	}
-}
-
-func TestAuthLogin_ExpiresInStopsPolling(t *testing.T) {
-	fake := newAuthFake()
-	fake.tokenScript = []string{"pending", "pending", "pending"}
-	_, cleanup := withAuthTest(t, fake)
-	defer cleanup()
-
-	start := time.Unix(1_700_000_000, 0)
-	nowFn = func() time.Time { return start }
-	sleepFn = func(time.Duration) {
-		start = start.Add(10 * time.Minute)
-		nowFn = func() time.Time { return start }
-	}
-
-	stdout, stderr, code, _ := executeAuth("auth", "login", "--yes")
-	if code == 0 {
-		t.Fatal("expected timeout/expiry")
-	}
-	assertNoSecrets(t, stdout, stderr)
 }
 
 func TestAuthLogin_PromptRequiredToReplace(t *testing.T) {
@@ -570,13 +464,14 @@ func TestAuthLogin_PromptRequiredToReplace(t *testing.T) {
 	}
 }
 
-func TestAuthLogin_BrowserFallbackStillShowsCode(t *testing.T) {
+func TestAuthLogin_BrowserFallbackStillShowsAuthorizationURL(t *testing.T) {
 	fake := newAuthFake()
 	_, cleanup := withAuthTest(t, fake)
 	defer cleanup()
 
-	openBrowserFn = func(string) {
+	openBrowserFn = func(raw string) {
 		fmt.Println("Failed to open browser: no display")
+		completeTestBrowserLogin(raw)
 	}
 
 	stdout, stderr, code, err := executeAuth("auth", "login", "--yes")
@@ -587,8 +482,8 @@ func TestAuthLogin_BrowserFallbackStillShowsCode(t *testing.T) {
 		t.Fatalf("exit %d %s %s", code, stdout, stderr)
 	}
 	assertNoSecrets(t, stdout, stderr)
-	if !strings.Contains(stdout, authTestUserCode) || !strings.Contains(stdout, "https://login.example/device") {
-		t.Errorf("fallback must still show URI and user_code:\n%s", stdout)
+	if !strings.Contains(stdout, "code_challenge_method=S256") || !strings.Contains(stdout, "/oauth2/authorize?") {
+		t.Errorf("fallback must still show authorization URI:\n%s", stdout)
 	}
 }
 
@@ -1132,5 +1027,188 @@ func TestAuthHelpListsSubcommands(t *testing.T) {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("help missing %s:\n%s", want, stdout)
 		}
+	}
+}
+
+func testCallback(raw string) string {
+	u, _ := url.Parse(raw)
+	return lib.CLIAuthRedirectURI + "?code=" + authTestAuthCode + "&state=" + u.Query().Get("state")
+}
+func completeTestBrowserLogin(raw string) {
+	resp, err := http.Get(testCallback(raw))
+	if err == nil {
+		resp.Body.Close()
+	}
+}
+
+func TestAuthLoginTimeoutPreservesCredential(t *testing.T) {
+	_, cleanup := withAuthTest(t, nil)
+	defer cleanup()
+	os.WriteFile(configFilePath(), []byte(`{"CRONITOR_API_KEY":"existing"}`), 0600)
+	openBrowserFn = func(string) {}
+	_, _, code, _ := executeAuth("auth", "login", "--yes", "--timeout", "20ms")
+	if code == 0 {
+		t.Fatal("expected timeout")
+	}
+	if readAuthConfig(t)["CRONITOR_API_KEY"] != "existing" {
+		t.Fatal("replaced credential on timeout")
+	}
+	// Listener must have been released even when login timed out.
+	openBrowserFn = completeTestBrowserLogin
+	if _, _, code, _ := executeAuth("auth", "login", "--yes", "--timeout", "5s"); code != 0 {
+		t.Fatal("listener not released")
+	}
+}
+
+func TestAuthLoginRemoteRejectsInvalidCallbackWithoutPersisting(t *testing.T) {
+	_, cleanup := withAuthTest(t, nil)
+	defer cleanup()
+	readCallbackFn = func(context.Context, string) (string, error) {
+		return lib.CLIAuthRedirectURI + "?state=wrong&code=" + authTestAuthCode, nil
+	}
+	stdout, stderr, code, _ := executeAuth("auth", "login", "--yes", "--no-browser")
+	if code == 0 {
+		t.Fatal("invalid callback accepted")
+	}
+	assertNoSecrets(t, stdout, stderr)
+	if _, err := os.Stat(configFilePath()); !os.IsNotExist(err) {
+		t.Fatal("persisted invalid login")
+	}
+}
+
+func TestAuthLoginInvalidLocalCallbackDoesNotCancelLogin(t *testing.T) {
+	_, cleanup := withAuthTest(t, nil)
+	defer cleanup()
+	openBrowserFn = func(raw string) {
+		bad := strings.Replace(testCallback(raw), "state=", "state=wrong", 1)
+		resp, err := http.Get(bad)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 400 {
+			t.Error("accepted invalid state")
+		}
+		completeTestBrowserLogin(raw)
+	}
+	if _, _, code, _ := executeAuth("auth", "login", "--yes"); code != 0 {
+		t.Fatal("invalid state killed login")
+	}
+}
+
+func TestAuthLoginDenialAndExchangeFailurePreserveExistingCredential(t *testing.T) {
+	for _, remote := range []bool{false, true} {
+		for _, denied := range []bool{false, true} {
+			t.Run(fmt.Sprintf("remote=%v/denied=%v", remote, denied), func(t *testing.T) {
+				fake := newAuthFake()
+				if !denied {
+					fake.tokenScript = []string{"denied"}
+				}
+				_, cleanup := withAuthTest(t, fake)
+				defer cleanup()
+				os.WriteFile(configFilePath(), []byte(`{"CRONITOR_API_KEY":"existing"}`), 0600)
+				callback := func(raw string) string {
+					value := testCallback(raw)
+					if denied {
+						value = strings.Replace(value, "code="+authTestAuthCode, "error=access_denied&error_description="+authTestAuthCode, 1)
+					}
+					return value
+				}
+				readCallbackFn = func(_ context.Context, raw string) (string, error) { return callback(raw), nil }
+				openBrowserFn = func(raw string) {
+					resp, err := http.Get(callback(raw))
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					resp.Body.Close()
+				}
+				args := []string{"auth", "login", "--yes", "--timeout", "1s"}
+				if remote {
+					args = append(args, "--no-browser")
+				}
+				stdout, stderr, code, _ := executeAuth(args...)
+				if code == 0 {
+					t.Fatal("failed login succeeded")
+				}
+				assertNoSecrets(t, stdout, stderr)
+				if readAuthConfig(t)["CRONITOR_API_KEY"] != "existing" {
+					t.Fatal("replaced credential")
+				}
+				fake.mu.Lock()
+				defer fake.mu.Unlock()
+				for _, r := range fake.requests {
+					if r.Path == "/api/cli/machine-credentials" {
+						t.Error("attempted credential creation after failure")
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestAuthLoginCreateFailurePreservesExistingCredential(t *testing.T) {
+	fake := newAuthFake()
+	fake.createStatus = 503
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+	os.WriteFile(configFilePath(), []byte(`{"CRONITOR_API_KEY":"existing"}`), 0600)
+	stdout, stderr, code, _ := executeAuth("auth", "login", "--yes")
+	if code == 0 {
+		t.Fatal("failed creation succeeded")
+	}
+	assertNoSecrets(t, stdout, stderr)
+	if readAuthConfig(t)["CRONITOR_API_KEY"] != "existing" {
+		t.Fatal("replaced credential")
+	}
+}
+
+func TestAuthLoginRemoteNeedsNoListener(t *testing.T) {
+	_, cleanup := withAuthTest(t, nil)
+	defer cleanup()
+	listener, err := net.Listen("tcp4", "127.0.0.1:8319")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	if _, _, code, _ := executeAuth("auth", "login", "--yes", "--no-browser"); code != 0 {
+		t.Fatal("remote login requires local listener")
+	}
+}
+
+func TestCallbackInputEOFTimeoutAndNoEcho(t *testing.T) {
+	for _, name := range []string{"eof", "timeout", "success", "too-long"} {
+		t.Run(name, func(t *testing.T) {
+			reader, writer, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			original := os.Stdin
+			os.Stdin = reader
+			defer func() { os.Stdin = original; reader.Close(); writer.Close() }()
+			switch name {
+			case "eof":
+				writer.Close()
+			case "success":
+				go func() { io.WriteString(writer, "callback-secret\n"); writer.Close() }()
+			case "too-long":
+				go func() { io.WriteString(writer, strings.Repeat("x", 20<<10)); writer.Close() }()
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+			defer cancel()
+			var value string
+			var readErr error
+			stdout, stderr := testutil.CaptureStdoutStderr(func() { value, readErr = readCallbackFromTerminal(ctx, "") })
+			if name == "success" {
+				if value != "callback-secret" || readErr != nil {
+					t.Fatalf("input failed: %v", readErr)
+				}
+			} else if readErr == nil {
+				t.Fatal("expected input failure")
+			}
+			if strings.Contains(stdout+stderr, "callback-secret") {
+				t.Fatal("echoed callback")
+			}
+		})
 	}
 }
