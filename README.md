@@ -21,6 +21,37 @@ For the latest installation details, see https://cronitor.io/docs/using-cronitor
 cronitor [command]
 ```
 
+### Sign in or create an account
+
+```bash
+cronitor auth login
+cronitor auth status
+cronitor monitor list
+```
+
+Login opens a browser and displays a verification URL and user code. Sign in to your existing Cronitor account, or create one in the same browser step with Google, GitHub, or email and password. After approval, the CLI saves a named machine credential for this installation. `cronitor signup` is an alias for `cronitor auth login`.
+
+For remote terminals or agents, run `cronitor auth login --no-browser`. Keep the process running while the human opens the displayed URL and completes sign-in or signup. Never paste passwords, API keys, or tokens into an agent conversation. Check `cronitor auth --help` and update an older binary if the command is unavailable.
+
+Use a writable config owned by the OS user that will run the CLI. For a fresh Linux/macOS installation without a writable system config:
+
+```bash
+mkdir -p "$HOME/.config/cronitor"
+export CRONITOR_CONFIG="$HOME/.config/cronitor/cronitor.json"
+cronitor auth login --no-browser
+cronitor auth status
+```
+
+Keep using that config path (`CRONITOR_CONFIG` or `--config`) for subsequent commands. Login restricts the saved file to its owner (`0600` on Unix; an owner-restricted ACL on Windows). Jobs running as another OS user need their own config or credentials supplied through their service environment.
+
+`auth status` shows the credential's organization and permissions without exposing the key. Full-access users receive SDK Integration credentials; read-only users receive telemetry-only credentials and cannot manage account resources. Reuse working credentials rather than logging in again for every task.
+
+```bash
+cronitor auth logout
+```
+
+Logout revokes this installation's credential and removes it locally. **Scheduled jobs using that credential will stop authenticating.** Agents should not log out as routine task cleanup. The credential persists independently of the browser session; removing a user or changing their role does not automatically revoke it. Replacing a credential with another login also does not revoke the previous key; remove unused keys in the dashboard.
+
 ### Cron Management
 | Command | Description |
 |---------|-------------|
@@ -193,6 +224,8 @@ For systemd and Docker examples, and security best‑practices, see the full [Da
 
 ## Configuration and secrets
 
+Browser login above is the default for interactive use. Existing explicit API keys remain supported for CI, containers, and secret-managed deployments; no login is required when those credentials already work.
+
 Do not put API keys, ping keys, or dashboard passwords on the command line. Those flags (`--api-key`, `--ping-api-key`, `--dash-password`) remain for compatibility but appear in shell history and process lists. Set credentials in the environment instead:
 
 ```
@@ -203,7 +236,7 @@ cronitor configure
 
 `cronitor configure` prints `API Key: Set` / `Ping API Key: Set` (or `Not Set`). It never prints complete keys. Dashboard passwords are shown as `********`.
 
-New config files are created **owner-only** (`0600` on Unix; an owner-restricted ACL on Windows), and `configure` prints a note saying so the first time. An existing file keeps its current permissions when saved, so upgrading never changes which users can read it. `exec` and `ping` read the file exactly as before.
+New config files are created **owner-only** (`0600` on Unix; an owner-restricted ACL on Windows), and `configure` prints a note saying so the first time. Ordinary `configure` saves preserve an existing file's permissions; `auth login` restricts the file to its owner. `exec` and `ping` read the file exactly as before.
 
 Default paths are unchanged: `/etc/cronitor/cronitor.json` (Linux/macOS) and `%SystemDrive%\ProgramData\Cronitor\cronitor.json` (Windows).
 
