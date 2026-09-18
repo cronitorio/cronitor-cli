@@ -5,155 +5,16 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/cronitorio/cronitor-cli/lib"
 )
 
-func parseForm(body string) (url.Values, error) {
-	return url.ParseQuery(body)
-}
-
 const (
-	testDeviceCode  = "DEVICE_POLL_CODE_SECRET_do_not_print"
-	testUserCode    = "WD-TEST-42"
 	testAccessToken = "WORKOS_ACCESS_TOKEN_SECRET_do_not_print"
-	testRefreshTok  = "WORKOS_REFRESH_TOKEN_SECRET_do_not_print"
 	testMachineKey  = "cronitor_machine_key_SECRET_do_not_print"
-	testClientID    = "client_test_cronitor_cli"
 )
-
-func TestRequestDeviceAuthorization_FormAndResponse(t *testing.T) {
-	var gotContentType, gotBody string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		gotContentType = r.Header.Get("Content-Type")
-		gotBody = string(body)
-		if r.URL.Path != "/oauth2/device_authorization" {
-			t.Errorf("path: %s", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"device_code":               testDeviceCode,
-			"user_code":                 testUserCode,
-			"verification_uri":          "https://login.example/device",
-			"verification_uri_complete": "https://login.example/device?user_code=" + testUserCode,
-			"expires_in":                300,
-			"interval":                  5,
-		})
-	}))
-	defer server.Close()
-
-	auth, err := lib.RequestDeviceAuthorization(server.URL, testClientID, "openid")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(gotContentType, "application/x-www-form-urlencoded") {
-		t.Errorf("content-type: %s", gotContentType)
-	}
-	if !strings.Contains(gotBody, "client_id="+testClientID) || !strings.Contains(gotBody, "scope=openid") {
-		t.Errorf("form body: %s", gotBody)
-	}
-	if auth.DeviceCode != testDeviceCode || auth.UserCode != testUserCode {
-		t.Errorf("codes: %+v", auth)
-	}
-	if auth.VerificationURI == "" {
-		t.Fatal("missing verification_uri")
-	}
-}
-
-func TestRequestDeviceAuthorization_DefaultsIntervalAndExpiry(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{
-			"device_code":      testDeviceCode,
-			"user_code":        testUserCode,
-			"verification_uri": "https://login.example/device",
-		})
-	}))
-	defer server.Close()
-
-	auth, err := lib.RequestDeviceAuthorization(server.URL, testClientID, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if auth.Interval != 5 {
-		t.Errorf("interval default: %d", auth.Interval)
-	}
-	if auth.ExpiresIn != 300 {
-		t.Errorf("expires_in default: %d", auth.ExpiresIn)
-	}
-}
-
-func TestExchangeDeviceToken_PendingSlowDownDeniedExpired(t *testing.T) {
-	cases := []struct {
-		errorCode string
-	}{
-		{"authorization_pending"},
-		{"slow_down"},
-		{"access_denied"},
-		{"expired_token"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.errorCode, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/oauth2/token" {
-					t.Errorf("path: %s", r.URL.Path)
-				}
-				body, _ := io.ReadAll(r.Body)
-				form, err := parseForm(string(body))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if form.Get("grant_type") != lib.DeviceCodeGrantType {
-					t.Errorf("grant: %s", body)
-				}
-				if form.Get("device_code") != testDeviceCode {
-					t.Errorf("device_code missing")
-				}
-				w.WriteHeader(400)
-				json.NewEncoder(w).Encode(map[string]string{"error": tc.errorCode})
-			}))
-			defer server.Close()
-
-			token, oauthErr, err := lib.ExchangeDeviceToken(server.URL, testClientID, testDeviceCode)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if token != nil {
-				t.Fatal("expected no token")
-			}
-			if oauthErr != tc.errorCode {
-				t.Errorf("got %q", oauthErr)
-			}
-		})
-	}
-}
-
-func TestExchangeDeviceToken_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"access_token":  testAccessToken,
-			"refresh_token": testRefreshTok,
-			"token_type":    "Bearer",
-			"expires_in":    300,
-		})
-	}))
-	defer server.Close()
-
-	token, oauthErr, err := lib.ExchangeDeviceToken(server.URL, testClientID, testDeviceCode)
-	if err != nil || oauthErr != "" {
-		t.Fatalf("err=%v oauth=%s", err, oauthErr)
-	}
-	if token.AccessToken != testAccessToken {
-		t.Fatal("missing access token")
-	}
-	token.Discard()
-	if token.AccessToken != "" || token.RefreshToken != "" || token.IDToken != "" {
-		t.Fatal("Discard left token fields populated")
-	}
-}
 
 func TestCreateMachineCredential_FrozenContract(t *testing.T) {
 	var gotAuth, gotBody string

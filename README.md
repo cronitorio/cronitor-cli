@@ -29,9 +29,11 @@ cronitor auth status
 cronitor monitor list
 ```
 
-Login opens a browser and displays a verification URL and user code. Sign in to your existing Cronitor account, or create one in the same browser step with Google, GitHub, or email and password. After approval, the CLI saves a named machine credential for this installation. `cronitor signup` is an alias for `cronitor auth login`.
+Login opens a browser using authorization code + PKCE. Sign in to your existing Cronitor account, or create one in the same browser step with Google, GitHub, or email and password. After approval, the CLI saves a named machine credential for this installation. `cronitor signup` is an alias for `cronitor auth login`.
 
-For remote terminals or agents, run `cronitor auth login --no-browser`. Keep the process running while the human opens the displayed URL and completes sign-in or signup. Never paste passwords, API keys, or tokens into an agent conversation. Check `cronitor auth --help` and update an older binary if the command is unavailable.
+For remote terminals or agents, run `cronitor auth login --no-browser`. Keep the process running while the human opens the displayed authorization URL and completes sign-in or signup. The browser will redirect to `http://127.0.0.1:8319/callback` and may show a connection error because the CLI is on another computer. Copy the entire resulting URL from the browser address bar and paste it into the waiting CLI prompt (input is hidden). No SSH tunnel is needed. Paste this URL only into that prompt, not an agent conversation; it contains a short-lived authorization code. Never share passwords, API keys, or tokens.
+
+Local login listens only on `127.0.0.1:8319` and receives the callback automatically. If that port is occupied, close the other login attempt or use `--no-browser`. Login expires after five minutes; use `--timeout 10m` if needed. These instructions require the PKCE login update: version 33.6 used a device flow that is incompatible with our authentication provider's External Sign-in. Existing API keys continue working; use API-key configuration until an updated release is available.
 
 Use a writable config owned by the OS user that will run the CLI. For a fresh Linux/macOS installation without a writable system config:
 
