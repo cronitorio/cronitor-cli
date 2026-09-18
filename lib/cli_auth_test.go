@@ -325,6 +325,29 @@ func TestWorkOSAuthKitURL_DefaultIsAuthCronitor(t *testing.T) {
 	}
 }
 
+func TestWorkOSClientID_ProductionDefaultAndOverrides(t *testing.T) {
+	old := lib.WorkOSClientIDOverride
+	t.Cleanup(func() { lib.WorkOSClientIDOverride = old })
+	lib.WorkOSClientIDOverride = ""
+
+	const productionClientID = "client_01M2S35Z13KFG88QDXA7W8A41K"
+	for _, env := range []string{"", "   ", "\t"} {
+		t.Setenv("CRONITOR_WORKOS_CLIENT_ID", env)
+		if got := lib.WorkOSClientID(); got != productionClientID {
+			t.Errorf("env %q: WorkOSClientID() = %q, want %q", env, got, productionClientID)
+		}
+	}
+
+	t.Setenv("CRONITOR_WORKOS_CLIENT_ID", " client_staging ")
+	if got := lib.WorkOSClientID(); got != "client_staging" {
+		t.Errorf("environment override: got %q", got)
+	}
+	lib.WorkOSClientIDOverride = "client_build_override"
+	if got := lib.WorkOSClientID(); got != "client_build_override" {
+		t.Errorf("build override should win over environment: got %q", got)
+	}
+}
+
 func TestWorkOSAuthKitURL_EmptyAndWhitespaceEnvUseDefault(t *testing.T) {
 	withClearedAuthKitURL(t)
 
