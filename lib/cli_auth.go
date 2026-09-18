@@ -17,7 +17,7 @@ const (
 	DefaultDeviceInterval   = 5 * time.Second
 	SlowDownIncrement       = 5 * time.Second
 	DefaultDeviceExpiry     = 300 * time.Second
-	DefaultWorkOSClientID   = "client_cronitor_cli"
+	DefaultWorkOSClientID   = "client_01M2S35Z13KFG88QDXA7W8A41K"
 	DefaultWorkOSAuthKitURL = "https://auth.cronitor.io"
 
 	envWorkOSClientID   = "CRONITOR_WORKOS_CLIENT_ID"
