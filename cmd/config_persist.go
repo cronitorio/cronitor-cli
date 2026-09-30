@@ -197,6 +197,7 @@ func configFromViper() ConfigFile {
 	configData := ConfigFile{}
 	configData.ApiKey = viper.GetString(varApiKey)
 	configData.PingApiAuthKey = viper.GetString(varPingApiKey)
+	configData.PingApiHost = viper.GetString(varPingApiHost)
 	configData.ExcludeText = viper.GetStringSlice(varExcludeText)
 	configData.Hostname = viper.GetString(varHostname)
 	configData.Log = viper.GetString(varLog)

@@ -12,6 +12,7 @@ import (
 type ConfigFile struct {
 	ApiKey                string                       `json:"CRONITOR_API_KEY"`
 	PingApiAuthKey        string                       `json:"CRONITOR_PING_API_KEY"`
+	PingApiHost           string                       `json:"CRONITOR_PING_API_HOST,omitempty"`
 	ExcludeText           []string                     `json:"CRONITOR_EXCLUDE_TEXT,omitempty"`
 	Hostname              string                       `json:"CRONITOR_HOSTNAME"`
 	Log                   string                       `json:"CRONITOR_LOG"`
@@ -59,6 +60,7 @@ WARNING: --api-key, --ping-api-key, and --dash-password appear in shell history 
 Environment variables that are read:
   CRONITOR_API_KEY
   CRONITOR_PING_API_KEY
+  CRONITOR_PING_API_HOST
   CRONITOR_CONFIG
   CRONITOR_EXCLUDE_TEXT
   CRONITOR_HOSTNAME
@@ -108,6 +110,9 @@ Example setting common exclude text for use with 'cronitor discover':
 
 		fmt.Println("\nPing API Key:")
 		fmt.Println(secretPresenceLabel(configData.PingApiAuthKey))
+
+		fmt.Println("\nPing API Host:")
+		fmt.Println(normalizePingApiHost(configData.PingApiHost))
 
 		fmt.Println("\nEnvironment:")
 		if configData.Env == "" {
@@ -203,6 +208,7 @@ func init() {
 	configureCmd.Flags().String("dash-password", "", "Password for the dashboard authentication (appears in shell history and process lists; prefer CRONITOR_DASH_PASS)")
 	configureCmd.Flags().String("allowed-ips", "", "Comma-separated list of allowed IP addresses/CIDR ranges (e.g. 192.168.1.0/24,10.0.0.1)")
 	configureCmd.Flags().String("ping-api-key", "", "Your Cronitor Ping API key (appears in shell history and process lists; prefer CRONITOR_PING_API_KEY)")
+	configureCmd.Flags().String("ping-api-host", "", "Telemetry host for pings, e.g. eu.cronitor.link (default: cronitor.link)")
 	configureCmd.Flags().String("log", "", "Path to debug log file")
 	configureCmd.Flags().String("env", "", "Environment name (e.g. staging, production)")
 	configureCmd.Flags().String("users", "", "Comma-separated list of users whose crontabs to include")
@@ -213,6 +219,7 @@ func init() {
 	viper.BindPFlag(varDashPassword, configureCmd.Flags().Lookup("dash-password"))
 	viper.BindPFlag(varAllowedIPs, configureCmd.Flags().Lookup("allowed-ips"))
 	viper.BindPFlag(varPingApiKey, configureCmd.Flags().Lookup("ping-api-key"))
+	viper.BindPFlag(varPingApiHost, configureCmd.Flags().Lookup("ping-api-host"))
 	viper.BindPFlag(varLog, configureCmd.Flags().Lookup("log"))
 	viper.BindPFlag(varEnv, configureCmd.Flags().Lookup("env"))
 	viper.BindPFlag(varUsers, configureCmd.Flags().Lookup("users"))

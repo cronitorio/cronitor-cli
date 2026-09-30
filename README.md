@@ -257,6 +257,16 @@ If the config file exists but cannot be read, the CLI prints one warning to stde
 
 On Windows, new files get an owner-restricted ACL (Administrators and SYSTEM keep access, a platform limitation). Existing files keep their ACL unless `--restrict` is passed.
 
+### Telemetry host
+
+Pings go to `cronitor.link` by default, which is right for most workloads. For latency-sensitive workloads in Europe, send pings to the EU endpoint instead:
+
+```
+export CRONITOR_PING_API_HOST=eu.cronitor.link
+```
+
+You can also pass `--ping-api-host eu.cronitor.link`, or save it with `cronitor configure --ping-api-host eu.cronitor.link`. The EU endpoint accepts the same API keys and sends events to the same monitors. It changes only where requests are received; it is not a data residency option. A bare host gets `https://`. Retries still fall back to `cronitor.io`. A host outside `cronitor.link`, such as a private proxy, is used for every attempt.
+
 ## MCP Server (AI Integration)
 
 The Cronitor CLI includes a built-in [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for managing cron jobs with natural language through AI-powered tools like Claude Code, Cursor, Cline, and Windsurf.

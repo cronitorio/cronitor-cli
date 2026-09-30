@@ -40,6 +40,7 @@ var pingApiKey string
 var verbose bool
 var noStdoutPassthru bool
 var users string
+var pingApiHostFlag string
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
@@ -63,6 +64,7 @@ var varEnv = "CRONITOR_ENV"
 var varHostname = "CRONITOR_HOSTNAME"
 var varLog = "CRONITOR_LOG"
 var varPingApiKey = "CRONITOR_PING_API_KEY"
+var varPingApiHost = "CRONITOR_PING_API_HOST"
 var varExcludeText = "CRONITOR_EXCLUDE_TEXT"
 var varConfig = "CRONITOR_CONFIG"
 var varDashUsername = "CRONITOR_DASH_USER"
@@ -82,6 +84,7 @@ func init() {
 	RootCmd.PersistentFlags().StringVar(&environment, "env", environment, "Cronitor Environment")
 	RootCmd.PersistentFlags().StringVarP(&apiKey, "api-key", "k", apiKey, "Cronitor API Key (appears in shell history and process lists; prefer CRONITOR_API_KEY)")
 	RootCmd.PersistentFlags().StringVarP(&pingApiKey, "ping-api-key", "p", pingApiKey, "Ping API Key (appears in shell history and process lists; prefer CRONITOR_PING_API_KEY)")
+	RootCmd.PersistentFlags().StringVar(&pingApiHostFlag, "ping-api-host", pingApiHostFlag, "Telemetry host for pings, e.g. eu.cronitor.link (default: cronitor.link)")
 	RootCmd.PersistentFlags().StringVarP(&hostname, "hostname", "n", hostname, "A unique identifier for this host (default: system hostname)")
 	RootCmd.PersistentFlags().StringVarP(&debugLog, "log", "l", debugLog, "Write debug logs to supplied file")
 	RootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", verbose, "Verbose output")
@@ -97,6 +100,7 @@ func init() {
 	viper.BindPFlag(varHostname, RootCmd.PersistentFlags().Lookup("hostname"))
 	viper.BindPFlag(varLog, RootCmd.PersistentFlags().Lookup("log"))
 	viper.BindPFlag(varPingApiKey, RootCmd.PersistentFlags().Lookup("ping-api-key"))
+	viper.BindPFlag(varPingApiHost, RootCmd.PersistentFlags().Lookup("ping-api-host"))
 	viper.BindPFlag(varConfig, RootCmd.PersistentFlags().Lookup("config"))
 	viper.BindPFlag(varApiVersion, RootCmd.PersistentFlags().Lookup("api-version"))
 	viper.BindPFlag(varDashUsername, RootCmd.PersistentFlags().Lookup("dash-username"))
@@ -240,15 +244,14 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 
 	pingSent := false
 	uri := ""
+	configuredPingApiHost := normalizePingApiHost(viper.GetString(varPingApiHost))
 	for i := 1; i <= 6; i++ {
 		if lib.PingHostOverride != "" {
 			pingApiHost = lib.PingHostOverride
 		} else if dev {
 			pingApiHost = "http://localhost:8000"
-		} else if i > 2 && pingApiHost == "https://cronitor.link" {
-			pingApiHost = "https://cronitor.io"
 		} else {
-			pingApiHost = "https://cronitor.link"
+			pingApiHost = pingHostForAttempt(configuredPingApiHost, i)
 		}
 
 		// After 2 failed attempts, take a brief random break before trying again
@@ -294,6 +297,42 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	if !pingSent {
 		raven.CaptureErrorAndWait(errors.New("Ping failure; retries exhausted: "+uri), nil)
 	}
+}
+
+const defaultPingApiHost = "https://cronitor.link"
+const fallbackPingApiHost = "https://cronitor.io"
+
+// normalizePingApiHost turns CRONITOR_PING_API_HOST into a base URL. A bare
+// host such as eu.cronitor.link gets https://; an empty value means the default.
+func normalizePingApiHost(host string) string {
+	host = strings.TrimRight(strings.TrimSpace(host), "/")
+	if host == "" {
+		return defaultPingApiHost
+	}
+	if !strings.Contains(host, "://") {
+		host = "https://" + host
+	}
+	return host
+}
+
+// pingHostForAttempt picks the host for a ping attempt. Cronitor telemetry
+// hosts alternate with cronitor.io from the third attempt so a regional
+// outage does not drop pings. Other hosts, such as a private proxy, are
+// used for every attempt so traffic never bypasses them.
+func pingHostForAttempt(configured string, attempt int) string {
+	if attempt > 2 && attempt%2 == 1 && isCronitorLinkHost(configured) {
+		return fallbackPingApiHost
+	}
+	return configured
+}
+
+func isCronitorLinkHost(baseURL string) bool {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "cronitor.link" || strings.HasSuffix(host, ".cronitor.link")
 }
 
 func effectiveHostname() string {
