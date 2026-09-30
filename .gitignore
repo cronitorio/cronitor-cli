@@ -73,6 +73,7 @@ cronitor-cli
 cronitor.exe
 
 local.md
+.env
 TODO.md
 *.exe
 
