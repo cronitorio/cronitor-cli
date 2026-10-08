@@ -9,6 +9,9 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Retained in the shared configuration schema for standalone dashboards.
+const varMCPEnabled = "CRONITOR_MCP_ENABLED"
+
 type ConfigFile struct {
 	ApiKey                string                       `json:"CRONITOR_API_KEY"`
 	PingApiAuthKey        string                       `json:"CRONITOR_PING_API_KEY"`
