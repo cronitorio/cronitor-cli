@@ -20,6 +20,7 @@ import (
 
 	"github.com/cronitorio/cronitor-cli/internal/testutil"
 	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
@@ -1012,6 +1013,189 @@ func TestAuthLogout_403ForceRemovesLocalOnly(t *testing.T) {
 	cfg := readAuthConfig(t)
 	if _, ok := cfg["CRONITOR_API_KEY"]; ok {
 		t.Errorf("force should remove local key: %#v", cfg)
+	}
+}
+
+func TestParseAuthTimeoutDefaultIsThirtyMinutes(t *testing.T) {
+	if authLoginTimeoutDefault != 30*time.Minute {
+		t.Fatalf("authLoginTimeoutDefault = %s, want 30m", authLoginTimeoutDefault)
+	}
+	got, err := parseAuthTimeout("  ")
+	if err != nil || got != 30*time.Minute {
+		t.Fatalf("empty timeout = %s err=%v, want 30m", got, err)
+	}
+	got, err = parseAuthTimeout("2h")
+	if err != nil || got != 2*time.Hour {
+		t.Fatalf("explicit timeout = %s err=%v, want 2h", got, err)
+	}
+	got, err = parseAuthTimeout("45s")
+	if err != nil || got != 45*time.Second {
+		t.Fatalf("explicit timeout = %s err=%v, want 45s", got, err)
+	}
+	for _, raw := range []string{"0", "-5m", "nope", "5"} {
+		if _, err := parseAuthTimeout(raw); err == nil || !strings.Contains(err.Error(), "30m") {
+			t.Fatalf("parseAuthTimeout(%q) err = %v, want invalid duration mentioning 30m", raw, err)
+		}
+	}
+}
+
+func TestAuthTimeoutHelpMentionsThirtyMinutes(t *testing.T) {
+	for _, cmd := range []*cobra.Command{authLoginCmd, signupCmd} {
+		usage := cmd.Flags().Lookup("timeout").Usage
+		if !strings.Contains(usage, "default: 30m") || strings.Contains(usage, "5m") {
+			t.Errorf("%s timeout usage = %q", cmd.Name(), usage)
+		}
+		if !strings.Contains(cmd.Long, "30 minutes") {
+			t.Errorf("%s Long help missing 30 minutes:\n%s", cmd.Name(), cmd.Long)
+		}
+	}
+	for _, args := range [][]string{{"auth", "login", "--help"}, {"signup", "--help"}, {"auth", "signup", "--help"}} {
+		stdout, stderr, code, err := executeAuth(args...)
+		if err != nil || code != 0 {
+			t.Fatalf("%v help failed code=%d err=%v\n%s", args, code, err, stderr)
+		}
+		help := stdout + stderr
+		if !strings.Contains(help, "30m") || !strings.Contains(help, "30 minutes") {
+			t.Errorf("%v help missing 30-minute default:\n%s", args, help)
+		}
+		if strings.Contains(help, "5m") || strings.Contains(help, "five minutes") {
+			t.Errorf("%v help still documents a 5-minute default:\n%s", args, help)
+		}
+	}
+}
+
+func TestAuthLinkExpiryLineUsesLocalClock(t *testing.T) {
+	now := time.Date(2026, 10, 8, 12, 4, 30, 0, time.Local)
+	expires := now.Add(30 * time.Minute).In(time.Local)
+	zone, _ := expires.Zone()
+	if zone == "" {
+		zone = localZoneName(expires)
+	}
+	line := authLinkExpiryLine(30*time.Minute, now)
+	want := fmt.Sprintf("This link expires in 30 minutes (at %s %s).", expires.Format("15:04"), zone)
+	if line != want {
+		t.Fatalf("line = %q, want %q", line, want)
+	}
+	if strings.Contains(line, "code=") || strings.Contains(line, "oauth") || strings.Contains(line, "token") {
+		t.Fatalf("expiry line must not include a URL or secret: %s", line)
+	}
+	if got := authLinkExpiryLine(2*time.Hour, now); !strings.Contains(got, "in 2 hours (at ") {
+		t.Fatalf("2h phrase: %s", got)
+	}
+	if got := authLinkExpiryLine(time.Minute, now); !strings.Contains(got, "in 1 minute (at ") {
+		t.Fatalf("1m phrase: %s", got)
+	}
+	if got := authLinkExpiryLine(90*time.Minute, now); !strings.Contains(got, "in 90 minutes (at ") {
+		t.Fatalf("90m phrase: %s", got)
+	}
+	unnamed := time.Date(2026, 10, 8, 12, 34, 0, 0, time.FixedZone("", -7*3600))
+	if got := localZoneName(unnamed); got != "GMT-07:00" {
+		t.Fatalf("empty zone name = %q, want GMT-07:00", got)
+	}
+	east := time.Date(2026, 10, 8, 12, 34, 0, 0, time.FixedZone("", 5*3600+30*60))
+	if got := localZoneName(east); got != "GMT+05:30" {
+		t.Fatalf("empty zone name = %q, want GMT+05:30", got)
+	}
+}
+
+func TestAuthLinkExpiryLineUsesProcessLocalZone(t *testing.T) {
+	old := time.Local
+	time.Local = time.FixedZone("PDT", -7*3600)
+	t.Cleanup(func() { time.Local = old })
+
+	// 19:04 UTC is 12:04 PDT; thirty minutes later is 12:34 PDT.
+	now := time.Date(2026, 10, 8, 19, 4, 0, 0, time.UTC)
+	line := authLinkExpiryLine(30*time.Minute, now)
+	const want = "This link expires in 30 minutes (at 12:34 PDT)."
+	if line != want {
+		t.Fatalf("line = %q, want %q", line, want)
+	}
+
+	// 06:50 UTC is 23:50 PDT the previous calendar day. The wait crosses midnight.
+	late := time.Date(2026, 10, 9, 6, 50, 0, 0, time.UTC)
+	rolled := authLinkExpiryLine(30*time.Minute, late)
+	const wantRolled = "This link expires in 30 minutes (at 2026-10-09 00:20 PDT)."
+	if rolled != wantRolled {
+		t.Fatalf("rolled = %q, want %q", rolled, wantRolled)
+	}
+}
+
+func TestAuthLoginInvalidTimeoutDoesNotStartAuthorization(t *testing.T) {
+	_, cleanup := withAuthTest(t, newAuthFake())
+	defer cleanup()
+	opened := 0
+	openBrowserFn = func(string) { opened++ }
+
+	stdout, stderr, code, _ := executeAuth("auth", "login", "--yes", "--no-browser", "--timeout", "nope")
+	if code == 0 {
+		t.Fatal("invalid timeout succeeded")
+	}
+	if opened != 0 {
+		t.Fatal("opened a browser for an invalid timeout")
+	}
+	combined := stdout + stderr
+	if strings.Contains(combined, "/oauth2/authorize?") || strings.Contains(combined, "This link expires") {
+		t.Fatalf("invalid timeout started login:\n%s", combined)
+	}
+	if !strings.Contains(combined, "30m") {
+		t.Fatalf("error should point at a duration such as 30m:\n%s", combined)
+	}
+	assertNoSecrets(t, stdout, stderr)
+}
+
+func TestAuthLoginPrintsExpiryNextToURL(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		timeout time.Duration
+	}{
+		{name: "login-no-browser", args: []string{"auth", "login", "--yes", "--no-browser"}, timeout: 30 * time.Minute},
+		{name: "signup-no-browser", args: []string{"signup", "--yes", "--no-browser"}, timeout: 30 * time.Minute},
+		{name: "auth-signup-no-browser", args: []string{"auth", "signup", "--yes", "--no-browser"}, timeout: 30 * time.Minute},
+		{name: "login-browser", args: []string{"auth", "login", "--yes"}, timeout: 30 * time.Minute},
+		{name: "login-no-browser-override", args: []string{"auth", "login", "--yes", "--no-browser", "--timeout", "2h"}, timeout: 2 * time.Hour},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, cleanup := withAuthTest(t, newAuthFake())
+			defer cleanup()
+			fixed := time.Date(2026, 10, 8, 15, 4, 0, 0, time.Local)
+			nowFn = func() time.Time { return fixed }
+			opened := 0
+			openBrowserFn = func(raw string) {
+				opened++
+				completeTestBrowserLogin(raw)
+			}
+
+			stdout, stderr, code, err := executeAuth(tc.args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code != 0 {
+				t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
+			}
+			assertNoSecrets(t, stdout, stderr)
+			want := authLinkExpiryLine(tc.timeout, fixed)
+			if !strings.Contains(stdout, want) {
+				t.Fatalf("missing %q\n%s", want, stdout)
+			}
+			if tc.timeout != 30*time.Minute && strings.Contains(stdout, "in 30 minutes") {
+				t.Fatalf("explicit timeout still printed the default phrase:\n%s", stdout)
+			}
+			urlAt := strings.Index(stdout, "/oauth2/authorize?")
+			expiryAt := strings.Index(stdout, "This link expires")
+			if urlAt < 0 || expiryAt < 0 || expiryAt < urlAt {
+				t.Fatalf("expiry line must follow the authorization URL:\n%s", stdout)
+			}
+			for _, line := range strings.Split(stdout, "\n") {
+				if strings.HasPrefix(line, "This link expires") && (strings.Contains(line, "http") || strings.Contains(line, "code=")) {
+					t.Fatalf("expiry line includes a URL or code: %s", line)
+				}
+			}
+			if strings.Contains(tc.name, "no-browser") && opened != 0 {
+				t.Fatalf("opened browser %d times", opened)
+			}
+		})
 	}
 }
 

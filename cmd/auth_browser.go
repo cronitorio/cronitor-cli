@@ -19,7 +19,19 @@ import (
 
 var readCallbackFn = readCallbackFromTerminal
 
+// printAuthorizationURL keeps the URL on its own line so it can be copied,
+// then prints when this CLI stops waiting. The expiry line never includes the URL.
+func printAuthorizationURL(intro, raw string, timeout time.Duration, started time.Time) {
+	fmt.Println(intro)
+	fmt.Println()
+	fmt.Println(raw)
+	fmt.Println()
+	fmt.Println(authLinkExpiryLine(timeout, started))
+	fmt.Println()
+}
+
 func authorizeBrowser(issuer, clientID string, timeout time.Duration) (*lib.AuthorizationToken, error) {
+	started := nowFn()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -30,10 +42,12 @@ func authorizeBrowser(issuer, clientID string, timeout time.Duration) (*lib.Auth
 	}
 	var callback string
 	if authNoBrowser {
-		fmt.Println("Open this URL in any browser and complete sign-in:")
-		fmt.Println()
-		fmt.Println(a.URL)
-		fmt.Println()
+		printAuthorizationURL(
+			"Open this URL in any browser and complete sign-in:",
+			a.URL,
+			timeout,
+			started,
+		)
 		fmt.Println("After sign-in, the browser may show a localhost connection error. Copy the entire URL from its address bar and paste it here. Keep this terminal open.")
 		callback, err = readCallbackFn(ctx, a.URL)
 	} else {
@@ -65,10 +79,12 @@ func authorizeBrowser(issuer, clientID string, timeout time.Duration) (*lib.Auth
 		})
 		defer server.Close()
 		go server.Serve(listener)
-		fmt.Println("Open this URL in a browser on this computer:")
-		fmt.Println()
-		fmt.Println(a.URL)
-		fmt.Println()
+		printAuthorizationURL(
+			"Open this URL in a browser on this computer:",
+			a.URL,
+			timeout,
+			started,
+		)
 		fmt.Println("For a browser on another computer, cancel and rerun with --no-browser.")
 		openBrowserFn(a.URL)
 		select {
