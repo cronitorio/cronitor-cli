@@ -15,7 +15,12 @@ import (
 const (
 	varAuthManaged           = "CRONITOR_AUTH_MANAGED"
 	varMachineCredentialName = "CRONITOR_MACHINE_CREDENTIAL_NAME"
-	authLoginTimeoutDefault  = 5 * time.Minute
+	authLoginTimeoutDefault  = 30 * time.Minute
+	// authOpenSignInLimit is how long the human has after the browser opens
+	// the authorize URL. That GET sets the WorkOS external_auth cookie
+	// (Max-Age 300s). Cronitor's login transaction starts at the same moment
+	// and lasts 600s (TRANSACTION_LIFETIME_SECONDS). The cookie is tighter.
+	authOpenSignInLimit = 5 * time.Minute
 )
 
 var (
@@ -29,7 +34,12 @@ const authLoginLong = `Start browser authorization with PKCE, then exchange the 
 for a Cronitor machine credential stored in the resolved config file.
 
 For remote machines, use --no-browser and paste the final callback URL
-into this terminal. Authorization codes, tokens, and API keys are never printed.`
+into this terminal. Authorization codes, tokens, and API keys are never printed.
+
+The CLI waits 30 minutes by default and prints when that wait ends, in local
+time, next to the authorization URL. After you open the link, finish signing in
+within about 5 minutes. Pass --timeout (for example 2h) to wait longer.
+Starting a new login replaces the previous URL.`
 
 var authCmd = &cobra.Command{
 	Use:   "auth",
@@ -110,7 +120,7 @@ func init() {
 func addAuthLoginFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&authYes, "yes", false, "Install or replace a machine credential without prompting")
 	cmd.Flags().BoolVar(&authNoBrowser, "no-browser", false, "Print the authorization URL and accept callback URL paste-back (remote/headless login)")
-	cmd.Flags().StringVar(&authTimeout, "timeout", "", "Maximum time for browser authorization and token exchange (default: 5m)")
+	cmd.Flags().StringVar(&authTimeout, "timeout", "", "Maximum time for browser authorization and token exchange (default: 30m)")
 }
 
 func resetAuthLoginFlags(cmd *cobra.Command) {
@@ -228,9 +238,62 @@ func parseAuthTimeout(raw string) (time.Duration, error) {
 	}
 	d, err := time.ParseDuration(raw)
 	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("invalid --timeout %q (use a duration such as 5m)", raw)
+		return 0, fmt.Errorf("invalid --timeout %q (use a duration such as 30m)", raw)
 	}
 	return d, nil
+}
+
+// authWaitLine tells the human how long this CLI will keep waiting for the
+// link to be opened, and that sign-in after the open is a shorter window.
+// It never includes the authorization URL or any code or token.
+func authWaitLine(timeout time.Duration, now time.Time) string {
+	if timeout < 0 {
+		timeout = 0
+	}
+	localNow := now.In(time.Local)
+	until := localNow.Add(timeout)
+	zone := localZoneName(until)
+	clock := until.Format("15:04")
+	// A 30-minute wait can cross midnight. Include the date only then so the
+	// usual line stays "until 12:34 PDT" and a wrapped clock is not ambiguous.
+	if until.Year() != localNow.Year() || until.YearDay() != localNow.YearDay() {
+		clock = until.Format("2006-01-02 15:04")
+	}
+	return fmt.Sprintf("Waiting up to %s (until %s %s) for you to open this link and finish signing in. After you open it, finish within about %s.",
+		authTimeoutPhrase(timeout), clock, zone, authTimeoutPhrase(authOpenSignInLimit))
+}
+
+func authTimeoutPhrase(d time.Duration) string {
+	switch {
+	case d >= time.Hour && d%time.Hour == 0:
+		return pluralCount(int(d/time.Hour), "hour")
+	case d >= time.Minute && d%time.Minute == 0:
+		return pluralCount(int(d/time.Minute), "minute")
+	case d >= time.Second && d%time.Second == 0:
+		return pluralCount(int(d/time.Second), "second")
+	default:
+		return d.String()
+	}
+}
+
+func pluralCount(n int, unit string) string {
+	if n == 1 {
+		return "1 " + unit
+	}
+	return fmt.Sprintf("%d %ss", n, unit)
+}
+
+func localZoneName(t time.Time) string {
+	zone, offset := t.Zone()
+	if zone != "" {
+		return zone
+	}
+	sign := "+"
+	if offset < 0 {
+		sign = "-"
+		offset = -offset
+	}
+	return fmt.Sprintf("GMT%s%02d:%02d", sign, offset/3600, (offset%3600)/60)
 }
 
 func confirmInstallOrReplace() error {
