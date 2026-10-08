@@ -20,13 +20,14 @@ import (
 var readCallbackFn = readCallbackFromTerminal
 
 // printAuthorizationURL keeps the URL on its own line so it can be copied,
-// then prints when this CLI stops waiting. The expiry line never includes the URL.
+// then prints how long this CLI waits and the shorter window after the link is opened.
+// That line never includes the URL.
 func printAuthorizationURL(intro, raw string, timeout time.Duration, started time.Time) {
 	fmt.Println(intro)
 	fmt.Println()
 	fmt.Println(raw)
 	fmt.Println()
-	fmt.Println(authLinkExpiryLine(timeout, started))
+	fmt.Println(authWaitLine(timeout, started))
 	fmt.Println()
 }
 

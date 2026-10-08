@@ -16,6 +16,11 @@ const (
 	varAuthManaged           = "CRONITOR_AUTH_MANAGED"
 	varMachineCredentialName = "CRONITOR_MACHINE_CREDENTIAL_NAME"
 	authLoginTimeoutDefault  = 30 * time.Minute
+	// authOpenSignInLimit is how long the human has after the browser opens
+	// the authorize URL. That GET sets the WorkOS external_auth cookie
+	// (Max-Age 300s). Cronitor's login transaction starts at the same moment
+	// and lasts 600s (TRANSACTION_LIFETIME_SECONDS). The cookie is tighter.
+	authOpenSignInLimit = 5 * time.Minute
 )
 
 var (
@@ -32,8 +37,9 @@ For remote machines, use --no-browser and paste the final callback URL
 into this terminal. Authorization codes, tokens, and API keys are never printed.
 
 The CLI waits 30 minutes by default and prints when that wait ends, in local
-time, next to the authorization URL. Pass --timeout (for example 2h) to wait
-longer. Starting a new login replaces the previous URL.`
+time, next to the authorization URL. After you open the link, finish signing in
+within about 5 minutes. Pass --timeout (for example 2h) to wait longer.
+Starting a new login replaces the previous URL.`
 
 var authCmd = &cobra.Command{
 	Use:   "auth",
@@ -237,23 +243,24 @@ func parseAuthTimeout(raw string) (time.Duration, error) {
 	return d, nil
 }
 
-// authLinkExpiryLine tells the human when this CLI will stop waiting.
-// It names the duration and the local clock time, and it never includes
-// the authorization URL or any code or token.
-func authLinkExpiryLine(timeout time.Duration, now time.Time) string {
+// authWaitLine tells the human how long this CLI will keep waiting for the
+// link to be opened, and that sign-in after the open is a shorter window.
+// It never includes the authorization URL or any code or token.
+func authWaitLine(timeout time.Duration, now time.Time) string {
 	if timeout < 0 {
 		timeout = 0
 	}
 	localNow := now.In(time.Local)
-	expires := localNow.Add(timeout)
-	zone := localZoneName(expires)
-	clock := expires.Format("15:04")
+	until := localNow.Add(timeout)
+	zone := localZoneName(until)
+	clock := until.Format("15:04")
 	// A 30-minute wait can cross midnight. Include the date only then so the
-	// usual line stays "at 12:34 PDT" and a wrapped clock is not ambiguous.
-	if expires.Year() != localNow.Year() || expires.YearDay() != localNow.YearDay() {
-		clock = expires.Format("2006-01-02 15:04")
+	// usual line stays "until 12:34 PDT" and a wrapped clock is not ambiguous.
+	if until.Year() != localNow.Year() || until.YearDay() != localNow.YearDay() {
+		clock = until.Format("2006-01-02 15:04")
 	}
-	return fmt.Sprintf("This link expires in %s (at %s %s).", authTimeoutPhrase(timeout), clock, zone)
+	return fmt.Sprintf("Waiting up to %s (until %s %s) for you to open this link and finish signing in. After you open it, finish within about %s.",
+		authTimeoutPhrase(timeout), clock, zone, authTimeoutPhrase(authOpenSignInLimit))
 }
 
 func authTimeoutPhrase(d time.Duration) string {
