@@ -62,7 +62,11 @@ func TestSiteUpdateCommandFlags(t *testing.T) {
 }
 
 func TestSiteQueryCommandFlags(t *testing.T) {
-	flags := []string{"site", "type", "time", "start", "end", "metric", "group-by", "filter", "order-by", "timezone", "bucket", "compare"}
+	flags := []string{
+		"site", "type", "kind", "time", "start", "end", "metric", "aggregate",
+		"group-by", "filter", "order-by", "timezone", "bucket", "compare",
+		"environment", "filters-behavior", "search",
+	}
 
 	for _, flag := range flags {
 		if siteQueryCmd.Flags().Lookup(flag) == nil {

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/cronitorio/cronitor-cli/lib"
@@ -25,19 +27,23 @@ var (
 	siteFilterLocal bool
 	siteFilterBots  bool
 	// Query flags
-	siteQueryType     string
-	siteQuerySite     string
-	siteQueryTime     string
-	siteQueryStart    string
-	siteQueryEnd      string
-	siteQueryMetrics  string
-	siteQueryDims     string
-	siteQueryGroupBy  string
-	siteQueryFilters  string
-	siteQueryOrderBy  string
-	siteQueryTimezone string
-	siteQueryBucket   string
-	siteQueryCompare  bool
+	siteQueryType            string
+	siteQuerySite            string
+	siteQueryTime            string
+	siteQueryStart           string
+	siteQueryEnd             string
+	siteQueryMetrics         string
+	siteQueryAggregate       string
+	siteQueryGroupBy         string
+	siteQueryFilters         string
+	siteQueryOrderBy         string
+	siteQueryTimezone        string
+	siteQueryBucket          string
+	siteQueryCompare         bool
+	siteQueryKind            string
+	siteQueryEnvironment     string
+	siteQueryFiltersBehavior string
+	siteQuerySearch          string
 )
 
 var siteCmd = &cobra.Command{
@@ -58,7 +64,7 @@ Examples:
 
   cronitor site errors --site my-site
   cronitor site query --site my-site --type aggregation --metric session_count
-  cronitor site query --site my-site --type breakdown --metric lcp_p50 --group-by country_code
+  cronitor site query --site my-site --type breakdown --metric web_vital_lcp_p50 --group-by country_code
   cronitor site query --site my-site --type timeseries --metric session_count --bucket hour
 
 For full API documentation:
@@ -330,107 +336,86 @@ var siteQueryCmd = &cobra.Command{
 	Short: "Query RUM analytics data",
 	Long: `Query Real User Monitoring analytics data.
 
-Query types:
-  aggregation   - Aggregate metrics over time range
-  breakdown     - Group metrics by dimension
-  timeseries    - Metrics over time with buckets
-  error_groups  - Grouped JavaScript error patterns
+The POST /api/sites/query body uses the Sites API names: kind, aggregate
+(a list), and group_by (one string). --type is an alias for kind and
+--metric is an alias for aggregate. This command does not send type,
+metrics, or dimensions.
 
-Available metrics:
-  session_count, pageview_count, bounce_rate
-  page_load_p50, page_load_p75, page_load_p90, page_load_p99
-  lcp_p50, lcp_p75, lcp_p90, lcp_p99 (Largest Contentful Paint)
-  fid_p50, fid_p75, fid_p90, fid_p99 (First Input Delay)
-  cls_p50, cls_p75, cls_p90, cls_p99 (Cumulative Layout Shift)
-  ttfb_p50, ttfb_p75, ttfb_p90, ttfb_p99 (Time to First Byte)
+Query kinds:
+  aggregation     Aggregate metrics over the time range
+  breakdown       Group metrics by one dimension (--group-by is required)
+  timeseries      Metrics over time (--bucket is time_bucket)
+  error_groups    Grouped JavaScript errors. Rows are the group key plus requested aggregates; with no --metric only group keys are returned
+  search_options  Find dimension values. Pass --metric and --search (an empty --search is valid)
 
-Dimensions for breakdown/filtering:
-  country_code, city_name, path, hostname, device_type
-  browser, operating_system, referrer_hostname
-  utm_source, utm_medium, utm_campaign, connection_type
+Aggregate names are whatever the server currently accepts. Names that are
+valid on the API today include session_count, pageview_count, and
+web_vital_lcp_p50. Short names such as lcp_p50 are not server fields.
+The CLI forwards any aggregate you pass; it does not keep its own enum.
 
-Time ranges: 1h, 6h, 12h, 24h, 3d, 7d, 14d, 30d, 90d
-Time buckets: minute, hour, day, week, month
+group_by / filter dimensions include country_code, path, browser, and
+device_type. Pass exactly one --group-by value.
+Filter operators: eq, ne, gt, gte, lt, lte, startsWith, endsWith, contains.
+
+Time ranges: 1h, 24h, today, 3d, 7d, 14d, 30d, 180d, 4w, mtd, 3m, 6m, 12m, 24m, ytd, custom
+  custom also requires --start and --end (ISO 8601). Timezone is IANA; the server defaults to UTC.
+
+Timeseries buckets allowed for a time range:
+  1h                         minute
+  24h, today                 hour
+  3d, 7d, 14d                hour, day
+  30d, 4w, mtd               hour, day, week
+  180d, 3m, 6m, 12m, 24m, ytd  day, week, month
+  custom                     hour, day, week, month
 
 Examples:
-  cronitor site query --site my-site --type aggregation --metric session_count,lcp_p50
+  cronitor site query --site my-site --type aggregation --metric session_count,web_vital_lcp_p50
   cronitor site query --site my-site --type breakdown --metric session_count --group-by country_code
   cronitor site query --site my-site --type timeseries --metric pageview_count --bucket hour --time 7d
-  cronitor site query --site my-site --type breakdown --metric lcp_p50 --group-by browser --filter "device_type:eq:desktop"
-  cronitor site query --site my-site --type error_groups --time 24h`,
+  cronitor site query --site my-site --type breakdown --metric web_vital_lcp_p50 --group-by browser --filter "device_type:eq:desktop"
+  cronitor site query --site my-site --type error_groups --metric message,error_type,error_count,last_seen --time 24h`,
 	Run: func(cmd *cobra.Command, args []string) {
-		if siteQuerySite == "" {
-			Error("--site is required")
+		kind, err := siteQueryKindFromFlags(cmd)
+		if err != nil {
+			Error(err.Error())
 			os.Exit(1)
 		}
-		if siteQueryType == "" {
-			Error("--type is required (aggregation, breakdown, timeseries, error_groups)")
+		metrics, err := siteQueryMetricsFromFlags(cmd)
+		if err != nil {
+			Error(err.Error())
 			os.Exit(1)
 		}
 
-		payload := map[string]interface{}{
-			"site": siteQuerySite,
-			"type": siteQueryType,
+		payload, err := buildSiteQueryPayload(siteQueryInput{
+			Site:            siteQuerySite,
+			Kind:            kind,
+			Metrics:         metrics,
+			GroupBy:         siteQueryGroupBy,
+			Time:            siteQueryTime,
+			Start:           siteQueryStart,
+			End:             siteQueryEnd,
+			Timezone:        siteQueryTimezone,
+			Bucket:          siteQueryBucket,
+			Filters:         siteQueryFilters,
+			OrderBy:         siteQueryOrderBy,
+			Environment:     siteQueryEnvironment,
+			FiltersBehavior: siteQueryFiltersBehavior,
+			Search:          siteQuerySearch,
+			SearchSet:       cmd.Flags().Changed("search"),
+			Compare:         siteQueryCompare,
+			Page:            sitePage,
+			PageSize:        sitePageSize,
+		})
+		if err != nil {
+			Error(err.Error())
+			os.Exit(1)
 		}
 
-		// Time range
-		if siteQueryTime != "" {
-			payload["time"] = siteQueryTime
-		} else {
-			payload["time"] = "24h"
+		body, err := json.Marshal(payload)
+		if err != nil {
+			Error(fmt.Sprintf("Failed to encode query: %s", err))
+			os.Exit(1)
 		}
-		if siteQueryStart != "" {
-			payload["start"] = siteQueryStart
-		}
-		if siteQueryEnd != "" {
-			payload["end"] = siteQueryEnd
-		}
-		if siteQueryTimezone != "" {
-			payload["timezone"] = siteQueryTimezone
-		}
-
-		// Metrics
-		if siteQueryMetrics != "" {
-			payload["metrics"] = splitAndTrimSite(siteQueryMetrics)
-		}
-
-		// Dimensions (for breakdown)
-		if siteQueryGroupBy != "" {
-			payload["dimensions"] = splitAndTrimSite(siteQueryGroupBy)
-		}
-
-		// Time bucket (for timeseries)
-		if siteQueryBucket != "" {
-			payload["time_bucket"] = siteQueryBucket
-		}
-
-		// Filters
-		if siteQueryFilters != "" {
-			filters := parseFilters(siteQueryFilters)
-			if len(filters) > 0 {
-				payload["filters"] = filters
-			}
-		}
-
-		// Order by
-		if siteQueryOrderBy != "" {
-			payload["order_by"] = splitAndTrimSite(siteQueryOrderBy)
-		}
-
-		// Compare
-		if siteQueryCompare {
-			payload["compare"] = "previous_time_range"
-		}
-
-		// Pagination
-		if sitePage > 1 {
-			payload["page"] = sitePage
-		}
-		if sitePageSize > 0 {
-			payload["page_size"] = sitePageSize
-		}
-
-		body, _ := json.Marshal(payload)
 		client := lib.NewAPIClient(dev, log)
 		resp, err := client.POST("/sites/query", body, nil)
 		if err != nil {
@@ -443,9 +428,11 @@ Examples:
 			os.Exit(1)
 		}
 
-		// For query results, JSON is the default since structure varies by query type
+		// JSON is the default because the response shape depends on kind.
 		if siteFormat == "table" {
-			renderQueryTable(resp.Body, siteQueryType)
+			aggregates, _ := payload["aggregate"].([]string)
+			groupBy, _ := payload["group_by"].(string)
+			renderQueryTable(resp.Body, kind, aggregates, groupBy)
 		} else {
 			siteOutputToTarget(FormatJSON(resp.Body))
 		}
@@ -454,12 +441,12 @@ Examples:
 
 // --- ERRORS (parent command) ---
 var siteErrorsCmd = &cobra.Command{
-	Use:   "error",
+	Use:     "error",
 	Aliases: []string{"errors"},
-	Short: "Manage JavaScript errors",
+	Short:   "Manage JavaScript errors",
 	Long: `Manage JavaScript errors collected from RUM sites.
 
-For grouped error analytics, use: cronitor site query --type error_groups
+For grouped error analytics, use: cronitor site query --site my-site --type error_groups --metric message,error_type,error_count,last_seen
 
 Examples:
   cronitor site error list --site my-site
@@ -602,19 +589,25 @@ func init() {
 	// Update flags
 	siteUpdateCmd.Flags().StringVarP(&siteData, "data", "d", "", "JSON payload")
 
-	// Query flags
+	// Query flags. --type/--metric stay as the flags agents already pass.
+	// --kind/--aggregate are the Sites API names for the same values.
 	siteQueryCmd.Flags().StringVar(&siteQuerySite, "site", "", "Site key (required)")
-	siteQueryCmd.Flags().StringVar(&siteQueryType, "type", "", "Query type: aggregation, breakdown, timeseries, error_groups")
-	siteQueryCmd.Flags().StringVar(&siteQueryTime, "time", "24h", "Time range: 1h, 6h, 12h, 24h, 3d, 7d, 14d, 30d, 90d")
-	siteQueryCmd.Flags().StringVar(&siteQueryStart, "start", "", "Custom start time (ISO 8601)")
-	siteQueryCmd.Flags().StringVar(&siteQueryEnd, "end", "", "Custom end time (ISO 8601)")
-	siteQueryCmd.Flags().StringVar(&siteQueryMetrics, "metric", "", "Metrics to return (comma-separated)")
-	siteQueryCmd.Flags().StringVar(&siteQueryGroupBy, "group-by", "", "Dimensions to group by (comma-separated)")
-	siteQueryCmd.Flags().StringVar(&siteQueryFilters, "filter", "", "Filters: dim:op:value (comma-separated)")
-	siteQueryCmd.Flags().StringVar(&siteQueryOrderBy, "order-by", "", "Sort fields (prefix - for desc)")
-	siteQueryCmd.Flags().StringVar(&siteQueryTimezone, "timezone", "", "Timezone (IANA format)")
-	siteQueryCmd.Flags().StringVar(&siteQueryBucket, "bucket", "", "Time bucket: minute, hour, day, week, month")
-	siteQueryCmd.Flags().BoolVar(&siteQueryCompare, "compare", false, "Compare with previous time range")
+	siteQueryCmd.Flags().StringVar(&siteQueryType, "type", "", "Query kind: aggregation, breakdown, timeseries, error_groups, search_options")
+	siteQueryCmd.Flags().StringVar(&siteQueryKind, "kind", "", "Alias for --type (Sites API field name)")
+	siteQueryCmd.Flags().StringVar(&siteQueryTime, "time", "24h", "Time range: 1h, 24h, today, 3d, 7d, 14d, 30d, 180d, 4w, mtd, 3m, 6m, 12m, 24m, ytd, custom")
+	siteQueryCmd.Flags().StringVar(&siteQueryStart, "start", "", "Custom range start (ISO 8601, with --time custom)")
+	siteQueryCmd.Flags().StringVar(&siteQueryEnd, "end", "", "Custom range end (ISO 8601, with --time custom)")
+	siteQueryCmd.Flags().StringVar(&siteQueryMetrics, "metric", "", "Aggregate metrics, comma-separated (sent as aggregate)")
+	siteQueryCmd.Flags().StringVar(&siteQueryAggregate, "aggregate", "", "Alias for --metric (Sites API field name)")
+	siteQueryCmd.Flags().StringVar(&siteQueryGroupBy, "group-by", "", "Single group_by dimension (required for breakdown)")
+	siteQueryCmd.Flags().StringVar(&siteQueryFilters, "filter", "", "Filters: dimension:operator:value (comma-separated)")
+	siteQueryCmd.Flags().StringVar(&siteQueryOrderBy, "order-by", "", "Sort fields, comma-separated (prefix - for desc)")
+	siteQueryCmd.Flags().StringVar(&siteQueryTimezone, "timezone", "", "IANA timezone (server default UTC)")
+	siteQueryCmd.Flags().StringVar(&siteQueryBucket, "bucket", "", "Timeseries time_bucket: minute, hour, day, week, month")
+	siteQueryCmd.Flags().BoolVar(&siteQueryCompare, "compare", false, "Set compare to previous_time_range")
+	siteQueryCmd.Flags().StringVar(&siteQueryEnvironment, "environment", "", "Environment key")
+	siteQueryCmd.Flags().StringVar(&siteQueryFiltersBehavior, "filters-behavior", "", "Combine filters: and, or")
+	siteQueryCmd.Flags().StringVar(&siteQuerySearch, "search", "", "Search term (search_options)")
 
 	// Error subcommands
 	siteErrorsCmd.AddCommand(siteErrorListCmd)
@@ -648,25 +641,190 @@ func splitAndTrimSite(s string) []string {
 	return result
 }
 
+// siteQueryInput is the resolved CLI query. buildSiteQueryPayload maps it
+// onto RUMQuerySerializer field names. Metric and dimension values are not
+// checked against a client-side enum; the server accepts new aggregates
+// (for example those added after this CLI release) without a CLI change.
+type siteQueryInput struct {
+	Site            string
+	Kind            string
+	Metrics         string
+	GroupBy         string
+	Time            string
+	Start           string
+	End             string
+	Timezone        string
+	Bucket          string
+	Filters         string
+	OrderBy         string
+	Environment     string
+	FiltersBehavior string
+	Search          string
+	SearchSet       bool
+	Compare         bool
+	Page            int
+	PageSize        int
+}
+
+func siteQueryKindFromFlags(cmd *cobra.Command) (string, error) {
+	typeSet := cmd.Flags().Changed("type")
+	kindSet := cmd.Flags().Changed("kind")
+	switch {
+	case typeSet && kindSet && siteQueryType != siteQueryKind:
+		return "", fmt.Errorf("--type %q and --kind %q disagree; pass only one", siteQueryType, siteQueryKind)
+	case kindSet:
+		return siteQueryKind, nil
+	case typeSet:
+		return siteQueryType, nil
+	default:
+		return "", fmt.Errorf("--type is required (aggregation, breakdown, timeseries, error_groups, search_options); --kind is an alias")
+	}
+}
+
+func siteQueryMetricsFromFlags(cmd *cobra.Command) (string, error) {
+	metricSet := cmd.Flags().Changed("metric")
+	aggSet := cmd.Flags().Changed("aggregate")
+	switch {
+	case metricSet && aggSet && siteQueryMetrics != siteQueryAggregate:
+		return "", fmt.Errorf("--metric %q and --aggregate %q disagree; pass only one", siteQueryMetrics, siteQueryAggregate)
+	case aggSet:
+		return siteQueryAggregate, nil
+	default:
+		return siteQueryMetrics, nil
+	}
+}
+
+func buildSiteQueryPayload(in siteQueryInput) (map[string]interface{}, error) {
+	site := strings.TrimSpace(in.Site)
+	if site == "" {
+		return nil, fmt.Errorf("--site is required")
+	}
+	kind := strings.TrimSpace(in.Kind)
+	if kind == "" {
+		return nil, fmt.Errorf("--type is required (aggregation, breakdown, timeseries, error_groups, search_options); --kind is an alias")
+	}
+
+	groupBy, err := singleSiteGroupBy(in.GroupBy)
+	if err != nil {
+		return nil, err
+	}
+	if kind == "breakdown" && groupBy == "" {
+		return nil, fmt.Errorf("--group-by is required when kind is breakdown (one dimension, for example country_code)")
+	}
+
+	// aggregate is required by the serializer. An omitted --metric is an empty
+	// list rather than a missing field. Names are forwarded as given; this
+	// client does not keep a closed list of aggregate values.
+	aggregate := []string{}
+	if strings.TrimSpace(in.Metrics) != "" {
+		aggregate = splitAndTrimSite(in.Metrics)
+	}
+	if kind == "search_options" {
+		// RUMSearchOptionsQuery accepts search="" (the flag must be present).
+		// It still requires at least one search field in aggregate.
+		if !in.SearchSet {
+			return nil, fmt.Errorf("--search is required when kind is search_options")
+		}
+		if len(aggregate) == 0 {
+			return nil, fmt.Errorf("--metric is required when kind is search_options (one or more search fields)")
+		}
+	}
+
+	payload := map[string]interface{}{
+		"site":      site,
+		"kind":      kind,
+		"aggregate": aggregate,
+	}
+	timeRange := strings.TrimSpace(in.Time)
+	if timeRange == "custom" && (strings.TrimSpace(in.Start) == "" || strings.TrimSpace(in.End) == "") {
+		return nil, fmt.Errorf("--start and --end are required when --time is custom")
+	}
+	if timeRange != "" {
+		payload["time"] = timeRange
+	}
+	if v := strings.TrimSpace(in.Start); v != "" {
+		payload["start"] = v
+	}
+	if v := strings.TrimSpace(in.End); v != "" {
+		payload["end"] = v
+	}
+	if v := strings.TrimSpace(in.Timezone); v != "" {
+		payload["timezone"] = v
+	}
+	if v := strings.TrimSpace(in.Bucket); v != "" {
+		payload["time_bucket"] = v
+	}
+	if groupBy != "" {
+		payload["group_by"] = groupBy
+	}
+	if strings.TrimSpace(in.Filters) != "" {
+		filters, err := parseFilters(in.Filters)
+		if err != nil {
+			return nil, err
+		}
+		if len(filters) > 0 {
+			payload["filters"] = filters
+		}
+	}
+	if strings.TrimSpace(in.OrderBy) != "" {
+		payload["order_by"] = splitAndTrimSite(in.OrderBy)
+	}
+	if in.Compare {
+		payload["compare"] = "previous_time_range"
+	}
+	if v := strings.TrimSpace(in.Environment); v != "" {
+		payload["environment"] = v
+	}
+	if v := strings.TrimSpace(in.FiltersBehavior); v != "" {
+		payload["filters_behavior"] = v
+	}
+	if in.SearchSet {
+		// Include "" when the flag was passed. The server treats that as a
+		// search, distinct from omitting the field.
+		payload["search"] = strings.TrimSpace(in.Search)
+	}
+	if in.Page > 1 {
+		payload["page"] = in.Page
+	}
+	if in.PageSize > 0 {
+		payload["page_size"] = in.PageSize
+	}
+	return payload, nil
+}
+
+func singleSiteGroupBy(raw string) (string, error) {
+	parts := splitAndTrimSite(raw)
+	if len(parts) > 1 {
+		return "", fmt.Errorf("--group-by accepts a single dimension, got %s; the Sites API group_by field is one string, not a list", strings.Join(parts, ", "))
+	}
+	if len(parts) == 0 {
+		return "", nil
+	}
+	return parts[0], nil
+}
+
 // parseFilters parses filter strings in format "dimension:operator:value"
 // e.g., "device_type:eq:desktop,country_code:eq:US"
-func parseFilters(filterStr string) []map[string]string {
+func parseFilters(filterStr string) ([]map[string]string, error) {
 	filters := []map[string]string{}
 	for _, f := range splitAndTrimSite(filterStr) {
 		parts := strings.SplitN(f, ":", 3)
-		if len(parts) == 3 {
-			filters = append(filters, map[string]string{
-				"dimension": parts[0],
-				"operator":  parts[1],
-				"value":     parts[2],
-			})
+		if len(parts) != 3 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+			return nil, fmt.Errorf("invalid --filter %q; expected dimension:operator:value", f)
 		}
+		filters = append(filters, map[string]string{
+			"dimension": strings.TrimSpace(parts[0]),
+			"operator":  strings.TrimSpace(parts[1]),
+			"value":     parts[2],
+		})
 	}
-	return filters
+	return filters, nil
 }
 
-// renderQueryTable renders query results as a table based on query type
-func renderQueryTable(body []byte, queryType string) {
+// renderQueryTable renders query results as a table based on query kind.
+// aggregates and groupBy are the request fields, in the order the user asked
+// for them, so columns follow that order instead of Go map iteration.
+func renderQueryTable(body []byte, queryType string, aggregates []string, groupBy string) {
 	var result map[string]interface{}
 	if err := json.Unmarshal(body, &result); err != nil {
 		siteOutputToTarget(FormatJSON(body))
@@ -677,11 +835,11 @@ func renderQueryTable(body []byte, queryType string) {
 	case "aggregation":
 		renderAggregationTable(result)
 	case "breakdown":
-		renderBreakdownTable(result)
+		renderBreakdownTable(result, groupBy, aggregates)
 	case "timeseries":
 		renderTimeseriesTable(result)
 	case "error_groups":
-		renderErrorGroupsTable(result)
+		renderErrorGroupsTable(result, aggregates)
 	default:
 		siteOutputToTarget(FormatJSON(body))
 	}
@@ -694,18 +852,60 @@ func renderAggregationTable(result map[string]interface{}) {
 		return
 	}
 
-	table := &UITable{
-		Headers: []string{"METRIC", "VALUE"},
-	}
-
+	keys := make([]string, 0, len(data))
+	showPrevious := false
 	for k, v := range data {
-		table.Rows = append(table.Rows, []string{k, formatSiteValue(v)})
+		keys = append(keys, k)
+		if m, ok := v.(map[string]interface{}); ok {
+			if _, has := m["previous_time_range_value"]; has {
+				showPrevious = true
+			}
+		}
+	}
+	sort.Strings(keys)
+
+	headers := []string{"METRIC", "VALUE"}
+	if showPrevious {
+		headers = append(headers, "PREVIOUS", "CHANGE")
+	}
+	table := &UITable{Headers: headers}
+	for _, k := range keys {
+		value, previous, change := formatAggregateCell(data[k])
+		row := []string{k, value}
+		if showPrevious {
+			row = append(row, previous, change)
+		}
+		table.Rows = append(table.Rows, row)
 	}
 
 	siteOutputToTarget(table.Render())
 }
 
-func renderBreakdownTable(result map[string]interface{}) {
+// formatAggregateCell reads an aggregation metric. The API returns
+// {"session_count":{"value":0}} and, with compare, previous_time_range_*.
+func formatAggregateCell(v interface{}) (value, previous, change string) {
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return formatSiteValue(v), "-", "-"
+	}
+	if _, has := m["value"]; !has {
+		return formatSiteValue(v), "-", "-"
+	}
+	value = formatSiteValue(m["value"])
+	if prev, has := m["previous_time_range_value"]; has {
+		previous = formatSiteValue(prev)
+	} else {
+		previous = "-"
+	}
+	if rate, has := m["previous_time_range_change_rate"]; has {
+		change = formatSiteValue(rate)
+	} else {
+		change = "-"
+	}
+	return value, previous, change
+}
+
+func renderBreakdownTable(result map[string]interface{}, groupBy string, aggregates []string) {
 	data, ok := result["data"].([]interface{})
 	if !ok || len(data) == 0 {
 		fmt.Println("No data")
@@ -719,10 +919,7 @@ func renderBreakdownTable(result map[string]interface{}) {
 		return
 	}
 
-	headers := []string{}
-	for k := range firstRow {
-		headers = append(headers, strings.ToUpper(k))
-	}
+	headers := breakdownHeaders(firstRow, groupBy, aggregates)
 
 	table := &UITable{
 		Headers: headers,
@@ -736,7 +933,7 @@ func renderBreakdownTable(result map[string]interface{}) {
 		values := []string{}
 		for _, h := range headers {
 			key := strings.ToLower(h)
-			values = append(values, formatSiteValue(row[key]))
+			values = append(values, formatQueryCell(row[key]))
 		}
 		table.Rows = append(table.Rows, values)
 	}
@@ -758,12 +955,14 @@ func renderTimeseriesTable(result map[string]interface{}) {
 		return
 	}
 
-	headers := []string{"TIMESTAMP"}
+	metricHeaders := []string{}
 	for k := range firstRow {
-		if k != "timestamp" && k != "time" {
-			headers = append(headers, strings.ToUpper(k))
+		if k != "timestamp" && k != "ts" && k != "time" {
+			metricHeaders = append(metricHeaders, strings.ToUpper(k))
 		}
 	}
+	sort.Strings(metricHeaders)
+	headers := append([]string{"TIMESTAMP"}, metricHeaders...)
 
 	table := &UITable{
 		Headers: headers,
@@ -774,17 +973,10 @@ func renderTimeseriesTable(result map[string]interface{}) {
 		if !ok {
 			continue
 		}
-		values := []string{}
-		if ts, ok := row["timestamp"]; ok {
-			values = append(values, formatSiteValue(ts))
-		} else if ts, ok := row["time"]; ok {
-			values = append(values, formatSiteValue(ts))
-		} else {
-			values = append(values, "-")
-		}
+		values := []string{timeseriesStamp(row)}
 		for _, h := range headers[1:] {
 			key := strings.ToLower(h)
-			values = append(values, formatSiteValue(row[key]))
+			values = append(values, formatQueryCell(row[key]))
 		}
 		table.Rows = append(table.Rows, values)
 	}
@@ -792,36 +984,92 @@ func renderTimeseriesTable(result map[string]interface{}) {
 	siteOutputToTarget(table.Render())
 }
 
-func renderErrorGroupsTable(result map[string]interface{}) {
+func breakdownHeaders(firstRow map[string]interface{}, groupBy string, aggregates []string) []string {
+	seen := map[string]bool{}
+	keys := make([]string, 0, len(firstRow))
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		keys = append(keys, name)
+	}
+	// group_by, then the aggregates in the order they were requested.
+	add(groupBy)
+	for _, name := range aggregates {
+		add(name)
+	}
+	rest := make([]string, 0, len(firstRow))
+	for key := range firstRow {
+		if !seen[key] {
+			rest = append(rest, key)
+		}
+	}
+	sort.Strings(rest)
+	keys = append(keys, rest...)
+
+	headers := make([]string, len(keys))
+	for i, key := range keys {
+		headers[i] = strings.ToUpper(key)
+	}
+	return headers
+}
+
+func renderErrorGroupsTable(result map[string]interface{}, aggregates []string) {
 	data, ok := result["data"].([]interface{})
 	if !ok || len(data) == 0 {
 		fmt.Println("No error groups found")
 		return
 	}
 
-	table := &UITable{
-		Headers: []string{"MESSAGE", "TYPE", "COUNT", "FIRST SEEN", "LAST SEEN"},
+	// Rows are {key, <requested aggregates>}. key is the error group, not an
+	// aggregate the caller lists in --metric.
+	columns := []string{"key"}
+	seen := map[string]bool{"key": true}
+	for _, name := range aggregates {
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		columns = append(columns, name)
+	}
+	headers := make([]string, len(columns))
+	for i, column := range columns {
+		headers[i] = strings.ToUpper(column)
 	}
 
+	table := &UITable{Headers: headers}
 	for _, item := range data {
 		row, ok := item.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		msg := formatSiteValue(row["message"])
-		if len(msg) > 50 {
-			msg = msg[:47] + "..."
+		values := make([]string, len(columns))
+		for i, column := range columns {
+			values[i] = formatQueryCell(row[column])
 		}
-		table.Rows = append(table.Rows, []string{
-			msg,
-			formatSiteValue(row["error_type"]),
-			formatSiteValue(row["count"]),
-			formatSiteValue(row["first_seen"]),
-			formatSiteValue(row["last_seen"]),
-		})
+		table.Rows = append(table.Rows, values)
 	}
 
 	siteOutputToTarget(table.Render())
+}
+
+func timeseriesStamp(row map[string]interface{}) string {
+	for _, key := range []string{"timestamp", "ts", "time"} {
+		if ts, ok := row[key]; ok {
+			return formatQueryCell(ts)
+		}
+	}
+	return "-"
+}
+
+func formatQueryCell(v interface{}) string {
+	if m, ok := v.(map[string]interface{}); ok {
+		if val, has := m["value"]; has {
+			return formatSiteValue(val)
+		}
+	}
+	return formatSiteValue(v)
 }
 
 func formatSiteValue(v interface{}) string {
@@ -830,10 +1078,10 @@ func formatSiteValue(v interface{}) string {
 	}
 	switch val := v.(type) {
 	case float64:
-		if val == float64(int(val)) {
-			return fmt.Sprintf("%.0f", val)
+		if val == float64(int64(val)) {
+			return strconv.FormatFloat(val, 'f', 0, 64)
 		}
-		return fmt.Sprintf("%.2f", val)
+		return strconv.FormatFloat(val, 'f', -1, 64)
 	case string:
 		return val
 	default:
