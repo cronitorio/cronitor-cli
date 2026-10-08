@@ -6,7 +6,7 @@
 CronitorCLI is the recommended companion application to the Cronitor monitoring service.  Use it on your workstation and deploy it to your server for powerful features, including:
 
 * Import and sync all of your cron jobs with Cronitor
-* Easily manage your cron jobs with the [web-based control panel](#crontab-guru-dashboard)
+* Add the optional [Crontab Guru Dashboard](https://github.com/cronitorio/crontab-dashboard) to manage local cron jobs in a browser
 * Automatic integration with Cronitor
 * Power tools for your cron jobs
 
@@ -61,7 +61,7 @@ Logout revokes this installation's credential and removes it locally. **Schedule
 | `cronitor exec <key> <cmd>` | Run a command with monitoring |
 | `cronitor list` | List all cron jobs |
 | `cronitor status` | View monitor status |
-| `cronitor dash` | Start the web dashboard |
+| `cronitor dash` | Start the separately installed Crontab Guru Dashboard |
 
 ### API Resources
 
@@ -195,62 +195,18 @@ cronitor environment delete <key>
 
 ## Crontab Guru Dashboard
 
-The Cronitor CLI bundles the [Crontab Guru Dashboard](https://crontab.guru/dashboard.html), a self‑hosted web UI to manage your cron jobs, including a one‑click “run now” and "suspend", a local console for testing jobs, and a built in MCP server for configuring jobs and checking the health/status of existing ones.
+The [Crontab Guru Dashboard](https://github.com/cronitorio/crontab-dashboard) is
+now a separate application. Its release bundles include the dashboard and a
+pinned Cronitor CLI, so a single installation provides both executables.
 
-Start locally
+Run `crontab-dashboard` directly, or continue using `cronitor dash` after
+installing the dashboard. The compatibility command forwards arguments,
+configuration, environment, and signals to the standalone application.
+Use `CRONTAB_DASHBOARD_BIN` to select an explicit dashboard executable.
 
-```
-cronitor dash
-# then visit http://localhost:9000
-```
-
-Secure access
-The dashboard is intended for local or secured access. A simple, safe pattern for remote use is an SSH tunnel:
-```
-ssh -L 9000:localhost:9000 user@your-server
-# now open http://localhost:9000
-```
-
-Access control & options
-```
-# Set login credentials via environment variables (preferred).
-# --dash-username / --dash-password work but appear in shell history and process lists.
-export CRONITOR_DASH_USER=USER
-export CRONITOR_DASH_PASS=PASS
-cronitor configure
-
-# Optionally, restrict which system users' crontabs are loaded
-cronitor configure --users user1,user2
-```
-### Docker
-
-The included `dockerfile` downloads and extracts the CLI for the target platform
-(`amd64`, `arm64`, or `arm`). Credentials are supplied when the container starts;
-do not put them in Docker build arguments or Dockerfile `ENV` instructions.
-The dashboard reads these environment variables directly, so no
-`cronitor configure` step is needed.
-
-Create a local `.env` file (ignored by Git) and set permissions with `chmod 600 .env`:
-
-```dotenv
-CRONITOR_DASH_USER=your-username
-CRONITOR_DASH_PASS='replace-with-a-strong-password'
-```
-
-Then build and start the dashboard:
-
-```sh
-docker compose -f compose.dashboard.yml up -d --build
-```
-
-Open `http://localhost:9000`, or use the SSH tunnel above for remote access.
-The Compose example requires both credentials and binds the port to localhost.
-Runtime environment variables remain accessible to Docker administrators.
-Configuration and container crontabs are stored in named volumes. This starts
-the dashboard only; running scheduled jobs also requires a cron daemon.
-
-The existing `docker-compose.yml` is for development. For systemd setup and
-additional deployment guidance, see the [Dashboard documentation](https://crontab.guru/dashboard.html).
+Existing `cronitor exec` cron entries, `/etc/cronitor/cronitor.json`, and
+`CRONITOR_*` environment variables continue to work. Dashboard installation,
+Docker/Compose, systemd, and MCP instructions live in the dashboard repository.
 
 ## Configuration and secrets
 
@@ -297,7 +253,7 @@ You can also pass `--ping-api-host eu.cronitor.link`, or save it with `cronitor 
 
 ## MCP Server (AI Integration)
 
-The Cronitor CLI includes a built-in [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for managing cron jobs with natural language through AI-powered tools like Claude Code, Cursor, Cline, and Windsurf.
+The separately installed Crontab Guru Dashboard provides a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for managing local cron jobs. Install its release bundle before using the compatibility commands below.
 
 **Quick start:** Run `cronitor dash` on your server, then configure your MCP client to spawn `cronitor dash --mcp-instance default`.
 

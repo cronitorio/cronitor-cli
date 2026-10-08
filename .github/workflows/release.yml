@@ -36,32 +36,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install web dependencies
-        run: |
-          cd web
-          npm install
-
-      - name: Ensure static directory exists
-        run: |
-          mkdir -p web/static
-          ls -la web/
-
-      - name: Build web assets
-        run: |
-          cd web
-          echo "Starting web build..."
-          npm run build
-          echo "Web build completed"
-
-      - name: Verify web assets were built
-        run: |
-          test -s web/static/index.html
-
       - name: Go Release Binaries Normal Volume Size
         uses: wangyoucao577/go-release-action@v1.53
         with:
