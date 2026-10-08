@@ -345,8 +345,8 @@ Query kinds:
   aggregation     Aggregate metrics over the time range
   breakdown       Group metrics by one dimension (--group-by is required)
   timeseries      Metrics over time (--bucket is time_bucket)
-  error_groups    Grouped JavaScript errors. Omit --metric; aggregate is []
-  search_options  Find dimension values. Pass --search and --metric
+  error_groups    Grouped JavaScript errors. Rows are the group key plus requested aggregates; with no --metric only group keys are returned
+  search_options  Find dimension values. Pass --metric and --search (an empty --search is valid)
 
 Aggregate names are whatever the server currently accepts. Names that are
 valid on the API today include session_count, pageview_count, and
@@ -373,7 +373,7 @@ Examples:
   cronitor site query --site my-site --type breakdown --metric session_count --group-by country_code
   cronitor site query --site my-site --type timeseries --metric pageview_count --bucket hour --time 7d
   cronitor site query --site my-site --type breakdown --metric web_vital_lcp_p50 --group-by browser --filter "device_type:eq:desktop"
-  cronitor site query --site my-site --type error_groups --time 24h`,
+  cronitor site query --site my-site --type error_groups --metric message,error_type,error_count,last_seen --time 24h`,
 	Run: func(cmd *cobra.Command, args []string) {
 		kind, err := siteQueryKindFromFlags(cmd)
 		if err != nil {
@@ -401,6 +401,7 @@ Examples:
 			Environment:     siteQueryEnvironment,
 			FiltersBehavior: siteQueryFiltersBehavior,
 			Search:          siteQuerySearch,
+			SearchSet:       cmd.Flags().Changed("search"),
 			Compare:         siteQueryCompare,
 			Page:            sitePage,
 			PageSize:        sitePageSize,
@@ -429,7 +430,9 @@ Examples:
 
 		// JSON is the default because the response shape depends on kind.
 		if siteFormat == "table" {
-			renderQueryTable(resp.Body, kind)
+			aggregates, _ := payload["aggregate"].([]string)
+			groupBy, _ := payload["group_by"].(string)
+			renderQueryTable(resp.Body, kind, aggregates, groupBy)
 		} else {
 			siteOutputToTarget(FormatJSON(resp.Body))
 		}
@@ -443,7 +446,7 @@ var siteErrorsCmd = &cobra.Command{
 	Short:   "Manage JavaScript errors",
 	Long: `Manage JavaScript errors collected from RUM sites.
 
-For grouped error analytics, use: cronitor site query --site my-site --type error_groups
+For grouped error analytics, use: cronitor site query --site my-site --type error_groups --metric message,error_type,error_count,last_seen
 
 Examples:
   cronitor site error list --site my-site
@@ -657,6 +660,7 @@ type siteQueryInput struct {
 	Environment     string
 	FiltersBehavior string
 	Search          string
+	SearchSet       bool
 	Compare         bool
 	Page            int
 	PageSize        int
@@ -708,16 +712,17 @@ func buildSiteQueryPayload(in siteQueryInput) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("--group-by is required when kind is breakdown (one dimension, for example country_code)")
 	}
 
-	// aggregate is required by the serializer. error_groups takes no metrics,
-	// so an omitted --metric is an empty list rather than a missing field.
-	// Explicit metrics are still forwarded; this client does not keep a
-	// closed list of aggregate names.
+	// aggregate is required by the serializer. An omitted --metric is an empty
+	// list rather than a missing field. Names are forwarded as given; this
+	// client does not keep a closed list of aggregate values.
 	aggregate := []string{}
 	if strings.TrimSpace(in.Metrics) != "" {
 		aggregate = splitAndTrimSite(in.Metrics)
 	}
 	if kind == "search_options" {
-		if strings.TrimSpace(in.Search) == "" {
+		// RUMSearchOptionsQuery accepts search="" (the flag must be present).
+		// It still requires at least one search field in aggregate.
+		if !in.SearchSet {
 			return nil, fmt.Errorf("--search is required when kind is search_options")
 		}
 		if len(aggregate) == 0 {
@@ -773,8 +778,10 @@ func buildSiteQueryPayload(in siteQueryInput) (map[string]interface{}, error) {
 	if v := strings.TrimSpace(in.FiltersBehavior); v != "" {
 		payload["filters_behavior"] = v
 	}
-	if v := strings.TrimSpace(in.Search); v != "" {
-		payload["search"] = v
+	if in.SearchSet {
+		// Include "" when the flag was passed. The server treats that as a
+		// search, distinct from omitting the field.
+		payload["search"] = strings.TrimSpace(in.Search)
 	}
 	if in.Page > 1 {
 		payload["page"] = in.Page
@@ -814,8 +821,10 @@ func parseFilters(filterStr string) ([]map[string]string, error) {
 	return filters, nil
 }
 
-// renderQueryTable renders query results as a table based on query type
-func renderQueryTable(body []byte, queryType string) {
+// renderQueryTable renders query results as a table based on query kind.
+// aggregates and groupBy are the request fields, in the order the user asked
+// for them, so columns follow that order instead of Go map iteration.
+func renderQueryTable(body []byte, queryType string, aggregates []string, groupBy string) {
 	var result map[string]interface{}
 	if err := json.Unmarshal(body, &result); err != nil {
 		siteOutputToTarget(FormatJSON(body))
@@ -826,11 +835,11 @@ func renderQueryTable(body []byte, queryType string) {
 	case "aggregation":
 		renderAggregationTable(result)
 	case "breakdown":
-		renderBreakdownTable(result)
+		renderBreakdownTable(result, groupBy, aggregates)
 	case "timeseries":
 		renderTimeseriesTable(result)
 	case "error_groups":
-		renderErrorGroupsTable(result)
+		renderErrorGroupsTable(result, aggregates)
 	default:
 		siteOutputToTarget(FormatJSON(body))
 	}
@@ -896,7 +905,7 @@ func formatAggregateCell(v interface{}) (value, previous, change string) {
 	return value, previous, change
 }
 
-func renderBreakdownTable(result map[string]interface{}) {
+func renderBreakdownTable(result map[string]interface{}, groupBy string, aggregates []string) {
 	data, ok := result["data"].([]interface{})
 	if !ok || len(data) == 0 {
 		fmt.Println("No data")
@@ -910,11 +919,7 @@ func renderBreakdownTable(result map[string]interface{}) {
 		return
 	}
 
-	headers := make([]string, 0, len(firstRow))
-	for k := range firstRow {
-		headers = append(headers, strings.ToUpper(k))
-	}
-	sort.Strings(headers)
+	headers := breakdownHeaders(firstRow, groupBy, aggregates)
 
 	table := &UITable{
 		Headers: headers,
@@ -979,33 +984,71 @@ func renderTimeseriesTable(result map[string]interface{}) {
 	siteOutputToTarget(table.Render())
 }
 
-func renderErrorGroupsTable(result map[string]interface{}) {
+func breakdownHeaders(firstRow map[string]interface{}, groupBy string, aggregates []string) []string {
+	seen := map[string]bool{}
+	keys := make([]string, 0, len(firstRow))
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		keys = append(keys, name)
+	}
+	// group_by, then the aggregates in the order they were requested.
+	add(groupBy)
+	for _, name := range aggregates {
+		add(name)
+	}
+	rest := make([]string, 0, len(firstRow))
+	for key := range firstRow {
+		if !seen[key] {
+			rest = append(rest, key)
+		}
+	}
+	sort.Strings(rest)
+	keys = append(keys, rest...)
+
+	headers := make([]string, len(keys))
+	for i, key := range keys {
+		headers[i] = strings.ToUpper(key)
+	}
+	return headers
+}
+
+func renderErrorGroupsTable(result map[string]interface{}, aggregates []string) {
 	data, ok := result["data"].([]interface{})
 	if !ok || len(data) == 0 {
 		fmt.Println("No error groups found")
 		return
 	}
 
-	table := &UITable{
-		Headers: []string{"MESSAGE", "TYPE", "COUNT", "FIRST SEEN", "LAST SEEN"},
+	// Rows are {key, <requested aggregates>}. key is the error group, not an
+	// aggregate the caller lists in --metric.
+	columns := []string{"key"}
+	seen := map[string]bool{"key": true}
+	for _, name := range aggregates {
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		columns = append(columns, name)
+	}
+	headers := make([]string, len(columns))
+	for i, column := range columns {
+		headers[i] = strings.ToUpper(column)
 	}
 
+	table := &UITable{Headers: headers}
 	for _, item := range data {
 		row, ok := item.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		msg := formatQueryCell(row["message"])
-		if len(msg) > 50 {
-			msg = msg[:47] + "..."
+		values := make([]string, len(columns))
+		for i, column := range columns {
+			values[i] = formatQueryCell(row[column])
 		}
-		table.Rows = append(table.Rows, []string{
-			msg,
-			formatQueryCell(row["error_type"]),
-			formatQueryCell(row["count"]),
-			formatQueryCell(row["first_seen"]),
-			formatQueryCell(row["last_seen"]),
-		})
+		table.Rows = append(table.Rows, values)
 	}
 
 	siteOutputToTarget(table.Render())

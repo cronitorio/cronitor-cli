@@ -26,7 +26,7 @@ var wantSiteQueryBodies = map[string]string{
 	"cronitor site query --site my-site --type breakdown --metric session_count --group-by country_code":                                  `{"aggregate":["session_count"],"group_by":"country_code","kind":"breakdown","site":"my-site","time":"24h"}`,
 	"cronitor site query --site my-site --type timeseries --metric pageview_count --bucket hour --time 7d":                                `{"aggregate":["pageview_count"],"kind":"timeseries","site":"my-site","time":"7d","time_bucket":"hour"}`,
 	`cronitor site query --site my-site --type breakdown --metric web_vital_lcp_p50 --group-by browser --filter "device_type:eq:desktop"`: `{"aggregate":["web_vital_lcp_p50"],"filters":[{"dimension":"device_type","operator":"eq","value":"desktop"}],"group_by":"browser","kind":"breakdown","site":"my-site","time":"24h"}`,
-	"cronitor site query --site my-site --type error_groups --time 24h":                                                                   `{"aggregate":[],"kind":"error_groups","site":"my-site","time":"24h"}`,
+	"cronitor site query --site my-site --type error_groups --metric message,error_type,error_count,last_seen --time 24h":                 `{"aggregate":["message","error_type","error_count","last_seen"],"kind":"error_groups","site":"my-site","time":"24h"}`,
 }
 
 func resetSiteQueryState() {
@@ -202,6 +202,11 @@ func TestSiteQueryContract_HelpExamples(t *testing.T) {
 	if len(examples) < 5 {
 		t.Fatalf("expected at least 5 site query examples in --help, got %d\n%s", len(examples), queryHelp)
 	}
+	for line := range wantSiteQueryBodies {
+		if !seen[line] {
+			t.Errorf("pinned body has no matching help example: %s", line)
+		}
+	}
 
 	for _, line := range examples {
 		line := line
@@ -361,14 +366,27 @@ func TestSiteQuery_SearchOptionsRequiresSearchAndAggregate(t *testing.T) {
 		t.Fatalf("expected search required, got %v", err)
 	}
 	_, err = buildSiteQueryPayload(siteQueryInput{
-		Site:   "my-site",
-		Kind:   "search_options",
-		Search: "pricing",
-		Time:   "24h",
+		Site:      "my-site",
+		Kind:      "search_options",
+		Search:    "pricing",
+		SearchSet: true,
+		Time:      "24h",
 	})
 	if err == nil || !strings.Contains(err.Error(), "--metric is required") {
 		t.Fatalf("expected metric required, got %v", err)
 	}
+}
+
+func TestSiteQuery_EmptySearchIsSent(t *testing.T) {
+	body := captureSiteQueryBody(t, []string{
+		"site", "query",
+		"--site", "my-site",
+		"--type", "search_options",
+		"--metric", "path",
+		"--search", "",
+	})
+	assertJSONEqual(t, body, `{"aggregate":["path"],"kind":"search_options","search":"","site":"my-site","time":"24h"}`)
+	assertNoLegacySiteQueryKeys(t, body)
 }
 
 func TestSiteQuery_FormatTableUsesNestedAggregationValues(t *testing.T) {
@@ -445,7 +463,7 @@ func TestRenderQueryTable_AggregationValueShape(t *testing.T) {
 
 	body := []byte(`{"data":{"session_count":{"value":0},"pageview_count":{"value":0}}}`)
 	out := testutil.CaptureStdout(func() {
-		renderQueryTable(body, "aggregation")
+		renderQueryTable(body, "aggregation", nil, "")
 	})
 	for _, want := range []string{"METRIC", "VALUE", "session_count", "pageview_count"} {
 		if !strings.Contains(out, want) {
@@ -467,7 +485,7 @@ func TestRenderQueryTable_AggregationCompare(t *testing.T) {
 
 	body := []byte(`{"data":{"session_count":{"value":15420,"previous_time_range_value":14200,"previous_time_range_change_rate":0.086}}}`)
 	out := testutil.CaptureStdout(func() {
-		renderQueryTable(body, "aggregation")
+		renderQueryTable(body, "aggregation", nil, "")
 	})
 	for _, want := range []string{"PREVIOUS", "CHANGE", "session_count", "15420", "14200", "0.086"} {
 		if !strings.Contains(out, want) {
@@ -482,7 +500,7 @@ func TestRenderQueryTable_TimeseriesUsesTs(t *testing.T) {
 
 	body := []byte(`{"data":[{"ts":"2025-12-01T00:00:00+00:00","session_count":520,"pageview_count":1240}],"time_bucket":"day"}`)
 	out := testutil.CaptureStdout(func() {
-		renderQueryTable(body, "timeseries")
+		renderQueryTable(body, "timeseries", nil, "")
 	})
 	for _, want := range []string{"TIMESTAMP", "2025-12-01T00:00:00+00:00", "520", "1240"} {
 		if !strings.Contains(out, want) {
@@ -498,9 +516,73 @@ func TestRenderQueryTable_KeyedByKind(t *testing.T) {
 	// The same aggregation document rendered as breakdown is not an aggregation table.
 	body := []byte(`{"data":{"session_count":{"value":3}}}`)
 	out := testutil.CaptureStdout(func() {
-		renderQueryTable(body, "breakdown")
+		renderQueryTable(body, "breakdown", nil, "")
 	})
 	if strings.Contains(out, "METRIC") {
 		t.Fatalf("breakdown rendering treated an aggregation document as a metric table\n%s", out)
+	}
+}
+
+func TestRenderQueryTable_BreakdownGroupByThenAggregates(t *testing.T) {
+	resetSiteQueryState()
+	t.Cleanup(resetSiteQueryState)
+
+	// Alphabetical order would be COUNTRY_CODE, PAGEVIEW_COUNT, SESSION_COUNT.
+	body := []byte(`{"data":[{"session_count":10,"pageview_count":20,"country_code":"US"}]}`)
+	out := testutil.CaptureStdout(func() {
+		renderQueryTable(body, "breakdown", []string{"session_count", "pageview_count"}, "country_code")
+	})
+	country := strings.Index(out, "COUNTRY_CODE")
+	sessions := strings.Index(out, "SESSION_COUNT")
+	pageviews := strings.Index(out, "PAGEVIEW_COUNT")
+	if country < 0 || sessions < 0 || pageviews < 0 || !(country < sessions && sessions < pageviews) {
+		t.Fatalf("expected group_by then aggregates in request order\n%s", out)
+	}
+}
+
+func TestRenderQueryTable_ErrorGroupsKeyAndRequestedAggregates(t *testing.T) {
+	resetSiteQueryState()
+	t.Cleanup(resetSiteQueryState)
+
+	// Realistic error_groups row: key plus the aggregates that were requested.
+	// Request order is not alphabetical (that would be ERROR_COUNT, ERROR_TYPE, KEY, LAST_SEEN, MESSAGE).
+	body := []byte(`{"data":[{"key":"TypeError:boom","message":"Cannot read property","error_type":"TypeError","error_count":12,"last_seen":"2025-12-01T00:00:00Z"}]}`)
+	out := testutil.CaptureStdout(func() {
+		renderQueryTable(body, "error_groups", []string{"message", "error_type", "error_count", "last_seen"}, "")
+	})
+	key := strings.Index(out, "KEY")
+	message := strings.Index(out, "MESSAGE")
+	errType := strings.Index(out, "ERROR_TYPE")
+	errCount := strings.Index(out, "ERROR_COUNT")
+	lastSeen := strings.Index(out, "LAST_SEEN")
+	if key < 0 || message < 0 || errType < 0 || errCount < 0 || lastSeen < 0 ||
+		!(key < message && message < errType && errType < errCount && errCount < lastSeen) {
+		t.Fatalf("expected key then requested aggregates\n%s", out)
+	}
+	for _, want := range []string{"TypeError:boom", "Cannot read property", "TypeError", "12", "2025-12-01T00:00:00Z"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table missing %q\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "FIRST SEEN") || strings.Contains(out, " COUNT ") {
+		t.Errorf("table still has the old count column\n%s", out)
+	}
+}
+
+func TestRenderQueryTable_ErrorGroupsKeyOnly(t *testing.T) {
+	resetSiteQueryState()
+	t.Cleanup(resetSiteQueryState)
+
+	body := []byte(`{"data":[{"key":"grp_1"},{"key":"grp_2"}]}`)
+	out := testutil.CaptureStdout(func() {
+		renderQueryTable(body, "error_groups", nil, "")
+	})
+	for _, want := range []string{"KEY", "grp_1", "grp_2"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table missing %q\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "MESSAGE") || strings.Contains(out, "COUNT") {
+		t.Errorf("key-only rows rendered aggregate columns\n%s", out)
 	}
 }
