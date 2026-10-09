@@ -161,9 +161,21 @@ func configFileMissing(err error) bool {
 	return errors.Is(err, fs.ErrNotExist)
 }
 
+// telemetryTestHook, when set, runs at the start of a ping. Tests use it to
+// prove a panic in telemetry cannot kill the job.
+var telemetryTestHook func()
+
 func sendPing(endpoint string, uniqueIdentifier string, message string, series string, timestamp float64, duration *float64, exitCode *int, metrics map[string]int, schedule string, group *sync.WaitGroup) {
 	if group != nil {
 		defer group.Done()
+	}
+	defer func() {
+		if rec := recover(); rec != nil {
+			log(fmt.Sprintf("ping recovered: %v", rec))
+		}
+	}()
+	if telemetryTestHook != nil {
+		telemetryTestHook()
 	}
 
 	Client := &http.Client{

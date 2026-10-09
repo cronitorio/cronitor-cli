@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -109,6 +110,16 @@ Example with no command output send to Cronitor:
 }
 
 func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) int {
+	return runCommand(subcommand, withEnvironment, withMonitoring, "")
+}
+
+// RunCommandWithShell runs subcommand under shell -c, including when shell is /bin/sh.
+// Cron puts the wrapper in the child's SHELL, so that variable is not consulted.
+func RunCommandWithShell(subcommand string, withEnvironment bool, withMonitoring bool, shell string) int {
+	return runCommand(subcommand, withEnvironment, withMonitoring, shell)
+}
+
+func runCommand(subcommand string, withEnvironment bool, withMonitoring bool, explicitShell string) int {
 	var monitoringWaitGroup sync.WaitGroup
 
 	startTime := makeStamp()
@@ -130,7 +141,14 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 		env = makeCronLikeEnv()
 	}
 	env = append(env, "CRONITOR_EXEC=1")
-	execCmd := makeSubcommandExec(subcommand, env)
+	// The handshake fd belongs to this process. The job should see the real shell.
+	env = dropEnv(env, "CRONITOR_SHIM_FD")
+	if explicitShell != "" {
+		env = setEnv(env, "SHELL", explicitShell)
+	}
+	// explicitShell, when set, is the crontab's real shell. It is not chosen
+	// from env: cron puts the shim path in the child's SHELL variable.
+	execCmd := makeSubcommandExecWithShell(subcommand, explicitShell, env)
 	execCmd.Env = env
 
 	// Handle stdin to the subcommand - improved pipe handling
@@ -140,6 +158,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 	} else {
 		defer execCmdStdin.Close()
 		go func() {
+			defer func() { recover() }()
 			defer execCmdStdin.Close()
 			io.Copy(execCmdStdin, os.Stdin)
 		}()
@@ -170,6 +189,9 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 		if err := execCmd.Start(); err != nil {
 			waitCh <- err
 		} else {
+			// After Start the job is running. The wrapper treats this byte as
+			// "do not run the command again" even if we later crash.
+			signalShimStarted()
 			waitCh <- execCmd.Wait()
 		}
 	}()
@@ -240,7 +262,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 				// Cribbed from aws-vault.
 				if exiterr, ok := err.(*exec.ExitError); ok {
 					if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-						exitCode = status.ExitStatus()
+						exitCode = exitStatusOf(status)
 					} else {
 						exitCode = 1
 					}
@@ -256,7 +278,12 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 				}
 			}
 
-			monitoringWaitGroup.Wait()
+			if explicitShell != "" {
+				// Shim path only. exec keeps its own retry budget.
+				waitForTelemetry(&monitoringWaitGroup, 3*time.Second)
+			} else {
+				monitoringWaitGroup.Wait()
+			}
 			return exitCode
 		}
 	}
@@ -290,6 +317,17 @@ func makeSubcommandExec(subcommand string, env []string) *exec.Cmd {
 	execCmd := exec.Command(name, flag, subcommand)
 	execCmd.SysProcAttr = getPlatformSysProcAttr()
 	return execCmd
+}
+
+// makeSubcommandExecWithShell uses shell -c as given. An empty shell keeps
+// makeSubcommandExec, which reads SHELL from the child environment.
+func makeSubcommandExecWithShell(subcommand, explicitShell string, env []string) *exec.Cmd {
+	if explicitShell == "" {
+		return makeSubcommandExec(subcommand, env)
+	}
+	cmd := exec.Command(explicitShell, "-c", subcommand)
+	cmd.SysProcAttr = getPlatformSysProcAttr()
+	return cmd
 }
 
 // interpreterForExec selects the program and its command flag.
@@ -421,10 +459,60 @@ func isStaleFile(file os.FileInfo) bool {
 }
 
 func shipLogData(tempFile *os.File, series string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	defer func() {
+		if rec := recover(); rec != nil {
+			log(fmt.Sprintf("log upload recovered: %v", rec))
+		}
+	}()
 	outputForLogs := gatherOutput(tempFile, false)
 	_, err := lib.SendLogData(viper.GetString(varApiKey), monitorCode, series, string(outputForLogs))
 	if err != nil {
 		log(fmt.Sprintf("%v", err))
 	}
-	wg.Done()
+}
+
+func waitForTelemetry(wg *sync.WaitGroup, bound time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(bound):
+	}
+}
+
+func signalShimStarted() {
+	raw := os.Getenv("CRONITOR_SHIM_FD")
+	if raw == "" {
+		return
+	}
+	fd, err := strconv.Atoi(raw)
+	if err != nil || fd < 0 {
+		return
+	}
+	f := os.NewFile(uintptr(fd), "cronitor-shim")
+	if f == nil {
+		return
+	}
+	_, _ = f.Write([]byte("1\n"))
+	_ = f.Close()
+}
+
+func setEnv(env []string, key, value string) []string {
+	return append(dropEnv(env, key), key+"="+value)
+}
+
+func dropEnv(env []string, key string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
 }
