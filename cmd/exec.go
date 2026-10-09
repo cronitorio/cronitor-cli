@@ -311,7 +311,7 @@ func interpreterForExec(goos, shellEnv string, stat func(string) (os.FileInfo, e
 // /bin/sh is not selectable; see makeSubcommandExec.
 func selectableShell(shellEnv string, stat func(string) (os.FileInfo, error)) (string, bool) {
 	cleaned := cleanShellPath(shellEnv)
-	if !absoluteShellPath(cleaned) || cleaned == "/bin/sh" {
+	if !strings.HasPrefix(cleaned, "/") || cleaned == "/bin/sh" {
 		return "", false
 	}
 	info, err := stat(cleaned)
@@ -344,10 +344,6 @@ func cleanShellPath(shellEnv string) string {
 		return ""
 	}
 	return path.Clean(shellEnv)
-}
-
-func absoluteShellPath(cleaned string) bool {
-	return strings.HasPrefix(cleaned, "/")
 }
 
 func getTempFile() (*os.File, error) {

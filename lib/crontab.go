@@ -232,6 +232,7 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 		// The original prefix is kept so Write does not rebuild flags or the binary path.
 		if code, unwrapped, prefix, noStdout, ok := unwrapCronitorExec(rawCommand); ok {
 			line.Code = code
+			line.parsedCode = code
 			line.CommandToRun = unwrapped
 			line.wrapPrefix = prefix
 			if noStdout {
@@ -245,8 +246,6 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 				line.CommandToRun = strings.Trim(line.CommandToRun, "\"")
 				line.CommandToRun = strings.Replace(line.CommandToRun, "\\\"", "\"", -1)
 			}
-			// A not-yet-wrapped \% is a literal percent. Store that, and escape once on Write.
-			line.CommandToRun = unescapeCronPercents(line.CommandToRun)
 		}
 
 		if line.IsAutoDiscoverCommand() {
@@ -437,7 +436,8 @@ type Line struct {
 	Ignored        bool
 	Mon            Monitor
 	Crontab        Crontab
-	wrapPrefix     string // original cronitor prefix through the key; Write emits it verbatim
+	wrapPrefix     string // cronitor prefix through the key, from parse
+	parsedCode     string // key that wrapPrefix was parsed with
 }
 
 func (l Line) IsMonitorable() bool {
@@ -507,8 +507,21 @@ func (l Line) Write() string {
 		lineParts = append(lineParts, l.RunAs)
 	}
 
-	if l.wrapPrefix != "" {
-		lineParts = append(lineParts, l.wrapPrefix)
+	// A saved prefix is only reused while the monitor code still matches parse.
+	// Code "" is how the dashboard disables monitoring: write the bare command.
+	if l.wrapPrefix != "" && l.Code == "" {
+		lineParts = append(lineParts, l.CommandToRun)
+		outputLines = append(outputLines, strings.TrimSpace(strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)))
+		return strings.Join(outputLines, "\n")
+	}
+
+	if l.wrapPrefix != "" && l.Code != "" {
+		prefix := l.wrapPrefix
+		if l.Code != l.parsedCode {
+			prefix = replacePrefixKey(prefix, l.Code)
+		}
+		prefix = mergeSyncFlags(prefix, l.Mon.NoStdoutPassthru)
+		lineParts = append(lineParts, prefix)
 		if len(l.CommandToRun) > 0 {
 			lineParts = append(lineParts, formatWrappedCommand(l.CommandToRun))
 		}
@@ -540,7 +553,7 @@ func (l Line) Write() string {
 		return strings.Join(outputLines, "\n")
 	}
 
-	lineParts = append(lineParts, escapeCronPercents(l.CommandToRun))
+	lineParts = append(lineParts, l.CommandToRun)
 	outputLines = append(outputLines, strings.TrimSpace(strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)))
 	return strings.Join(outputLines, "\n")
 }
@@ -564,12 +577,9 @@ func (l Line) Key(CanonicalPath string) string {
 	return fmt.Sprintf("%x", sha1.Sum(data))
 }
 
-// ApplyDiscoveredMonitor copies an API monitor onto the line. NoStdoutPassthru
-// is not in the API payload, so the parsed value is kept.
+// ApplyDiscoveredMonitor copies an API monitor onto the line the way discover does.
 func (l *Line) ApplyDiscoveredMonitor(updated Monitor) {
-	noStdout := l.Mon.NoStdoutPassthru
 	l.Mon = updated
-	l.Mon.NoStdoutPassthru = noStdout
 	l.Code = updated.Attributes.Code
 	if updated.Name != "" {
 		l.Name = updated.Name
