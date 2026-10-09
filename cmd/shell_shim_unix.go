@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// shellShimCmd is what the wrapper execs: cronitor shell-shim -c '<command>'.
 var shellShimCmd = &cobra.Command{
 	Use:                "shell-shim",
 	DisableFlagParsing: true,
@@ -25,9 +24,6 @@ func init() {
 	RootCmd.AddCommand(shellShimCmd)
 }
 
-// RunShellShim monitors a marked command exactly once. The wrapper does not
-// invoke cronitor for unmarked commands. A panic before the handshake leaves
-// the wrapper to run the command; telemetry recovers on its own.
 func RunShellShim(args []string) int {
 	command, ok := shellShimDashC(args)
 	shell := lib.ResolveRealShell(os.Getenv(lib.RealShellEnv))

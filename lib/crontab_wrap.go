@@ -101,7 +101,6 @@ var cronitorBoolFlags = map[string]bool{
 
 // unwrapCronitorExec parses `cronitor [flags] exec [flags] <key> [command]`.
 // prefix is the original text through the key so Write can emit it unchanged.
-// flags are the flag tokens the MONITORIO marker cannot carry.
 func unwrapCronitorExec(raw string) (code, command, prefix string, noStdout bool, flags []string, ok bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

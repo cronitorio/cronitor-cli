@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -108,9 +109,6 @@ Example with no command output send to Cronitor:
 	},
 }
 
-// RunCommand runs subcommand. explicitShell, when set, is used as-is for
-// `shell -c`, including /bin/sh. Cron puts the wrapper in SHELL, so that
-// variable is not consulted on the shim path.
 func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, explicitShell ...string) int {
 	shell := ""
 	if len(explicitShell) > 0 {
@@ -174,14 +172,12 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 	// Invoke subcommand and send a message when it's done
 	waitCh := make(chan error, 16)
 	var jobs jobSignal
+	var plainProc atomic.Pointer[os.Process]
 	go func() {
 		defer close(waitCh)
 
 		time.Sleep(20 * time.Millisecond)
 
-		// The byte is the promise that this process runs the job once.
-		// It is written immediately before Start so a crash after Start
-		// cannot look like "never started".
 		if shell != "" {
 			commitShimHandshake()
 			if shimAfterHandshake != nil {
@@ -195,6 +191,8 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 		}
 		if shell != "" {
 			jobs.started(execCmd.Process)
+		} else {
+			plainProc.Store(execCmd.Process)
 		}
 		waitCh <- execCmd.Wait()
 	}()
@@ -210,11 +208,12 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 				jobs.deliver(sig)
 				continue
 			}
-			if execCmd.Process == nil {
+			proc := plainProc.Load()
+			if proc == nil {
 				signal.Stop(sigChan)
 				continue
 			}
-			if err := execCmd.Process.Signal(sig); err != nil {
+			if err := proc.Signal(sig); err != nil {
 				signal.Stop(sigChan)
 			}
 
@@ -265,7 +264,6 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 				// Cribbed from aws-vault.
 				if exiterr, ok := err.(*exec.ExitError); ok {
 					if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-						// 128+n is the shim only. Plain exec keeps ExitStatus.
 						if shell != "" {
 							exitCode = exitStatusOf(status)
 						} else {
@@ -290,7 +288,6 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 			}
 
 			if shell != "" {
-				// Shim path only. exec keeps its own retry budget.
 				waitForTelemetry(&monitoringWaitGroup, 3*time.Second)
 			} else {
 				monitoringWaitGroup.Wait()
@@ -330,8 +327,6 @@ func makeSubcommandExec(subcommand string, env []string) *exec.Cmd {
 	return execCmd
 }
 
-// makeSubcommandExecWithShell uses shell -c as given. An empty shell keeps
-// makeSubcommandExec, which reads SHELL from the child environment.
 func makeSubcommandExecWithShell(subcommand, explicitShell string, env []string) *exec.Cmd {
 	if explicitShell == "" {
 		return makeSubcommandExec(subcommand, env)
@@ -471,6 +466,7 @@ func isStaleFile(file os.FileInfo) bool {
 
 func shipLogData(tempFile *os.File, series string, wg *sync.WaitGroup) {
 	defer wg.Done()
+	defer finishTelemetry()
 	defer func() {
 		if rec := recover(); rec != nil {
 			log(fmt.Sprintf("log upload recovered: %v", rec))
@@ -495,8 +491,6 @@ func waitForTelemetry(wg *sync.WaitGroup, bound time.Duration) {
 	}
 }
 
-// jobSignal holds a signal that arrives before Start and delivers it once
-// the job exists, including to its process group.
 type jobSignal struct {
 	mu   sync.Mutex
 	sig  os.Signal

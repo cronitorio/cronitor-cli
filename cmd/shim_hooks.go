@@ -1,8 +1,14 @@
 package cmd
 
-// Test seams. Production leaves them nil.
 var (
 	telemetryTestHook  func()
 	shellShimAfterJob  func()
 	shimAfterHandshake func()
+	telemetryDoneHook  func()
 )
+
+func finishTelemetry() {
+	if telemetryDoneHook != nil {
+		telemetryDoneHook()
+	}
+}

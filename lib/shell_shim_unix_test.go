@@ -101,7 +101,7 @@ func TestWrapperSignalRemovesTempDir(t *testing.T) {
 	}
 }
 
-func TestWrapperIntDoesNotHang(t *testing.T) {
+func TestWrapperIntHungBinaryStopsWithoutRunningJob(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "hung")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nexec sleep 30\n"), 0755); err != nil {
@@ -112,7 +112,8 @@ func TestWrapperIntDoesNotHang(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := os.Getenv("TMPDIR")
-	cmd := exec.Command(wrapper, "-c", "MONITORIO=k1 printf x")
+	marker := filepath.Join(dir, "job-ran")
+	cmd := exec.Command(wrapper, "-c", "MONITORIO=k1 touch "+marker)
 	cmd.Env = append(os.Environ(), "CRONITOR_REAL_SHELL=/bin/sh", "TMPDIR="+root)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -124,14 +125,26 @@ func TestWrapperIntDoesNotHang(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
+	var waitErr error
 	select {
-	case <-done:
-		if time.Since(start) > 3*time.Second {
-			t.Fatal("SIGINT left the wrapper blocked")
-		}
+	case waitErr = <-done:
 	case <-time.After(3 * time.Second):
 		cmd.Process.Kill()
 		t.Fatal("SIGINT did not stop the wrapper")
+	}
+	elapsed := time.Since(start)
+	if elapsed < 700*time.Millisecond {
+		t.Fatalf("SIGINT killed the hung binary immediately (%s)", elapsed)
+	}
+	if elapsed > 2500*time.Millisecond {
+		t.Fatalf("SIGINT left the wrapper blocked for %s", elapsed)
+	}
+	exit, ok := waitErr.(*exec.ExitError)
+	if !ok || exit.ExitCode() != 137 {
+		t.Fatalf("exit=%v, want 137", waitErr)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("hung binary still ran the job")
 	}
 	if leftovers, _ := filepath.Glob(filepath.Join(root, "cronitor-shim.*")); len(leftovers) > 0 {
 		t.Fatalf("SIGINT left %s", leftovers)

@@ -181,6 +181,27 @@ func TestRedactAttachedAPIKey(t *testing.T) {
 	}
 }
 
+func TestRedactPingKeyAndCluster(t *testing.T) {
+	got := redactExecFlags([]string{
+		"--ping-api-key", "pingsecret",
+		"-p", "psecret",
+		"-vkcombined",
+		"--ping-api-key=eqsecret",
+		"-vk", "tailsecret",
+		"--env", "staging",
+	})
+	for _, leak := range []string{"pingsecret", "psecret", "combined", "eqsecret", "tailsecret"} {
+		if strings.Contains(got, leak) {
+			t.Fatalf("leaked %s in %q", leak, got)
+		}
+	}
+	for _, want := range []string{"--ping-api-key", "-p", "-vk<redacted>", "--ping-api-key=<redacted>", "<redacted>", "--env", "staging"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %s in %q", want, got)
+		}
+	}
+}
+
 func TestResolveShimInstallPathDoesNotCreateDirectories(t *testing.T) {
 	_, err := os.Stat("/etc/cronitor")
 	existed := err == nil
@@ -221,12 +242,15 @@ func TestWrapperRechecksByteAfterKill(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := readFile(t, dest)
-	killAt := strings.Index(body, `kill -KILL "$child"`)
+	// The INT trap also contains kill -KILL. The watchdog's kill is the one
+	// followed immediately by wait, and the byte re-check has to follow that.
+	const kill = "kill -KILL \"$child\" 2>/dev/null\nwait \"$child\""
+	killAt := strings.Index(body, kill)
 	if killAt < 0 {
 		t.Fatal("wrapper does not SIGKILL a timed-out cronitor")
 	}
-	rest := body[killAt:]
-	fallback := strings.LastIndex(rest, `exec "$REAL_SHELL" -c "$after"`)
+	rest := body[killAt+len(kill):]
+	fallback := strings.Index(rest, `exec "$REAL_SHELL" -c "$after"`)
 	if fallback < 0 {
 		t.Fatal("wrapper has no fallback after SIGKILL")
 	}

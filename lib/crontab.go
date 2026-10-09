@@ -33,18 +33,11 @@ type Crontab struct {
 	TimezoneLocationName    *TimezoneLocationName `json:"timezone,omitempty"`
 	Shell                   string                `json:"-"`
 	UsesSixFieldExpressions bool                  `json:"-"`
-	// WriteMode is set by sync/discover. The zero value keeps legacy exec lines.
-	WriteMode WriteMode `json:"-"`
-	// ShimShellPath is the wrapper installed for SHELL=. Empty uses the default.
-	ShimShellPath string `json:"-"`
-	// RealShell is CRONITOR_REAL_SHELL when the file has one.
-	RealShell string `json:"-"`
-	// BlockNewShim forces new lines to exec style when this sync was invoked
-	// with flags a MONITORIO line cannot express.
-	BlockNewShim bool `json:"-"`
-	// RewriteShimToExec turns existing MONITORIO lines into exec lines.
-	// Set when sync was invoked with --no-stdout.
-	RewriteShimToExec bool `json:"-"`
+	WriteMode               WriteMode             `json:"-"`
+	ShimShellPath           string                `json:"-"`
+	RealShell               string                `json:"-"`
+	BlockNewShim            bool                  `json:"-"`
+	RewriteShimToExec       bool                  `json:"-"`
 }
 
 // isExampleCronLine checks if a line contains obvious placeholder/example text
@@ -242,8 +235,6 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			Crontab:        c.lightweightCopy(),
 		}
 
-		// If this job is already wrapped, peel off `cronitor [flags...] exec [flags] <key>`.
-		// The original prefix is kept so Write does not rebuild flags or the binary path.
 		line.rawCommand = rawCommand
 		if code, unwrapped, prefix, noStdout, flags, ok := unwrapCronitorExec(rawCommand); ok {
 			line.Code = code
@@ -258,7 +249,6 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 				line.Mon.NoStdoutPassthru = true
 			}
 		} else if key, rest, ok := ParseMonitorMarker(rawCommand); ok {
-			// rawTail keeps the separator and the command bytes after the key.
 			line.Code = key
 			line.CommandToRun = rest
 			line.rawTail = rawCommand[len(MonitorPrefix)+len(key):]
@@ -295,7 +285,6 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 		c.Lines = append(c.Lines, createAutoDiscoverLine(c))
 	}
 
-	// Dash "run now" uses c.Shell. When SHELL= is the wrapper, run the real shell.
 	if IsShimShellPath(c.Shell) && c.RealShell != "" {
 		c.Shell = c.RealShell
 	}
@@ -471,8 +460,7 @@ type Line struct {
 	rawCommand     string // exact command field from the file
 	rawTail        string // shim: bytes after the key, including the separator; otherwise the job text
 	Integration    string `json:"-"`
-	// execFlags are flags on an exec invocation that MONITORIO cannot carry.
-	execFlags []string
+	execFlags      []string
 }
 
 func (l Line) IsMonitorable() bool {
@@ -546,9 +534,6 @@ func (l Line) writeUsing(c Crontab) string {
 		lineParts = append(lineParts, l.RunAs)
 	}
 
-	// Reuse the saved prefix while a code is still known, unless this line is
-	// being written as a shim. Discover clears Line.Code and leaves the code
-	// on Mon, so this uses GetCode. Dashboard disable clears both.
 	code := l.GetCode()
 	style := ""
 	if code != "" {
@@ -564,8 +549,6 @@ func (l Line) writeUsing(c Crontab) string {
 		return strings.Join(outputLines, "\n")
 	}
 
-	// Dashboard disable of a MONITORIO line clears the code and writes the
-	// command bytes after the marker, not a token rebuild.
 	if l.Integration == IntegrationShim && code == "" {
 		cmd := strings.TrimLeft(l.rawTail, " \t\v\f\r\n")
 		if cmd == "" {

@@ -376,8 +376,6 @@ func validateShellShimFlags() error {
 	return nil
 }
 
-// configureShellShim selects the line style for this sync and, when the
-// crontab will contain MONITORIO lines, installs the POSIX wrapper.
 func configureShellShim(crontab *lib.Crontab) error {
 	if runtime.GOOS == "windows" {
 		crontab.WriteMode = lib.WriteModeLegacy
@@ -422,11 +420,7 @@ func configureShellShim(crontab *lib.Crontab) error {
 	return nil
 }
 
-// syncFlagsBlockShim is true when this invocation carries flags the marker
-// cannot express. A key saved in the config file does not count.
 func syncFlagsBlockShim() bool {
-	// --config selects this process's config file and is not copied onto job
-	// lines. An exec line that already contains --config is skipped separately.
 	for _, name := range []string{"api-key", "hostname", "env"} {
 		if f := RootCmd.PersistentFlags().Lookup(name); f != nil && f.Changed {
 			return true
@@ -435,8 +429,6 @@ func syncFlagsBlockShim() bool {
 	return noStdoutPassthru || viper.GetString("CRONITOR_ENV") != ""
 }
 
-// cronitorExecutable is the path the user invoked. Symlinks are kept so a
-// package-manager upgrade does not leave the wrapper pointing at an old binary.
 func cronitorExecutable() string {
 	return invokedExecutable(os.Args[0], exec.LookPath, os.Getwd)
 }

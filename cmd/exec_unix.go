@@ -23,8 +23,6 @@ func getPlatformSysProcAttrForDash() *syscall.SysProcAttr {
 	}
 }
 
-// commitShimHandshake writes the newline-terminated byte and keeps the fifo
-// out of the job. The wrapper does not call this when fd 3 is already open.
 func commitShimHandshake() {
 	raw := os.Getenv("CRONITOR_SHIM_FD")
 	if raw == "" {

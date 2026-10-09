@@ -33,7 +33,6 @@ const (
 	IntegrationShim = "shim"
 )
 
-// ShimShellPathOverride is the wrapper path tests install instead of /etc/cronitor.
 var ShimShellPathOverride string
 
 func ParseMonitorMarker(command string) (key, rest string, ok bool) {
@@ -249,21 +248,37 @@ func redactExecFlags(flags []string) string {
 	out := make([]string, 0, len(flags))
 	for i := 0; i < len(flags); i++ {
 		tok := flags[i]
-		if strings.HasPrefix(tok, "--api-key=") {
-			out = append(out, "--api-key=<redacted>")
-			continue
+		eq := strings.IndexByte(tok, '=')
+		base, attached := tok, false
+		if eq > 0 {
+			base = tok[:eq]
 		}
-		if strings.HasPrefix(tok, "-k") && !strings.HasPrefix(tok, "--") && len(tok) > 2 {
-			out = append(out, "-k<redacted>")
-			continue
+		if eq < 0 && len(tok) > 2 && tok[0] == '-' && tok[1] != '-' {
+			for j := 1; j < len(tok)-1; j++ {
+				if tok[j] == 'k' || tok[j] == 'p' {
+					tok, attached = tok[:j+1]+"<redacted>", true
+					break
+				}
+			}
+		}
+		if !attached && eq > 0 && secretOpt(base) {
+			tok, attached = base+"=<redacted>", true
 		}
 		out = append(out, tok)
-		if (tok == "--api-key" || tok == "-k") && i+1 < len(flags) {
+		if !attached && (secretOpt(tok) || shortSecret(tok)) && i+1 < len(flags) {
 			i++
 			out = append(out, "<redacted>")
 		}
 	}
 	return strings.Join(out, " ")
+}
+
+func secretOpt(tok string) bool {
+	return tok == "--api-key" || tok == "--ping-api-key" || tok == "-k" || tok == "-p"
+}
+
+func shortSecret(tok string) bool {
+	return len(tok) > 2 && tok[0] == '-' && tok[1] != '-' && (tok[len(tok)-1] == 'k' || tok[len(tok)-1] == 'p')
 }
 
 func (c Crontab) linesForWrite() []*Line {
@@ -436,7 +451,6 @@ case $REAL_SHELL in
   */cronitor-shell|cronitor-shell) REAL_SHELL=/bin/sh ;;
 esac
 export SHELL="$REAL_SHELL"
-
 if [ "$#" -ne 2 ] || [ "$1" != "-c" ]; then
   exec "$REAL_SHELL" "$@"
 fi
@@ -464,8 +478,6 @@ done
 if [ ! -x "$CRONITOR_BIN" ]; then
   exec "$REAL_SHELL" -c "$after"
 fi
-
-# An open fd 3 belongs to the caller. Run once, unmonitored, and do not touch fds.
 if ( : <&3 ) 2>/dev/null || ( : >&3 ) 2>/dev/null; then
   exec "$REAL_SHELL" -c "$after"
 fi
@@ -498,7 +510,7 @@ exec 4<&-
 ) &
 watch=$!
 trap 'rm -rf "$hs"; kill -TERM "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' TERM
-trap 'rm -rf "$hs"; kill -INT "$child" 2>/dev/null; i=0; while kill -0 "$child" 2>/dev/null && [ "$i" -lt 20 ]; do i=$((i+1)); sleep 0.05; done; kill -KILL "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' INT
+trap 'kill -INT "$child" 2>/dev/null; i=0; while [ -z "$started" ] && [ ! -s "$hs/byte" ] && kill -0 "$child" 2>/dev/null && [ "$i" -lt 20 ]; do i=$((i+1)); sleep 0.05; done; [ -n "$started" ] || [ -s "$hs/byte" ] || kill -KILL "$child" 2>/dev/null; rm -rf "$hs"; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' INT
 trap 'rm -rf "$hs"; kill -HUP "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' HUP
 while [ ! -s "$hs/byte" ] && [ ! -f "$hs/timeout" ]; do
   kill -0 "$child" 2>/dev/null || break
@@ -508,6 +520,7 @@ kill "$watch" 2>/dev/null
 wait "$watch" 2>/dev/null
 if [ -s "$hs/byte" ]; then
   kill "$reader" 2>/dev/null
+  started=1
   wait "$reader" 2>/dev/null
   rm -rf "$hs"
   wait "$child"

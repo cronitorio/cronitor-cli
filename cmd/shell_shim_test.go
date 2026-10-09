@@ -3,15 +3,19 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -23,7 +27,11 @@ import (
 
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "shell-shim" {
-		lib.PingHostOverride = "http://127.0.0.1:1"
+		if host := os.Getenv("CRONITOR_SHIM_PING_HOST"); host != "" {
+			lib.PingHostOverride = host
+		} else {
+			lib.PingHostOverride = "http://127.0.0.1:1"
+		}
 		viper.Set(varApiKey, "")
 		viper.Set(varPingApiKey, "")
 		if os.Getenv("CRONITOR_SHIM_CRASH_AFTER_BYTE") == "1" {
@@ -325,6 +333,118 @@ func TestPlainExecSignalLeavesBackgroundChild(t *testing.T) {
 	}
 }
 
+type lockedBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuf) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+func TestWrapperIntOnRunningJob(t *testing.T) {
+	var mu sync.Mutex
+	var urls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		urls = append(urls, r.RequestURI)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	run := func(t *testing.T, command string, wantCode int, wantOut []string, wantPing []string) {
+		t.Helper()
+		mu.Lock()
+		from := len(urls)
+		mu.Unlock()
+		wrapper := installRealShim(t, os.Args[0])
+		closeOnExecInherited()
+		cmd := exec.Command(wrapper, "-c", "MONITORIO=abc123 "+command)
+		cmd.Env = shimEnv("CRONITOR_SHIM_PING_HOST=" + srv.URL)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		var out lockedBuf
+		cmd.Stdout = &out
+		cmd.Stderr = &out
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if cmd.Process != nil {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
+		})
+		deadline := time.Now().Add(4 * time.Second)
+		for !strings.Contains(out.String(), "started") {
+			if time.Now().After(deadline) {
+				t.Fatalf("job did not start; output=%q", out.String())
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		var waitErr error
+		select {
+		case waitErr = <-done:
+		case <-time.After(8 * time.Second):
+			t.Fatal("wrapper did not return after SIGINT")
+		}
+		code := 0
+		if waitErr != nil {
+			exit, ok := waitErr.(*exec.ExitError)
+			if !ok {
+				t.Fatal(waitErr)
+			}
+			code = exit.ExitCode()
+		}
+		if code != wantCode {
+			t.Fatalf("exit=%d, want %d; output=%q", code, wantCode, out.String())
+		}
+		got := out.String()
+		for _, s := range wantOut {
+			if !strings.Contains(got, s) {
+				t.Fatalf("output %q missing %q", got, s)
+			}
+		}
+		mu.Lock()
+		gotPings := strings.Join(urls[from:], "\n")
+		mu.Unlock()
+		for _, s := range wantPing {
+			if !strings.Contains(gotPings, s) {
+				t.Fatalf("pings missing %s:\n%s", s, gotPings)
+			}
+		}
+	}
+
+	t.Run("returns job code and pings", func(t *testing.T) {
+		run(t,
+			"trap 'sleep 2; echo cleaned; exit 7' INT; echo started; sleep 30",
+			7,
+			[]string{"cleaned"},
+			[]string{"/abc123/fail", "status_code=7"},
+		)
+	})
+	t.Run("ignored int still prints", func(t *testing.T) {
+		run(t,
+			"trap '' INT; echo started; sleep 2; echo to-stdout; echo end",
+			0,
+			[]string{"to-stdout", "end"},
+			[]string{"/abc123/complete", "status_code=0"},
+		)
+	})
+}
+
 func TestSignalBeforeStartReachesJob(t *testing.T) {
 	wrapper := installRealShim(t, os.Args[0])
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
@@ -347,28 +467,45 @@ func TestShimTelemetryWaitIsBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	var mu sync.Mutex
+	var conns []net.Conn
 	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			time.Sleep(time.Minute)
-			c.Close()
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+			_, _ = io.Copy(io.Discard, c)
 		}
 	}()
 	oldHost := lib.PingHostOverride
+	oldBase := lib.BaseURLOverride
 	oldCode := monitorCode
 	oldKey := viper.GetString(varApiKey)
 	lib.PingHostOverride = "http://" + ln.Addr().String()
+	lib.BaseURLOverride = "http://127.0.0.1:1"
 	monitorCode = "abc123"
 	viper.Set(varApiKey, "")
-	t.Cleanup(func() {
+	var idle sync.WaitGroup
+	idle.Add(3)
+	telemetryDoneHook = idle.Done
+	defer func() {
+		ln.Close()
+		mu.Lock()
+		for _, c := range conns {
+			c.Close()
+		}
+		mu.Unlock()
+		idle.Wait()
+		telemetryDoneHook = nil
 		lib.PingHostOverride = oldHost
+		lib.BaseURLOverride = oldBase
 		monitorCode = oldCode
 		viper.Set(varApiKey, oldKey)
-	})
+	}()
 	start := time.Now()
 	code := RunCommand("exit 0", false, true, "/bin/sh")
 	elapsed := time.Since(start)
