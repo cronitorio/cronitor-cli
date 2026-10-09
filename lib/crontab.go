@@ -232,7 +232,6 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 		// The original prefix is kept so Write does not rebuild flags or the binary path.
 		if code, unwrapped, prefix, noStdout, ok := unwrapCronitorExec(rawCommand); ok {
 			line.Code = code
-			line.parsedCode = code
 			line.CommandToRun = unwrapped
 			line.wrapPrefix = prefix
 			if noStdout {
@@ -437,7 +436,6 @@ type Line struct {
 	Mon            Monitor
 	Crontab        Crontab
 	wrapPrefix     string // cronitor prefix through the key, from parse
-	parsedCode     string // key that wrapPrefix was parsed with
 }
 
 func (l Line) IsMonitorable() bool {
@@ -507,20 +505,11 @@ func (l Line) Write() string {
 		lineParts = append(lineParts, l.RunAs)
 	}
 
-	// A saved prefix is only reused while the monitor code still matches parse.
-	// Code "" is how the dashboard disables monitoring: write the bare command.
-	if l.wrapPrefix != "" && l.Code == "" {
-		lineParts = append(lineParts, l.CommandToRun)
-		outputLines = append(outputLines, strings.TrimSpace(strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)))
-		return strings.Join(outputLines, "\n")
-	}
-
-	if l.wrapPrefix != "" && l.Code != "" {
-		prefix := l.wrapPrefix
-		if l.Code != l.parsedCode {
-			prefix = replacePrefixKey(prefix, l.Code)
-		}
-		prefix = mergeSyncFlags(prefix, l.Mon.NoStdoutPassthru)
+	// Reuse the saved prefix while a code is still known. Discover clears
+	// Line.Code and leaves the code on Mon, so this must use GetCode.
+	// Dashboard disable clears both, and the bare command is written below.
+	if code := l.GetCode(); l.wrapPrefix != "" && code != "" {
+		prefix := insertSyncFlags(replacePrefixKey(l.wrapPrefix, code), l.Mon.NoStdoutPassthru)
 		lineParts = append(lineParts, prefix)
 		if len(l.CommandToRun) > 0 {
 			lineParts = append(lineParts, formatWrappedCommand(l.CommandToRun))
@@ -532,16 +521,15 @@ func (l Line) Write() string {
 	if code := l.GetCode(); code != "" {
 		lineParts = append(lineParts, "cronitor")
 
-		// Add the --env flag if environment is set
+		// Root flags belong before the subcommand. --no-stdout is local to exec.
 		if env := viper.GetString("CRONITOR_ENV"); env != "" {
 			lineParts = append(lineParts, "--env")
 			lineParts = append(lineParts, env)
 		}
-
+		lineParts = append(lineParts, "exec")
 		if l.Mon.NoStdoutPassthru {
 			lineParts = append(lineParts, "--no-stdout")
 		}
-		lineParts = append(lineParts, "exec")
 		lineParts = append(lineParts, code)
 
 		if len(l.CommandToRun) > 0 {

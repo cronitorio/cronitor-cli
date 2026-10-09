@@ -197,7 +197,7 @@ func TestLineWriteWithEnvFlag(t *testing.T) {
 
 			// Verify the cronitor exec structure is correct
 			if strings.Contains(output, "cronitor") {
-				// Check the order: cronitor [--env <value>] [--no-stdout] exec <code> <command>
+				// Check the order: cronitor [--env <value>] exec [--no-stdout] <code> <command>
 				parts := strings.Fields(output)
 				cronitorIndex := -1
 				for i, part := range parts {
@@ -242,7 +242,6 @@ func TestLineWriteWithEnvFlag(t *testing.T) {
 	viper.Set("CRONITOR_ENV", originalEnv)
 }
 
-
 func TestLineWriteWithNoStdoutAndEnv(t *testing.T) {
 	// Save original viper value
 	originalEnv := viper.GetString("CRONITOR_ENV")
@@ -261,8 +260,8 @@ func TestLineWriteWithNoStdoutAndEnv(t *testing.T) {
 	output := line.Write()
 
 	// Check that both flags are present and in correct order
-	if !strings.Contains(output, "cronitor --env testing --no-stdout exec test123") {
-		t.Errorf("Expected 'cronitor --env testing --no-stdout exec test123' in output but got: %s", output)
+	if !strings.Contains(output, "cronitor --env testing exec --no-stdout test123") {
+		t.Errorf("Expected 'cronitor --env testing exec --no-stdout test123' in output but got: %s", output)
 	}
 
 	// Restore original viper value

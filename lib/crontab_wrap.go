@@ -14,18 +14,28 @@ func commandIsComplex(command string) bool {
 
 // formatWrappedCommand quotes a complex command as one shell word. A bare %
 // starts cron stdin and is left outside the quotes; \% is left as written.
+// A single quoted or escaped word is kept as written.
 func formatWrappedCommand(command string) string {
 	body, stdin := splitCronStdin(command)
-	var formatted string
-	if body != "" && commandIsComplex(body) {
-		formatted = shellquote.Join(body)
-	} else {
-		formatted = strings.Join(strings.Fields(body), " ")
-	}
+	body = strings.TrimSpace(body)
+	formatted := formatCommandBody(body)
 	if formatted == "" {
 		return stdin
 	}
 	return formatted + stdin
+}
+
+func formatCommandBody(body string) string {
+	if body == "" {
+		return ""
+	}
+	if words, err := shellquote.Split(body); err == nil && len(words) == 1 && body != words[0] && !commandIsComplex(words[0]) {
+		return body
+	}
+	if commandIsComplex(body) {
+		return shellquote.Join(body)
+	}
+	return strings.Join(strings.Fields(body), " ")
 }
 
 // splitCronStdin cuts at the first % cronie would treat as stdin. A backslash
@@ -119,11 +129,22 @@ func commandFromTail(tail string) string {
 	if tail == "" {
 		return ""
 	}
-	words, err := shellquote.Split(tail)
-	if err != nil || len(words) != 1 {
-		return strings.Join(strings.Fields(tail), " ")
+	// Cron cuts stdin at the first unescaped % before the shell parses the command.
+	body, stdin := splitCronStdin(tail)
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return stdin
 	}
-	return words[0]
+	words, err := shellquote.Split(body)
+	if err != nil || len(words) != 1 {
+		return strings.Join(strings.Fields(body), " ") + stdin
+	}
+	// A complex word was quoted by us; store the inner command and re-quote on write.
+	// Any other single quoted or escaped word stays as written.
+	if !commandIsComplex(words[0]) && body != words[0] {
+		return body + stdin
+	}
+	return words[0] + stdin
 }
 
 func detectCronitorWrap(words []string) (code string, keyIndex int, noStdout, ok bool) {
@@ -190,7 +211,9 @@ func flagConsumesNext(tok string, words []string, i int) bool {
 	}
 	name := strings.TrimLeft(tok, "-")
 	if cronitorValueFlags[name] {
-		return i+1 < len(words)
+		// The exec arg scanner treats the first "exec" as the subcommand, even
+		// when it sits where a flag value would be (`--env exec exec realkey`).
+		return i+1 < len(words) && words[i+1] != "exec"
 	}
 	if i+1 >= len(words) {
 		return false
@@ -220,52 +243,41 @@ func replacePrefixKey(prefix, code string) string {
 	return head + " " + code
 }
 
-// mergeSyncFlags adds the current sync --env and --no-stdout when the prefix
-// does not already have them.
-func mergeSyncFlags(prefix string, noStdout bool) string {
-	env := viper.GetString("CRONITOR_ENV")
-	var insert []string
-	if env != "" && !prefixHasFlag(prefix, "--env") {
-		insert = append(insert, "--env", env)
+// insertSyncFlags adds a missing --env before exec and puts --no-stdout after
+// exec. An --env already on the line wins over CRONITOR_ENV. A --no-stdout
+// that was before exec is moved after it, where the exec command accepts it.
+func insertSyncFlags(prefix string, noStdout bool) string {
+	words := strings.Fields(prefix)
+	hasEnv := false
+	var kept []string
+	for _, word := range words {
+		if word == "--env" || strings.HasPrefix(word, "--env=") {
+			hasEnv = true
+		}
+		if word == "--no-stdout" {
+			noStdout = true
+			continue
+		}
+		kept = append(kept, word)
 	}
-	if noStdout && !prefixHasFlag(prefix, "--no-stdout") {
-		insert = append(insert, "--no-stdout")
+	execAt := -1
+	for i, word := range kept {
+		if word == "exec" {
+			execAt = i
+			break
+		}
 	}
-	if len(insert) == 0 {
+	if execAt < 0 {
 		return prefix
 	}
-	at := execTokenStart(prefix)
-	if at < 0 {
-		return prefix
+	out := append([]string{}, kept[:execAt]...)
+	if env := viper.GetString("CRONITOR_ENV"); env != "" && !hasEnv {
+		out = append(out, "--env", env)
 	}
-	return strings.TrimRight(prefix[:at], " \t") + " " + strings.Join(insert, " ") + " " + prefix[at:]
-}
-
-func prefixHasFlag(prefix, flag string) bool {
-	for _, word := range strings.Fields(prefix) {
-		if word == flag || strings.HasPrefix(word, flag+"=") {
-			return true
-		}
+	out = append(out, "exec")
+	if noStdout {
+		out = append(out, "--no-stdout")
 	}
-	return false
-}
-
-func execTokenStart(prefix string) int {
-	i := 0
-	for i < len(prefix) {
-		for i < len(prefix) && (prefix[i] == ' ' || prefix[i] == '\t') {
-			i++
-		}
-		start := i
-		for i < len(prefix) && prefix[i] != ' ' && prefix[i] != '\t' {
-			i++
-		}
-		if start == i {
-			return -1
-		}
-		if prefix[start:i] == "exec" {
-			return start
-		}
-	}
-	return -1
+	out = append(out, kept[execAt+1:]...)
+	return strings.Join(out, " ")
 }

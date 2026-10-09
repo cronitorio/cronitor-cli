@@ -44,6 +44,8 @@ func TestWrapDetection(t *testing.T) {
 		{"cronitor-helper", `0 * * * * cronitor-helper exec abc /bin/true`, "", "cronitor-helper exec abc /bin/true", false},
 		{"discover subcommand", `30 * * * * cronitor discover /etc/crontab`, "", "cronitor discover /etc/crontab", false},
 		{"simple quotes kept", `0 * * * * cronitor exec abc echo "hi there"`, "abc", `echo "hi there"`, true},
+		{"quoted simple word kept", `0 * * * * cronitor exec k1 'my script.sh'`, "k1", `'my script.sh'`, true},
+		{"escaped word kept", `0 * * * * cronitor exec k1 \%`, "k1", `\%`, true},
 		{"quoted key", `0 * * * * cronitor exec 'k1' /bin/true`, "k1", "/bin/true", true},
 		{"unknown dash token is the key", `0 * * * * cronitor exec -zzz k1`, "-zzz", "k1", true},
 	}
@@ -104,8 +106,9 @@ func TestComplexCommandRoundTrip(t *testing.T) {
 }
 
 func TestFlagTablesAndFallback(t *testing.T) {
+	// The exec arg scanner pings the first "exec", which here is the flag value.
 	value := parseJobLine(t, `0 * * * * cronitor --env exec exec realkey /bin/true`)
-	if value.Code != "realkey" || value.CommandToRun != "/bin/true" {
+	if value.Code != "exec" || value.CommandToRun != "realkey /bin/true" {
 		t.Fatalf("value flag: code=%q command=%q", value.Code, value.CommandToRun)
 	}
 
@@ -130,6 +133,33 @@ func TestFlagTablesAndFallback(t *testing.T) {
 	}
 }
 
+func TestDoubleBackslashPercentIsStdin(t *testing.T) {
+	// cronie: a backslash escapes the next byte, so \\% is a literal \ then a bare %.
+	body, stdin := splitCronStdin(`echo \\%hello`)
+	if body != `echo \\` || stdin != `%hello` {
+		t.Fatalf(`\\%% split body=%q stdin=%q`, body, stdin)
+	}
+}
+
+func TestQuotedWordRoundTrip(t *testing.T) {
+	originalEnv := viper.GetString("CRONITOR_ENV")
+	viper.Set("CRONITOR_ENV", "")
+	t.Cleanup(func() { viper.Set("CRONITOR_ENV", originalEnv) })
+
+	lines := []string{
+		`0 * * * * cronitor exec k1 'my script.sh'`,
+		`0 * * * * cronitor exec k1 \%`,
+	}
+	for _, line := range lines {
+		t.Run(line, func(t *testing.T) {
+			written := strings.TrimSpace(parseContent(t, line).Write())
+			if written != line {
+				t.Fatalf("quoted word changed\n got %s\nwant %s", written, line)
+			}
+		})
+	}
+}
+
 func TestUnwrappedPercentRoundTrip(t *testing.T) {
 	lines := []string{
 		`0 * * * * cat%hello`,
@@ -138,6 +168,7 @@ func TestUnwrappedPercentRoundTrip(t *testing.T) {
 		`0 * * * * date +\%Y`,
 		`0 * * * * echo 100\%`,
 		`0 * * * * printf '\%s\n' x%more`,
+		`0 * * * * echo \\%hello`,
 	}
 	for _, line := range lines {
 		t.Run(line, func(t *testing.T) {
@@ -164,6 +195,8 @@ func TestWrappedPercentMatchesOriginal(t *testing.T) {
 		`cd /tmp && date +\%Y`,
 		`echo 100\% && true`,
 		`printf '\%s\n' x%more`,
+		`echo \\%hello`,
+		`cd /tmp && cat%hello world`,
 	}
 	for _, command := range commands {
 		t.Run(command, func(t *testing.T) {
@@ -171,7 +204,7 @@ func TestWrappedPercentMatchesOriginal(t *testing.T) {
 			job := jobLines(ct)[0]
 			job.Code = "k1"
 			w1 := ct.Write()
-			if strings.Contains(w1, `\\%`) {
+			if strings.Contains(w1, `\\%`) && !strings.Contains(command, `\\%`) {
 				t.Fatalf("double escaped:\n%s", w1)
 			}
 			w2 := parseContent(t, w1).Write()
@@ -195,23 +228,23 @@ func TestSyncFlagsMergeIntoPrefix(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{
 			`0 * * * * cronitor exec k1 /bin/true`,
-			`0 * * * * cronitor --env prod --no-stdout exec k1 /bin/true`,
+			`0 * * * * cronitor --env prod exec --no-stdout k1 /bin/true`,
 		},
 		{
 			`5 * * * * /opt/cronitor --env staging -c alt.json exec k2 /bin/echo hello`,
-			`5 * * * * /opt/cronitor --env staging -c alt.json --no-stdout exec k2 /bin/echo hello`,
+			`5 * * * * /opt/cronitor --env staging -c alt.json exec --no-stdout k2 /bin/echo hello`,
 		},
 		{
 			`10 * * * * /opt/cronitor --env staging -c alt.json --no-stdout exec k3 /bin/true`,
-			`10 * * * * /opt/cronitor --env staging -c alt.json --no-stdout exec k3 /bin/true`,
+			`10 * * * * /opt/cronitor --env staging -c alt.json exec --no-stdout k3 /bin/true`,
 		},
 		{
 			`15 * * * * cronitor --no-stdout exec k4 /bin/true`,
-			`15 * * * * cronitor --no-stdout --env prod exec k4 /bin/true`,
+			`15 * * * * cronitor --env prod exec --no-stdout k4 /bin/true`,
 		},
 		{
 			`20 * * * * /opt/cronitor   --env staging exec k5 /bin/true`,
-			`20 * * * * /opt/cronitor   --env staging --no-stdout exec k5 /bin/true`,
+			`20 * * * * /opt/cronitor --env staging exec --no-stdout k5 /bin/true`,
 		},
 	}
 	for _, tc := range cases {
@@ -438,34 +471,37 @@ func commandFieldOf(crontabLine string) string {
 // cronieCommand splits a crontab command the way cronie does. \% becomes %,
 // a bare % ends the command, and \\% does not escape the percent.
 func cronieCommand(field string) (command, stdin string) {
-	b := []byte(field)
+	body, rest := splitCronStdin(field)
+	command = unescapeCronPercent(body)
+	if rest == "" {
+		return command, ""
+	}
+	return command, cronieStdin(rest[1:])
+}
+
+func unescapeCronPercent(body string) string {
+	var b strings.Builder
 	escaped := false
-	p := 0
-	for i := 0; i < len(b); i++ {
-		ch := b[i]
-		if p != i {
-			b[p] = ch
-		}
+	for i := 0; i < len(body); i++ {
+		ch := body[i]
 		if escaped {
-			if ch == '%' {
-				p--
-				b[p] = '%'
+			if ch != '%' {
+				b.WriteByte('\\')
 			}
+			b.WriteByte(ch)
 			escaped = false
-			p++
 			continue
 		}
 		if ch == '\\' {
 			escaped = true
-			p++
 			continue
 		}
-		if ch == '%' {
-			return string(b[:p]), cronieStdin(string(b[i+1:]))
-		}
-		p++
+		b.WriteByte(ch)
 	}
-	return string(b[:p]), ""
+	if escaped {
+		b.WriteByte('\\')
+	}
+	return b.String()
 }
 
 func cronieStdin(rest string) string {
@@ -497,10 +533,13 @@ func cronieStdin(rest string) string {
 
 func cronieRun(t *testing.T, field string) string {
 	t.Helper()
-	command, stdin := cronieCommand(field)
-	if code, inner, _, _, ok := unwrapCronitorExec(command); ok && code != "" {
+	// Peel a cronitor wrap from the raw field first. Percent unescaping runs
+	// on the job command, the same order cron uses.
+	command := field
+	if code, inner, _, _, ok := unwrapCronitorExec(field); ok && code != "" {
 		command = inner
 	}
+	command, stdin := cronieCommand(command)
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not available")
 	}
