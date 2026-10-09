@@ -276,21 +276,55 @@ func makeCronLikeEnv() []string {
 	return env
 }
 
+// makeSubcommandExec starts the monitored command.
+//
+// Unix: cron exports SHELL into the job (default /bin/sh when the crontab does
+// not set it). An interactive login shell is a different variable — the user's
+// own $SHELL — and is not what cron put in the environment. Honor SHELL only
+// when it is set, absolute, and executable; otherwise keep the historical
+// bash-then-sh fallback. Jobs that depended on cronitor always using bash need
+// SHELL=/bin/bash in the crontab.
+//
+// Windows always uses powershell.exe -Command.
 func makeSubcommandExec(subcommand string) *exec.Cmd {
-	var execCmd *exec.Cmd
+	name, flag := interpreterForExec(runtime.GOOS, os.Getenv("SHELL"), os.Stat)
 	if runtime.GOOS == "windows" {
-		return exec.Command("powershell.exe", "-Command", subcommand)
+		return exec.Command(name, flag, subcommand)
 	}
 
-	if _, err := os.Stat("/bin/bash"); err == nil {
-		execCmd = exec.Command("bash", "-c", subcommand)
-	} else {
-		execCmd = exec.Command("sh", "-c", subcommand)
-	}
-
+	execCmd := exec.Command(name, flag, subcommand)
 	execCmd.SysProcAttr = getPlatformSysProcAttr()
-
 	return execCmd
+}
+
+// interpreterForExec selects the program and its command flag.
+// stat is os.Stat in production and a fake in tests.
+func interpreterForExec(goos, shellEnv string, stat func(string) (os.FileInfo, error)) (name, flag string) {
+	if goos == "windows" {
+		return "powershell.exe", "-Command"
+	}
+	if usableShell(shellEnv, stat) {
+		return strings.TrimSpace(shellEnv), "-c"
+	}
+	if _, err := stat("/bin/bash"); err == nil {
+		return "bash", "-c"
+	}
+	return "sh", "-c"
+}
+
+// usableShell reports whether shellEnv is safe to exec as the crontab shell.
+// Relative paths are rejected so a login-shell name or a PATH lookup cannot
+// override the bash/sh fallback.
+func usableShell(shellEnv string, stat func(string) (os.FileInfo, error)) bool {
+	shellEnv = strings.TrimSpace(shellEnv)
+	if shellEnv == "" || !filepath.IsAbs(shellEnv) {
+		return false
+	}
+	info, err := stat(shellEnv)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return info.Mode().Perm()&0111 != 0
 }
 
 func getTempFile() (*os.File, error) {

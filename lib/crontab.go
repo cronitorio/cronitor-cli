@@ -195,6 +195,14 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			}
 		}
 
+		// Raw command text, quote characters included. strings.Fields is only used to
+		// find the schedule prefix; it splits inside quotes and cannot round-trip
+		// a wrapped complex command.
+		var rawCommand string
+		if cronExpression != "" {
+			rawCommand = skipWSFields(fullLine, len(strings.Fields(cronExpression)))
+		}
+
 		// Try to determine if the command begins with a "run as" user designation. This is required for system-level crontabs.
 		// Basically, just see if the first word of the command is a valid user name. This is how vixie cron does it.
 		// https://github.com/rhuitl/uClinux/blob/master/user/vixie-cron/entry.c#L224
@@ -203,6 +211,7 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			if _, err := strconv.Atoi(strings.TrimSpace(string(idOrError))); err == nil {
 				runAs = command[0]
 				command = command[1:]
+				rawCommand = skipWSFields(rawCommand, 1)
 			}
 		}
 
@@ -219,19 +228,22 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			Crontab:        c.lightweightCopy(),
 		}
 
-		// If this job is already being wrapped by the Cronitor client, read current code.
-		// Expects a wrapped command to look like: cronitor exec d3x0 /path/to/cmd.sh
-		if len(command) > 1 && strings.HasSuffix(command[0], "cronitor") && command[1] == "exec" {
-			line.Code = command[2]
-			command = command[3:]
-		}
+		// If this job is already wrapped, peel off `cronitor [flags...] exec <key>`.
+		// Flags may precede exec (--env, --no-stdout, other persistent flags).
+		if code, unwrapped, noStdout, ok := unwrapCronitorExec(rawCommand); ok {
+			line.Code = code
+			line.CommandToRun = unwrapped
+			if noStdout {
+				line.Mon.NoStdoutPassthru = true
+			}
+		} else {
+			line.CommandToRun = strings.Join(command, " ")
 
-		line.CommandToRun = strings.Join(command, " ")
-
-		// If the command appears to be quoted (starts and ends with quotes), unquote it
-		if strings.HasPrefix(line.CommandToRun, "\"") && strings.HasSuffix(line.CommandToRun, "\"") {
-			line.CommandToRun = strings.Trim(line.CommandToRun, "\"")
-			line.CommandToRun = strings.Replace(line.CommandToRun, "\\\"", "\"", -1)
+			// If the command appears to be quoted (starts and ends with quotes), unquote it
+			if strings.HasPrefix(line.CommandToRun, "\"") && strings.HasSuffix(line.CommandToRun, "\"") {
+				line.CommandToRun = strings.Trim(line.CommandToRun, "\"")
+				line.CommandToRun = strings.Replace(line.CommandToRun, "\\\"", "\"", -1)
+			}
 		}
 
 		if line.IsAutoDiscoverCommand() {
@@ -452,7 +464,7 @@ func (l Line) IsMetaCronJob() bool {
 }
 
 func (l Line) CommandIsComplex() bool {
-	return strings.Contains(l.CommandToRun, ";") || strings.Contains(l.CommandToRun, "|") || strings.Contains(l.CommandToRun, "&&") || strings.Contains(l.CommandToRun, "||")
+	return commandIsComplex(l.CommandToRun)
 }
 
 func (l Line) Write() string {
@@ -476,45 +488,46 @@ func (l Line) Write() string {
 		} else {
 			lineParts = append(lineParts, l.FullLine)
 		}
-	} else {
-		// If this line is marked as a comment, ensure it is commented out in the crontab
-		if l.IsComment {
-			lineParts = append(lineParts, "#")
-		}
-
-		lineParts = append(lineParts, l.CronExpression)
-
-		if !l.Crontab.IsUserCrontab {
-			lineParts = append(lineParts, l.RunAs)
-		}
-
-		if code := l.GetCode(); code != "" {
-			lineParts = append(lineParts, "cronitor")
-
-			// Add the --env flag if environment is set
-			if env := viper.GetString("CRONITOR_ENV"); env != "" {
-				lineParts = append(lineParts, "--env")
-				lineParts = append(lineParts, env)
-			}
-
-			if l.Mon.NoStdoutPassthru {
-				lineParts = append(lineParts, "--no-stdout")
-			}
-			lineParts = append(lineParts, "exec")
-			lineParts = append(lineParts, code)
-
-			if len(l.CommandToRun) > 0 {
-				if l.CommandIsComplex() {
-					lineParts = append(lineParts, "\""+strings.Replace(l.CommandToRun, "\"", "\\\"", -1)+"\"")
-				} else {
-					lineParts = append(lineParts, l.CommandToRun)
-				}
-			}
-		} else {
-			lineParts = append(lineParts, l.CommandToRun)
-		}
+		outputLines = append(outputLines, strings.TrimSpace(strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)))
+		return strings.Join(outputLines, "\n")
 	}
 
+	// If this line is marked as a comment, ensure it is commented out in the crontab
+	if l.IsComment {
+		lineParts = append(lineParts, "#")
+	}
+
+	lineParts = append(lineParts, l.CronExpression)
+
+	if !l.Crontab.IsUserCrontab && l.RunAs != "" {
+		lineParts = append(lineParts, l.RunAs)
+	}
+
+	if code := l.GetCode(); code != "" {
+		lineParts = append(lineParts, "cronitor")
+
+		// Add the --env flag if environment is set
+		if env := viper.GetString("CRONITOR_ENV"); env != "" {
+			lineParts = append(lineParts, "--env")
+			lineParts = append(lineParts, env)
+		}
+
+		if l.Mon.NoStdoutPassthru {
+			lineParts = append(lineParts, "--no-stdout")
+		}
+		lineParts = append(lineParts, "exec")
+		lineParts = append(lineParts, code)
+
+		if len(l.CommandToRun) > 0 {
+			// Quoted as one shell word when complex, so the outer shell does not
+			// eat pipes and lists. Do not collapse spaces inside that word.
+			lineParts = append(lineParts, formatWrappedCommand(l.CommandToRun))
+		}
+		outputLines = append(outputLines, strings.TrimSpace(strings.Join(lineParts, " ")))
+		return strings.Join(outputLines, "\n")
+	}
+
+	lineParts = append(lineParts, l.CommandToRun)
 	outputLines = append(outputLines, strings.TrimSpace(strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)))
 	return strings.Join(outputLines, "\n")
 }
