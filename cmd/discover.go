@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"runtime"
@@ -113,6 +114,8 @@ var existingMonitors = ExistingMonitors{}
 var processingMultipleCrontabs = false
 var userAbortedSync = false // Set to true when user presses Ctrl+D to abort sync entirely
 var syncFile string         // Path to YAML/JSON file for bulk monitor import
+var execStyle bool          // --exec-style: write cronitor exec lines
+var convertToShim bool      // --convert-to-shim: convert existing exec lines
 
 // To deprecate this feature we are hijacking this flag that will trigger removal of auto-discover lines from existing user's crontabs.
 var noAutoDiscover = true
@@ -161,6 +164,8 @@ Example where you perform a dry-run without any crontab modifications:
   $ cronitor sync /path/to/crontab --dry-run
       > Steps line by line, creates or updates monitors
       > Checks permissions to ensure integration can be applied later
+
+On Unix, new jobs use a SHELL shim (MONITORIO=<key>). --exec-style writes cronitor exec. --convert-to-shim converts flag-free exec lines. Windows stays exec.
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
 
@@ -180,6 +185,12 @@ Example where you perform a dry-run without any crontab modifications:
 
 		if len(viper.GetString(varApiKey)) < 10 {
 			fatal(discoverMissingAPIKeyGuidance(), 1)
+		}
+		if err := validateShellShimFlags(); err != nil {
+			fatal(err.Error(), 1)
+		}
+		if runtime.GOOS == "windows" && (execStyle || convertToShim) {
+			printWarningText("The shell shim is Unix-only. Sync keeps cronitor exec lines.", false)
 		}
 
 		// Handle --file flag for bulk monitor import from YAML/JSON file
@@ -356,6 +367,88 @@ func importMonitorsFromFile(filePath string) {
 	}
 
 	printSuccessText("View your dashboard: https://cronitor.io/app/dashboard", false)
+}
+
+func validateShellShimFlags() error {
+	if execStyle && convertToShim {
+		return errors.New("--exec-style and --convert-to-shim cannot be used together")
+	}
+	return nil
+}
+
+func configureShellShim(crontab *lib.Crontab) error {
+	if runtime.GOOS == "windows" {
+		crontab.WriteMode = lib.WriteModeLegacy
+		return nil
+	}
+	switch {
+	case execStyle:
+		crontab.WriteMode = lib.WriteModeExec
+	case convertToShim:
+		crontab.WriteMode = lib.WriteModeConvertToShim
+	default:
+		crontab.WriteMode = lib.WriteModeShim
+	}
+	if noStdoutPassthru {
+		crontab.RewriteShimToExec = true
+	}
+	stop, notices := crontab.ShimNotices()
+	for _, notice := range notices {
+		fmt.Fprintln(os.Stderr, notice)
+	}
+	if stop {
+		crontab.WriteMode = lib.WriteModeLegacy
+		if !noStdoutPassthru {
+			crontab.RewriteShimToExec = false
+		}
+		return nil
+	}
+	if crontab.WriteMode == lib.WriteModeShim && syncFlagsBlockShim() {
+		crontab.BlockNewShim = true
+	}
+	if !crontab.EmitsShim() {
+		return nil
+	}
+	path := lib.ResolveShimInstallPath()
+	crontab.ShimShellPath = path
+	if dryRun {
+		return nil
+	}
+	if _, err := lib.InstallShimWrapper(path, cronitorExecutable()); err != nil {
+		return fmt.Errorf("cannot install shell shim at %s: %w", path, err)
+	}
+	return nil
+}
+
+func syncFlagsBlockShim() bool {
+	for _, name := range []string{"api-key", "hostname", "env"} {
+		if f := RootCmd.PersistentFlags().Lookup(name); f != nil && f.Changed {
+			return true
+		}
+	}
+	return noStdoutPassthru || viper.GetString("CRONITOR_ENV") != ""
+}
+
+func cronitorExecutable() string {
+	return invokedExecutable(os.Args[0], exec.LookPath, os.Getwd)
+}
+
+func invokedExecutable(arg0 string, lookPath func(string) (string, error), getwd func() (string, error)) string {
+	slash := strings.Contains(arg0, "/") || strings.Contains(arg0, string(filepath.Separator))
+	if slash {
+		if filepath.IsAbs(arg0) {
+			return arg0
+		}
+		wd, err := getwd()
+		if err != nil {
+			return arg0
+		}
+		return filepath.Join(wd, arg0)
+	}
+	if p, err := lookPath(arg0); err == nil && p != "" {
+		return p
+	}
+	return arg0
 }
 
 func processCrontab(crontab *lib.Crontab) bool {
@@ -543,6 +636,15 @@ func processCrontab(crontab *lib.Crontab) bool {
 		if updatedMonitor, exists := monitors[key]; exists {
 			line.ApplyDiscoveredMonitor(*updatedMonitor)
 		}
+	}
+
+	if err := configureShellShim(crontab); err != nil {
+		if !isSilent {
+			printErrorText(err.Error(), true)
+		} else {
+			fmt.Fprintln(os.Stderr, err.Error())
+		}
+		return false
 	}
 
 	// Re-write crontab lines with new/updated monitoring
@@ -870,6 +972,8 @@ func init() {
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")
 	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Do not use an interactive shell. Write updated crontab to stdout.")
+	discoverCmd.Flags().BoolVar(&convertToShim, "convert-to-shim", false, "Convert existing cronitor exec lines to MONITORIO=<key> shell-shim lines. Lines with flags the marker cannot express are skipped. Idempotent.")
+	discoverCmd.Flags().BoolVar(&execStyle, "exec-style", false, "Write new lines as cronitor exec and revert MONITORIO lines. When no MONITORIO lines remain, restore the prior SHELL.")
 	discoverCmd.Flags().StringVar(&syncFile, "file", "", "Path to YAML or JSON file containing monitor definitions for bulk import")
 
 	discoverCmd.Flags().BoolVar(&isSilent, "silent", isSilent, "")

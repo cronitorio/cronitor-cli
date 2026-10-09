@@ -165,6 +165,15 @@ func sendPing(endpoint string, uniqueIdentifier string, message string, series s
 	if group != nil {
 		defer group.Done()
 	}
+	defer finishTelemetry()
+	defer func() {
+		if rec := recover(); rec != nil {
+			log(fmt.Sprintf("ping recovered: %v", rec))
+		}
+	}()
+	if telemetryTestHook != nil {
+		telemetryTestHook()
+	}
 
 	Client := &http.Client{
 		Timeout: time.Second * 10,

@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -108,7 +109,11 @@ Example with no command output send to Cronitor:
 	},
 }
 
-func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) int {
+func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, explicitShell ...string) int {
+	shell := ""
+	if len(explicitShell) > 0 {
+		shell = explicitShell[0]
+	}
 	var monitoringWaitGroup sync.WaitGroup
 
 	startTime := makeStamp()
@@ -130,7 +135,11 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 		env = makeCronLikeEnv()
 	}
 	env = append(env, "CRONITOR_EXEC=1")
-	execCmd := makeSubcommandExec(subcommand, env)
+	env = dropEnv(env, "CRONITOR_SHIM_FD")
+	if shell != "" {
+		env = setEnv(env, "SHELL", shell)
+	}
+	execCmd := makeSubcommandExecWithShell(subcommand, shell, env)
 	execCmd.Env = env
 
 	// Handle stdin to the subcommand - improved pipe handling
@@ -140,6 +149,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 	} else {
 		defer execCmdStdin.Close()
 		go func() {
+			defer func() { recover() }()
 			defer execCmdStdin.Close()
 			io.Copy(execCmdStdin, os.Stdin)
 		}()
@@ -161,20 +171,32 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 
 	// Invoke subcommand and send a message when it's done
 	waitCh := make(chan error, 16)
+	var jobs jobSignal
+	var plainProc atomic.Pointer[os.Process]
 	go func() {
 		defer close(waitCh)
 
-		// Brief pause to allow gochannel selects
 		time.Sleep(20 * time.Millisecond)
+
+		if shell != "" {
+			commitShimHandshake()
+			if shimAfterHandshake != nil {
+				shimAfterHandshake()
+			}
+		}
 
 		if err := execCmd.Start(); err != nil {
 			waitCh <- err
-		} else {
-			waitCh <- execCmd.Wait()
+			return
 		}
+		if shell != "" {
+			jobs.started(execCmd.Process)
+		} else {
+			plainProc.Store(execCmd.Process)
+		}
+		waitCh <- execCmd.Wait()
 	}()
 
-	// Improved signal handling
 	sigChan := make(chan os.Signal, 16)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(sigChan)
@@ -182,14 +204,16 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 	for {
 		select {
 		case sig := <-sigChan:
-			// Stop listening for signals once process exits
-			if execCmd.Process == nil {
+			if shell != "" {
+				jobs.deliver(sig)
+				continue
+			}
+			proc := plainProc.Load()
+			if proc == nil {
 				signal.Stop(sigChan)
 				continue
 			}
-
-			if err := execCmd.Process.Signal(sig); err != nil {
-				// Process may have already exited, stop listening for signals
+			if err := proc.Signal(sig); err != nil {
 				signal.Stop(sigChan)
 			}
 
@@ -240,10 +264,17 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 				// Cribbed from aws-vault.
 				if exiterr, ok := err.(*exec.ExitError); ok {
 					if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-						exitCode = status.ExitStatus()
+						if shell != "" {
+							exitCode = exitStatusOf(status)
+						} else {
+							exitCode = status.ExitStatus()
+						}
 					} else {
 						exitCode = 1
 					}
+				} else if shell != "" {
+					fmt.Fprintf(os.Stderr, "shell-shim: %s: %v\n", shell, err)
+					exitCode = 127
 				}
 
 				if withMonitoring {
@@ -256,7 +287,11 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 				}
 			}
 
-			monitoringWaitGroup.Wait()
+			if shell != "" {
+				waitForTelemetry(&monitoringWaitGroup, 3*time.Second)
+			} else {
+				monitoringWaitGroup.Wait()
+			}
 			return exitCode
 		}
 	}
@@ -290,6 +325,15 @@ func makeSubcommandExec(subcommand string, env []string) *exec.Cmd {
 	execCmd := exec.Command(name, flag, subcommand)
 	execCmd.SysProcAttr = getPlatformSysProcAttr()
 	return execCmd
+}
+
+func makeSubcommandExecWithShell(subcommand, explicitShell string, env []string) *exec.Cmd {
+	if explicitShell == "" {
+		return makeSubcommandExec(subcommand, env)
+	}
+	cmd := exec.Command(explicitShell, "-c", subcommand)
+	cmd.SysProcAttr = getPlatformSysProcAttr()
+	return cmd
 }
 
 // interpreterForExec selects the program and its command flag.
@@ -421,10 +465,70 @@ func isStaleFile(file os.FileInfo) bool {
 }
 
 func shipLogData(tempFile *os.File, series string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	defer finishTelemetry()
+	defer func() {
+		if rec := recover(); rec != nil {
+			log(fmt.Sprintf("log upload recovered: %v", rec))
+		}
+	}()
 	outputForLogs := gatherOutput(tempFile, false)
 	_, err := lib.SendLogData(viper.GetString(varApiKey), monitorCode, series, string(outputForLogs))
 	if err != nil {
 		log(fmt.Sprintf("%v", err))
 	}
-	wg.Done()
+}
+
+func waitForTelemetry(wg *sync.WaitGroup, bound time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(bound):
+	}
+}
+
+type jobSignal struct {
+	mu   sync.Mutex
+	sig  os.Signal
+	proc *os.Process
+}
+
+func (j *jobSignal) deliver(sig os.Signal) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.proc == nil {
+		j.sig = sig
+		return
+	}
+	signalJob(j.proc, sig)
+}
+
+func (j *jobSignal) started(proc *os.Process) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.proc = proc
+	if j.sig != nil {
+		signalJob(proc, j.sig)
+		j.sig = nil
+	}
+}
+
+func setEnv(env []string, key, value string) []string {
+	return append(dropEnv(env, key), key+"="+value)
+}
+
+func dropEnv(env []string, key string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
 }
