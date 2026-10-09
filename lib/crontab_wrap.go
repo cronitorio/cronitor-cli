@@ -1,24 +1,17 @@
 package lib
 
 import (
-	"bytes"
 	"path"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/kballard/go-shellquote"
 )
 
-// commandIsComplex reports whether the shell, not cronitor, would interpret
-// control operators if the command were left unquoted.
 func commandIsComplex(command string) bool {
 	return strings.Contains(command, ";") || strings.Contains(command, "|") || strings.Contains(command, "&&") || strings.Contains(command, "||")
 }
 
-// formatWrappedCommand renders CommandToRun as the trailing token of a
-// `cronitor exec` line. Complex commands are one shell word so the outer shell
-// does not split on ; | && ||. Every % is written as \% because cron treats an
-// unescaped % as newline-plus-stdin.
+// formatWrappedCommand quotes complex commands as one shell word and writes % as \%.
 func formatWrappedCommand(command string) string {
 	var formatted string
 	if commandIsComplex(command) {
@@ -26,12 +19,23 @@ func formatWrappedCommand(command string) string {
 	} else {
 		formatted = strings.Join(strings.Fields(command), " ")
 	}
-	return strings.ReplaceAll(formatted, "%", "\\%")
+	return escapeCronPercents(formatted)
 }
 
-// skipWSFields returns the remainder of s after n whitespace-separated fields.
-// Cron schedule fields are unquoted, so this does not have to understand shell quotes.
+func escapeCronPercents(s string) string {
+	return strings.ReplaceAll(s, "%", "\\%")
+}
+
+func unescapeCronPercents(s string) string {
+	return strings.ReplaceAll(s, "\\%", "%")
+}
+
 func skipWSFields(s string, n int) string {
+	_, tail := cutAfterFields(s, n)
+	return tail
+}
+
+func cutAfterFields(s string, n int) (prefix, tail string) {
 	i := 0
 	for field := 0; field < n && i < len(s); field++ {
 		for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
@@ -41,14 +45,13 @@ func skipWSFields(s string, n int) string {
 			i++
 		}
 	}
+	prefix = strings.TrimRight(s[:i], " \t")
 	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
 		i++
 	}
-	return s[i:]
+	return prefix, s[i:]
 }
 
-// Persistent flags that take a value. Bool flags and anything unknown use a
-// heuristic so a future flag still doesn't swallow `exec` or the monitor key.
 var cronitorValueFlags = map[string]bool{
 	"config": true, "c": true,
 	"env":     true,
@@ -68,63 +71,46 @@ var cronitorBoolFlags = map[string]bool{
 	"help":      true, "h": true,
 }
 
-// unwrapCronitorExec reports whether raw is `cronitor [flags...] exec <key> [command]`.
-// The binary may be a path (…/cronitor, ./cronitor, cronitor.exe). noStdout is set
-// when --no-stdout was present so a later Write emits the same flag.
-func unwrapCronitorExec(raw string) (code, command string, noStdout, ok bool) {
+// unwrapCronitorExec parses `cronitor [flags] exec [flags] <key> [command]`.
+// prefix is the original text through the key so Write can emit it unchanged.
+func unwrapCronitorExec(raw string) (code, command, prefix string, noStdout, ok bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", "", false, false
+		return "", "", "", false, false
 	}
 
-	// Cron stores a literal % as \%. Undo that before shell splitting so the
-	// command we keep is the one the shell runs, and Write can escape it again.
-	logical := strings.ReplaceAll(raw, "\\%", "%")
-	words, ends, err := splitShellWords(logical)
-	if err != nil {
-		code, cmdWords, _, noStdout, found := detectCronitorWrap(strings.Fields(raw))
-		if !found {
-			return "", "", false, false
-		}
-		return code, strings.Join(cmdWords, " "), noStdout, true
+	logical := unescapeCronPercents(raw)
+	var keyIndex int
+	code, keyIndex, noStdout, ok = detectCronitorWrap(strings.Fields(logical))
+	if !ok {
+		return "", "", "", false, false
 	}
-
-	code, cmdWords, keyIndex, noStdout, found := detectCronitorWrap(words)
-	if !found {
-		return "", "", false, false
-	}
-	if len(cmdWords) == 0 {
-		return code, "", noStdout, true
-	}
-	// A single shell word is how complex commands are quoted. Multiple words
-	// keep the raw tail so quote characters that are part of a simple command
-	// (echo "hi there") survive.
-	if len(cmdWords) == 1 {
-		return code, cmdWords[0], noStdout, true
-	}
-	if keyIndex < len(ends) {
-		tail := strings.TrimSpace(logical[ends[keyIndex]:])
-		return code, strings.Join(strings.Fields(tail), " "), noStdout, true
-	}
-	return code, strings.Join(cmdWords, " "), noStdout, true
+	prefix, tail := cutAfterFields(raw, keyIndex+1)
+	return code, commandFromTail(unescapeCronPercents(tail)), prefix, noStdout, true
 }
 
-func detectCronitorWrap(words []string) (code string, commandWords []string, keyIndex int, noStdout, ok bool) {
+func commandFromTail(tail string) string {
+	tail = strings.TrimSpace(tail)
+	if tail == "" {
+		return ""
+	}
+	words, err := shellquote.Split(tail)
+	if err != nil || len(words) != 1 {
+		return strings.Join(strings.Fields(tail), " ")
+	}
+	return words[0]
+}
+
+func detectCronitorWrap(words []string) (code string, keyIndex int, noStdout, ok bool) {
 	if len(words) < 3 || !isCronitorBinary(words[0]) {
-		return "", nil, 0, false, false
+		return "", 0, false, false
 	}
 
 	i := 1
-	for i < len(words) {
+	for i < len(words) && words[i] != "exec" {
 		tok := words[i]
-		if tok == "exec" {
-			if i+1 >= len(words) {
-				return "", nil, 0, false, false
-			}
-			return words[i+1], words[i+2:], i + 1, noStdout, true
-		}
 		if !isCLIFlag(tok) {
-			return "", nil, 0, false, false
+			return "", 0, false, false
 		}
 		if tok == "--no-stdout" {
 			noStdout = true
@@ -135,7 +121,34 @@ func detectCronitorWrap(words []string) (code string, commandWords []string, key
 		}
 		i++
 	}
-	return "", nil, 0, false, false
+	if i >= len(words) || words[i] != "exec" {
+		return "", 0, false, false
+	}
+	i++
+	for i < len(words) && isExecArgFlag(words[i]) {
+		if words[i] == "--no-stdout" {
+			noStdout = true
+		}
+		i++
+	}
+	if i >= len(words) {
+		return "", 0, false, false
+	}
+	return words[i], i, noStdout, true
+}
+
+func isExecArgFlag(tok string) bool {
+	if tok == "--" || tok == "-" {
+		return true
+	}
+	if strings.Contains(tok, "=") || !isCLIFlag(tok) {
+		return false
+	}
+	name := strings.TrimPrefix(tok, "--")
+	if name == tok {
+		name = strings.TrimPrefix(tok, "-")
+	}
+	return cronitorBoolFlags[name] || cronitorValueFlags[name]
 }
 
 func isCLIFlag(tok string) bool {
@@ -146,7 +159,7 @@ func flagConsumesNext(tok string, words []string, i int) bool {
 	if strings.Contains(tok, "=") {
 		return false
 	}
-	// Attached short option, e.g. -c/path/to/cfg.
+	// -c/path is one token and must not consume the next word.
 	if strings.HasPrefix(tok, "-") && !strings.HasPrefix(tok, "--") && len(tok) > 2 {
 		return false
 	}
@@ -168,133 +181,6 @@ func flagConsumesNext(tok string, words []string, i int) bool {
 }
 
 func isCronitorBinary(token string) bool {
-	normalized := strings.ReplaceAll(token, `\`, "/")
-	base := strings.ToLower(path.Base(normalized))
+	base := strings.ToLower(path.Base(strings.ReplaceAll(token, `\`, "/")))
 	return base == "cronitor" || base == "cronitor.exe"
-}
-
-// splitShellWords splits s with /bin/sh word rules and returns the byte offset
-// just after each word (a following delimiter, if any, is included). Word text
-// matches shellquote.Split; the offsets are how we recover a multi-word tail.
-func splitShellWords(input string) (words []string, endOffsets []int, err error) {
-	original := input
-	var buf bytes.Buffer
-	for len(input) > 0 {
-		c, l := utf8.DecodeRuneInString(input)
-		if strings.ContainsRune(" \n\t", c) {
-			input = input[l:]
-			continue
-		} else if c == '\\' {
-			next := input[l:]
-			if len(next) == 0 {
-				return nil, nil, shellquote.UnterminatedEscapeError
-			}
-			c2, l2 := utf8.DecodeRuneInString(next)
-			if c2 == '\n' {
-				input = next[l2:]
-				continue
-			}
-		}
-
-		var word string
-		word, input, err = splitShellWord(input, &buf)
-		if err != nil {
-			return nil, nil, err
-		}
-		words = append(words, word)
-		endOffsets = append(endOffsets, len(original)-len(input))
-	}
-	return words, endOffsets, nil
-}
-
-// splitShellWord is the shellquote word scanner, plus the unconsumed remainder,
-// so callers can slice the original string. Behavior matches shellquote.Split.
-func splitShellWord(input string, buf *bytes.Buffer) (word string, remainder string, err error) {
-	buf.Reset()
-
-raw:
-	{
-		cur := input
-		for len(cur) > 0 {
-			c, l := utf8.DecodeRuneInString(cur)
-			cur = cur[l:]
-			if c == '\'' {
-				buf.WriteString(input[0 : len(input)-len(cur)-l])
-				input = cur
-				goto single
-			} else if c == '"' {
-				buf.WriteString(input[0 : len(input)-len(cur)-l])
-				input = cur
-				goto double
-			} else if c == '\\' {
-				buf.WriteString(input[0 : len(input)-len(cur)-l])
-				input = cur
-				goto escape
-			} else if strings.ContainsRune(" \n\t", c) {
-				buf.WriteString(input[0 : len(input)-len(cur)-l])
-				return buf.String(), cur, nil
-			}
-		}
-		if len(input) > 0 {
-			buf.WriteString(input)
-			input = ""
-		}
-		goto done
-	}
-
-escape:
-	{
-		if len(input) == 0 {
-			return "", "", shellquote.UnterminatedEscapeError
-		}
-		c, l := utf8.DecodeRuneInString(input)
-		if c == '\n' {
-			// a backslash-escaped newline is elided from the output entirely
-		} else {
-			buf.WriteString(input[:l])
-		}
-		input = input[l:]
-	}
-	goto raw
-
-single:
-	{
-		i := strings.IndexRune(input, '\'')
-		if i == -1 {
-			return "", "", shellquote.UnterminatedSingleQuoteError
-		}
-		buf.WriteString(input[0:i])
-		input = input[i+1:]
-		goto raw
-	}
-
-double:
-	{
-		cur := input
-		for len(cur) > 0 {
-			c, l := utf8.DecodeRuneInString(cur)
-			cur = cur[l:]
-			if c == '"' {
-				buf.WriteString(input[0 : len(input)-len(cur)-l])
-				input = cur
-				goto raw
-			} else if c == '\\' {
-				c2, l2 := utf8.DecodeRuneInString(cur)
-				cur = cur[l2:]
-				if strings.ContainsRune("$`\"\n\\", c2) {
-					buf.WriteString(input[0 : len(input)-len(cur)-l-l2])
-					if c2 == '\n' {
-						// newline is special, skip the backslash entirely
-					} else {
-						buf.WriteRune(c2)
-					}
-					input = cur
-				}
-			}
-		}
-		return "", "", shellquote.UnterminatedDoubleQuoteError
-	}
-
-done:
-	return buf.String(), input, nil
 }

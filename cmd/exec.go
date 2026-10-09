@@ -125,13 +125,13 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 
 	log(fmt.Sprintf("Running subcommand: %s", subcommand))
 
-	execCmd := makeSubcommandExec(subcommand)
-	if withEnvironment {
-		execCmd.Env = os.Environ()
-	} else {
-		execCmd.Env = makeCronLikeEnv()
+	env := os.Environ()
+	if !withEnvironment {
+		env = makeCronLikeEnv()
 	}
-	execCmd.Env = append(execCmd.Env, "CRONITOR_EXEC=1")
+	env = append(env, "CRONITOR_EXEC=1")
+	execCmd := makeSubcommandExec(subcommand, env)
+	execCmd.Env = env
 
 	// Handle stdin to the subcommand - improved pipe handling
 	execCmdStdin, err := execCmd.StdinPipe()
@@ -277,24 +277,12 @@ func makeCronLikeEnv() []string {
 	return env
 }
 
-// makeSubcommandExec starts the monitored command.
-//
-// Unix shell choice, with no regression versus historical bash:
-//   - If SHELL is set, absolute, executable, and its cleaned path is not
-//     /bin/sh, use that path with -c.
-//   - Otherwise bash -c when /bin/bash exists, else sh -c.
-//
-// /bin/sh is excluded on purpose. When a crontab has no SHELL= line, cron's
-// default is /bin/sh and cron exports that value, so it is indistinguishable
-// from an explicit SHELL=/bin/sh. Honoring it would move existing jobs from
-// bash to sh and break bashisms. The tradeoff is that an explicit SHELL=/bin/sh
-// still gets bash, the same as today. A follow-up SHELL shim can honor /bin/sh
-// exactly, because it reads the crontab's SHELL rather than the inherited
-// environment.
-//
-// Windows always uses powershell.exe -Command.
-func makeSubcommandExec(subcommand string) *exec.Cmd {
-	name, flag := interpreterForExec(runtime.GOOS, os.Getenv("SHELL"), os.Stat)
+// makeSubcommandExec starts the monitored command. SHELL comes from env, the
+// environment the child receives. An absolute executable other than /bin/sh is
+// used with -c; otherwise bash -c if /bin/bash exists, else sh -c. Windows
+// uses powershell.exe -Command.
+func makeSubcommandExec(subcommand string, env []string) *exec.Cmd {
+	name, flag := interpreterForExec(runtime.GOOS, shellFromEnv(env), os.Stat)
 	if runtime.GOOS == "windows" {
 		return exec.Command(name, flag, subcommand)
 	}
@@ -336,22 +324,30 @@ func selectableShell(shellEnv string, stat func(string) (os.FileInfo, error)) (s
 	return cleaned, true
 }
 
+// shellFromEnv returns the last SHELL= value in env.
+func shellFromEnv(env []string) string {
+	shell := ""
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && key == "SHELL" {
+			shell = value
+		}
+	}
+	return shell
+}
+
 // cleanShellPath trims space and lexically cleans the path so /bin//sh and
-// /bin/../bin/sh compare equal to /bin/sh. Slash-separated cleaning is used
-// so the comparison does not depend on the host OS separator.
+// /bin/../bin/sh compare equal to /bin/sh.
 func cleanShellPath(shellEnv string) string {
 	shellEnv = strings.TrimSpace(shellEnv)
 	if shellEnv == "" {
 		return ""
 	}
-	return path.Clean(strings.ReplaceAll(shellEnv, `\`, "/"))
+	return path.Clean(shellEnv)
 }
 
 func absoluteShellPath(cleaned string) bool {
-	if strings.HasPrefix(cleaned, "/") {
-		return true
-	}
-	return filepath.IsAbs(cleaned)
+	return strings.HasPrefix(cleaned, "/")
 }
 
 func getTempFile() (*os.File, error) {

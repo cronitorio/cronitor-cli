@@ -229,10 +229,11 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 		}
 
 		// If this job is already wrapped, peel off `cronitor [flags...] exec <key>`.
-		// Flags may precede exec (--env, --no-stdout, other persistent flags).
-		if code, unwrapped, noStdout, ok := unwrapCronitorExec(rawCommand); ok {
+		// The original prefix is kept so Write does not rebuild flags or the binary path.
+		if code, unwrapped, prefix, noStdout, ok := unwrapCronitorExec(rawCommand); ok {
 			line.Code = code
 			line.CommandToRun = unwrapped
+			line.wrapPrefix = prefix
 			if noStdout {
 				line.Mon.NoStdoutPassthru = true
 			}
@@ -244,6 +245,8 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 				line.CommandToRun = strings.Trim(line.CommandToRun, "\"")
 				line.CommandToRun = strings.Replace(line.CommandToRun, "\\\"", "\"", -1)
 			}
+			// A not-yet-wrapped \% is a literal percent. Store that, and escape once on Write.
+			line.CommandToRun = unescapeCronPercents(line.CommandToRun)
 		}
 
 		if line.IsAutoDiscoverCommand() {
@@ -434,6 +437,7 @@ type Line struct {
 	Ignored        bool
 	Mon            Monitor
 	Crontab        Crontab
+	wrapPrefix     string // original cronitor prefix through the key; Write emits it verbatim
 }
 
 func (l Line) IsMonitorable() bool {
@@ -503,6 +507,15 @@ func (l Line) Write() string {
 		lineParts = append(lineParts, l.RunAs)
 	}
 
+	if l.wrapPrefix != "" {
+		lineParts = append(lineParts, l.wrapPrefix)
+		if len(l.CommandToRun) > 0 {
+			lineParts = append(lineParts, formatWrappedCommand(l.CommandToRun))
+		}
+		outputLines = append(outputLines, strings.TrimSpace(strings.Join(lineParts, " ")))
+		return strings.Join(outputLines, "\n")
+	}
+
 	if code := l.GetCode(); code != "" {
 		lineParts = append(lineParts, "cronitor")
 
@@ -527,7 +540,7 @@ func (l Line) Write() string {
 		return strings.Join(outputLines, "\n")
 	}
 
-	lineParts = append(lineParts, l.CommandToRun)
+	lineParts = append(lineParts, escapeCronPercents(l.CommandToRun))
 	outputLines = append(outputLines, strings.TrimSpace(strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)))
 	return strings.Join(outputLines, "\n")
 }
@@ -549,6 +562,18 @@ func (l Line) Key(CanonicalPath string) string {
 	hostname, _ := os.Hostname()
 	data := []byte(fmt.Sprintf("%s-%s-%s-%s", hostname, CommandToRun, CronExpression, RunAs))
 	return fmt.Sprintf("%x", sha1.Sum(data))
+}
+
+// ApplyDiscoveredMonitor copies an API monitor onto the line. NoStdoutPassthru
+// is not in the API payload, so the parsed value is kept.
+func (l *Line) ApplyDiscoveredMonitor(updated Monitor) {
+	noStdout := l.Mon.NoStdoutPassthru
+	l.Mon = updated
+	l.Mon.NoStdoutPassthru = noStdout
+	l.Code = updated.Attributes.Code
+	if updated.Name != "" {
+		l.Name = updated.Name
+	}
 }
 
 func (l Line) GetCode() string {

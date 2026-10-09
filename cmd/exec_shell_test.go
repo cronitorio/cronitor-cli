@@ -55,10 +55,10 @@ func TestInterpreterForExec(t *testing.T) {
 		{name: "windows ignores SHELL", goos: "windows", shell: "/bin/zsh", stat: statFile, wantName: "powershell.exe", wantFlag: "-Command"},
 		{name: "windows ignores empty SHELL", goos: "windows", shell: "", stat: statMissing, wantName: "powershell.exe", wantFlag: "-Command"},
 		{name: "windows ignores /bin/sh", goos: "windows", shell: "/bin/sh", stat: statFile, wantName: "powershell.exe", wantFlag: "-Command"},
-		{name: "/bin/sh keeps bash fallback", goos: "linux", shell: "/bin/sh", stat: statBash, wantName: "bash", wantFlag: "-c"},
-		{name: "cleaned /bin/sh keeps bash fallback", goos: "linux", shell: "/bin//sh", stat: statBash, wantName: "bash", wantFlag: "-c"},
-		{name: "dotdot /bin/sh keeps bash fallback", goos: "linux", shell: "/bin/../bin/sh", stat: statBash, wantName: "bash", wantFlag: "-c"},
-		{name: "padded /bin/sh keeps bash fallback", goos: "linux", shell: "  /bin/sh  ", stat: statBash, wantName: "bash", wantFlag: "-c"},
+		{name: "/bin/sh keeps bash fallback", goos: "linux", shell: "/bin/sh", stat: statFile, wantName: "bash", wantFlag: "-c"},
+		{name: "cleaned /bin/sh keeps bash fallback", goos: "linux", shell: "/bin//sh", stat: statFile, wantName: "bash", wantFlag: "-c"},
+		{name: "dotdot /bin/sh keeps bash fallback", goos: "linux", shell: "/bin/../bin/sh", stat: statFile, wantName: "bash", wantFlag: "-c"},
+		{name: "padded /bin/sh keeps bash fallback", goos: "linux", shell: "  /bin/sh  ", stat: statFile, wantName: "bash", wantFlag: "-c"},
 		{name: "/bin/sh without bash falls back to sh", goos: "linux", shell: "/bin/sh", stat: statMissing, wantName: "sh", wantFlag: "-c"},
 		{name: "/bin/zsh honored", goos: "linux", shell: "/bin/zsh", stat: statFile, wantName: "/bin/zsh", wantFlag: "-c"},
 		{name: "/usr/bin/bash honored", goos: "linux", shell: "/usr/bin/bash", stat: statFile, wantName: "/usr/bin/bash", wantFlag: "-c"},
@@ -99,16 +99,24 @@ func TestInterpreterForExec(t *testing.T) {
 
 func TestMakeSubcommandExecShell(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Setenv("SHELL", `C:\Windows\System32\bash.exe`)
-		cmd := makeSubcommandExec("Write-Output hi")
+		cmd := makeSubcommandExec("Write-Output hi", []string{`SHELL=C:\Windows\System32\bash.exe`})
 		if len(cmd.Args) < 2 || cmd.Args[0] != "powershell.exe" || cmd.Args[1] != "-Command" {
 			t.Fatalf("windows args = %q", cmd.Args)
 		}
 		return
 	}
 
-	t.Setenv("SHELL", "/bin/sh")
-	cmd := makeSubcommandExec("true")
+	script := filepath.Join(t.TempDir(), "custom-shell")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// The process SHELL is an executable the function must not consult.
+	t.Setenv("SHELL", script)
+
+	cmd := makeSubcommandExec("true", []string{"SHELL=/bin/sh"})
+	if cmd.Args[0] == script {
+		t.Fatal("SHELL=/bin/sh used the process environment")
+	}
 	if _, err := os.Stat("/bin/bash"); err == nil {
 		if cmd.Args[0] != "bash" || cmd.Args[1] != "-c" || cmd.Args[2] != "true" {
 			t.Fatalf("SHELL=/bin/sh should keep the bash fallback, args = %q", cmd.Args)
@@ -117,32 +125,24 @@ func TestMakeSubcommandExecShell(t *testing.T) {
 		t.Fatalf("SHELL=/bin/sh should fall back to sh, args = %q", cmd.Args)
 	}
 
-	script := filepath.Join(t.TempDir(), "custom-shell")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
-		t.Fatal(err)
+	cmd = makeSubcommandExec("true", makeCronLikeEnv())
+	if cmd.Args[0] == script {
+		t.Fatalf("cron-like env picked up the process SHELL, args = %q", cmd.Args)
 	}
-	t.Setenv("SHELL", script)
-	cmd = makeSubcommandExec("true")
+
+	cmd = makeSubcommandExec("true", []string{"SHELL=/bin/sh", "SHELL=" + script})
 	if cmd.Args[0] != script || cmd.Args[1] != "-c" || cmd.Args[2] != "true" {
-		t.Fatalf("absolute SHELL args = %q", cmd.Args)
+		t.Fatalf("child SHELL args = %q", cmd.Args)
 	}
 
-	t.Setenv("SHELL", "zsh")
-	cmd = makeSubcommandExec("true")
-	if _, err := os.Stat("/bin/bash"); err == nil {
-		if cmd.Args[0] != "bash" || cmd.Args[1] != "-c" {
-			t.Fatalf("relative SHELL should fall back to bash, args = %q", cmd.Args)
-		}
-	} else if cmd.Args[0] != "sh" {
-		t.Fatalf("relative SHELL should fall back to sh, args = %q", cmd.Args)
+	cmd = makeSubcommandExec("true", []string{"SHELL=zsh"})
+	if cmd.Args[0] == script || cmd.Args[0] == "zsh" {
+		t.Fatalf("relative SHELL should fall back, args = %q", cmd.Args)
 	}
 
-	t.Setenv("SHELL", "")
-	cmd = makeSubcommandExec("true")
-	if _, err := os.Stat("/bin/bash"); err == nil {
-		if cmd.Args[0] != "bash" {
-			t.Fatalf("empty SHELL args = %q", cmd.Args)
-		}
+	cmd = makeSubcommandExec("true", nil)
+	if cmd.Args[0] == script {
+		t.Fatalf("empty child env used the process SHELL, args = %q", cmd.Args)
 	}
 }
 
@@ -159,8 +159,5 @@ func (f fakeFileInfo) IsDir() bool        { return f.dir }
 func (f fakeFileInfo) Sys() any           { return nil }
 
 func testAbsPath(name string) string {
-	if runtime.GOOS == "windows" {
-		return filepath.Join(`C:\`, name)
-	}
 	return "/" + name
 }
