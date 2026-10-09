@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -124,13 +125,13 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 
 	log(fmt.Sprintf("Running subcommand: %s", subcommand))
 
-	execCmd := makeSubcommandExec(subcommand)
-	if withEnvironment {
-		execCmd.Env = os.Environ()
-	} else {
-		execCmd.Env = makeCronLikeEnv()
+	env := os.Environ()
+	if !withEnvironment {
+		env = makeCronLikeEnv()
 	}
-	execCmd.Env = append(execCmd.Env, "CRONITOR_EXEC=1")
+	env = append(env, "CRONITOR_EXEC=1")
+	execCmd := makeSubcommandExec(subcommand, env)
+	execCmd.Env = env
 
 	// Handle stdin to the subcommand - improved pipe handling
 	execCmdStdin, err := execCmd.StdinPipe()
@@ -276,21 +277,73 @@ func makeCronLikeEnv() []string {
 	return env
 }
 
-func makeSubcommandExec(subcommand string) *exec.Cmd {
-	var execCmd *exec.Cmd
+// makeSubcommandExec starts the monitored command. SHELL comes from env, the
+// environment the child receives. An absolute executable other than /bin/sh is
+// used with -c; otherwise bash -c if /bin/bash exists, else sh -c. Windows
+// uses powershell.exe -Command.
+func makeSubcommandExec(subcommand string, env []string) *exec.Cmd {
+	name, flag := interpreterForExec(runtime.GOOS, shellFromEnv(env), os.Stat)
 	if runtime.GOOS == "windows" {
-		return exec.Command("powershell.exe", "-Command", subcommand)
+		return exec.Command(name, flag, subcommand)
 	}
 
-	if _, err := os.Stat("/bin/bash"); err == nil {
-		execCmd = exec.Command("bash", "-c", subcommand)
-	} else {
-		execCmd = exec.Command("sh", "-c", subcommand)
-	}
-
+	execCmd := exec.Command(name, flag, subcommand)
 	execCmd.SysProcAttr = getPlatformSysProcAttr()
-
 	return execCmd
+}
+
+// interpreterForExec selects the program and its command flag.
+// stat is os.Stat in production and a fake in tests.
+func interpreterForExec(goos, shellEnv string, stat func(string) (os.FileInfo, error)) (name, flag string) {
+	if goos == "windows" {
+		return "powershell.exe", "-Command"
+	}
+	if shell, ok := selectableShell(shellEnv, stat); ok {
+		return shell, "-c"
+	}
+	if _, err := stat("/bin/bash"); err == nil {
+		return "bash", "-c"
+	}
+	return "sh", "-c"
+}
+
+// selectableShell reports the cleaned SHELL path when it is safe to use.
+// /bin/sh is not selectable; see makeSubcommandExec.
+func selectableShell(shellEnv string, stat func(string) (os.FileInfo, error)) (string, bool) {
+	cleaned := cleanShellPath(shellEnv)
+	if !strings.HasPrefix(cleaned, "/") || cleaned == "/bin/sh" {
+		return "", false
+	}
+	info, err := stat(cleaned)
+	if err != nil || info.IsDir() {
+		return "", false
+	}
+	if info.Mode().Perm()&0111 == 0 {
+		return "", false
+	}
+	return cleaned, true
+}
+
+// shellFromEnv returns the last SHELL= value in env.
+func shellFromEnv(env []string) string {
+	shell := ""
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && key == "SHELL" {
+			shell = value
+		}
+	}
+	return shell
+}
+
+// cleanShellPath trims space and lexically cleans the path so /bin//sh and
+// /bin/../bin/sh compare equal to /bin/sh.
+func cleanShellPath(shellEnv string) string {
+	shellEnv = strings.TrimSpace(shellEnv)
+	if shellEnv == "" {
+		return ""
+	}
+	return path.Clean(shellEnv)
 }
 
 func getTempFile() (*os.File, error) {
