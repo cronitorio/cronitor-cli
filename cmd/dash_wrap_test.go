@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/spf13/viper"
 )
 
 func TestDashDisableReenableAndKeyChange(t *testing.T) {
@@ -163,6 +164,31 @@ func TestDashShimDisableReenableAndKeyChange(t *testing.T) {
 	putDashJob(t, Job{CrontabFilename: keyed, Code: "k1", Monitored: true, Command: "/bin/true", Expression: "0 * * * *"})
 	if got := strings.TrimSpace(readCrontab(t, keyed)); got != "0 * * * * MONITORIO=NEWCODE /bin/true" {
 		t.Fatalf("key change wrote %q", got)
+	}
+
+	// Disable keeps the raw command. Re-enable must not split it on spaces.
+	quoted := filepath.Join(t.TempDir(), "crontab")
+	original := "0 * * * * MONITORIO=shimk \"/opt/my app/run.sh\" --flag \"x y\"\n"
+	if err := os.WriteFile(quoted, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	putDashJob(t, Job{CrontabFilename: quoted, Code: "shimk", Monitored: false, Command: "/opt/my app/run.sh", Expression: "0 * * * *"})
+	if got := strings.TrimSpace(readCrontab(t, quoted)); got != `0 * * * * "/opt/my app/run.sh" --flag "x y"` {
+		t.Fatalf("disable broke a quoted path: %q", got)
+	}
+	ct, err = lib.GetCrontab(quoted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key = ""
+	for _, line := range ct.Lines {
+		if line.IsJob {
+			key = line.Key(ct.CanonicalName())
+		}
+	}
+	putDashJob(t, Job{CrontabFilename: quoted, Key: key, Monitored: true, Expression: "0 * * * *"})
+	if got := strings.TrimSpace(readCrontab(t, quoted)); got != `0 * * * * cronitor exec NEWCODE "/opt/my app/run.sh" --flag "x y"` {
+		t.Fatalf("re-enable broke a quoted path: %q", got)
 	}
 }
 

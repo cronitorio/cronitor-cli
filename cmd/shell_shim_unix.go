@@ -8,10 +8,27 @@ import (
 	"syscall"
 
 	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/spf13/cobra"
 )
 
-// RunShellShim monitors a marked command exactly once. A panic before the
-// handshake leaves the wrapper to run the command; telemetry recovers on its own.
+// shellShimCmd is what the wrapper execs: cronitor shell-shim -c '<command>'.
+var shellShimCmd = &cobra.Command{
+	Use:                "shell-shim",
+	DisableFlagParsing: true,
+	Short:              "Crontab SHELL shim (invoked by cronitor-shell)",
+	Args:               cobra.ArbitraryArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		os.Exit(RunShellShim(os.Args))
+	},
+}
+
+func init() {
+	RootCmd.AddCommand(shellShimCmd)
+}
+
+// RunShellShim monitors a marked command exactly once. The wrapper does not
+// invoke cronitor for unmarked commands. A panic before the handshake leaves
+// the wrapper to run the command; telemetry recovers on its own.
 func RunShellShim(args []string) int {
 	command, ok := shellShimDashC(args)
 	shell := lib.ResolveRealShell(os.Getenv(lib.RealShellEnv))
@@ -21,14 +38,28 @@ func RunShellShim(args []string) int {
 	}
 	key, rest, monitored := lib.ParseMonitorMarker(command)
 	if !monitored {
-		return execRealShell(shell, command)
+		shellShimUsage()
+		return 127
 	}
 	monitorCode = key
-	code := RunCommandWithShell(rest, true, true, shell)
+	code := RunCommand(rest, true, true, shell)
 	if shellShimAfterJob != nil {
 		shellShimAfterJob()
 	}
 	return code
+}
+
+func shellShimDashC(args []string) (string, bool) {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "-c" {
+			return args[i+1], true
+		}
+	}
+	return "", false
+}
+
+func shellShimUsage() {
+	fmt.Fprintln(os.Stderr, "shell-shim: expected: cronitor shell-shim -c 'MONITORIO=<key> <command>'")
 }
 
 // execRealShell replaces this process with `shell -c command`.

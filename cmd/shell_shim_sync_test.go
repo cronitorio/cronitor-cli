@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/kballard/go-shellquote"
 	"github.com/spf13/viper"
 )
 
@@ -312,6 +313,9 @@ func TestSyncConvertSkipsInexpressibleFlags(t *testing.T) {
 	if !strings.Contains(stderr, "skipped") || !strings.Contains(stderr, "--env") || !strings.Contains(stderr, "--no-stdout") {
 		t.Fatalf("expected a skip notice:\n%s", stderr)
 	}
+	if !strings.Contains(stderr, "monitor k1") || strings.Contains(stderr, "line ") {
+		t.Fatalf("skip notice is not keyed by monitor code:\n%s", stderr)
+	}
 	first := readCron(t, path)
 	if !strings.Contains(first, kept+"\n") || !strings.Contains(first, kept2+"\n") {
 		t.Fatalf("flagged lines lost flags or left --no-stdout before exec:\n%s", first)
@@ -327,6 +331,9 @@ func TestSyncConvertSkipsInexpressibleFlags(t *testing.T) {
 	}
 	if strings.Contains(first, "MONITORIO=k1") || strings.Contains(first, "MONITORIO=k3") {
 		t.Fatalf("flagged line was converted:\n%s", first)
+	}
+	if again := runSync(t, serverURL, path, "--convert-to-shim"); again != stderr {
+		t.Fatalf("skip notices changed across runs\n--- first\n%s\n--- second\n%s", stderr, again)
 	}
 
 	runSync(t, serverURL, path, "--exec-style")
@@ -510,6 +517,100 @@ func TestSyncDryRunDoesNotInstallWrapper(t *testing.T) {
 	body := readCron(t, path)
 	if strings.Contains(body, "MONITORIO=") {
 		t.Fatalf("dry-run rewrote the crontab:\n%s", body)
+	}
+}
+
+func TestSyncConvertCompoundRoundTrip(t *testing.T) {
+	serverURL, shimPath := withSyncFixture(t)
+	app := t.TempDir()
+	marker := filepath.Join(app, "ran")
+	script := filepath.Join(app, "run.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf ran > \"$1\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	command := "cd " + app + " && ./run.sh " + marker
+	original := "SHELL=/bin/sh\n0 1 * * * cronitor exec k1 " + shellquote.Join(command) + "\n"
+	path := writeCron(t, original)
+
+	runSync(t, serverURL, path, "--convert-to-shim")
+	shimmed := readCron(t, path)
+	want := "CRONITOR_REAL_SHELL=/bin/sh\nSHELL=" + shimPath + "\n0 1 * * * MONITORIO=k1 " + command + "\n"
+	if shimmed != want {
+		t.Fatalf("convert did not unquote the compound command\nwant:\n%s\ngot:\n%s", want, shimmed)
+	}
+	runLine := exec.Command(shimPath, "-c", "MONITORIO=k1 "+command)
+	runLine.Env = append(os.Environ(), "CRONITOR_REAL_SHELL=/bin/sh", "CRONITOR_API_KEY=")
+	if out, err := runLine.CombinedOutput(); err != nil {
+		t.Fatalf("shim line failed: %v\n%s", err, out)
+	}
+	if got := readCron(t, marker); got != "ran" {
+		t.Fatalf("shim line ran as %q", got)
+	}
+	os.Remove(marker)
+
+	runSync(t, serverURL, path, "--exec-style")
+	if got := readCron(t, path); got != original {
+		t.Fatalf("revert is not the #65 line\nwant:\n%s\ngot:\n%s", original, got)
+	}
+	stubDir := t.TempDir()
+	stub := "#!/bin/sh\nseen=0\nwhile [ $# -gt 0 ]; do\n  if [ \"$seen\" = 0 ]; then [ \"$1\" = exec ] && seen=1; shift; continue; fi\n  case \"$1\" in -*) shift ;; *) shift; break ;; esac\ndone\nif [ $# -eq 1 ]; then exec sh -c \"$1\"; fi\n"
+	if err := os.WriteFile(filepath.Join(stubDir, "cronitor"), []byte(stub), 0755); err != nil {
+		t.Fatal(err)
+	}
+	field := strings.TrimPrefix(strings.TrimSpace(original), "SHELL=/bin/sh\n")
+	field = strings.TrimPrefix(field, "0 1 * * * ")
+	execLine := exec.Command("sh", "-c", field)
+	execLine.Env = append(os.Environ(), "PATH="+stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if out, err := execLine.CombinedOutput(); err != nil {
+		t.Fatalf("exec line failed: %v\n%s\nfield: %s", err, out, field)
+	}
+	if got := readCron(t, marker); got != "ran" {
+		t.Fatalf("exec line ran as %q", got)
+	}
+}
+
+func TestSyncNoStdoutRewritesShimLines(t *testing.T) {
+	serverURL, shimPath := withSyncFixture(t)
+	path := writeCron(t, strings.Join([]string{
+		"CRONITOR_REAL_SHELL=/bin/bash",
+		"SHELL=" + shimPath,
+		"0 * * * * MONITORIO=abc /bin/true",
+	}, "\n"))
+	stderr := runSync(t, serverURL, path, "--no-stdout")
+	if !strings.Contains(stderr, "monitor abc") || !strings.Contains(stderr, "--no-stdout") {
+		t.Fatalf("expected a rewrite notice:\n%s", stderr)
+	}
+	got := readCron(t, path)
+	want := "SHELL=/bin/bash\n0 * * * * cronitor exec --no-stdout abc /bin/true\n"
+	if got != want {
+		t.Fatalf("shim line was not rewritten\nwant:\n%s\ngot:\n%s", want, got)
+	}
+	if strings.Contains(got, "MONITORIO=") || strings.Contains(got, "CRONITOR_REAL_SHELL=") || strings.Contains(got, shimPath) {
+		t.Fatalf("shim left behind:\n%s", got)
+	}
+	if again := runSync(t, serverURL, path, "--no-stdout"); again != "" {
+		t.Fatalf("second --no-stdout still noticed:\n%s", again)
+	}
+	if second := readCron(t, path); second != got {
+		t.Fatalf("rewrite not stable\n--- first\n%s\n--- second\n%s", got, second)
+	}
+}
+
+func TestSyncShellAfterShimIsLeftAlone(t *testing.T) {
+	serverURL, shimPath := withSyncFixture(t)
+	body := strings.Join([]string{
+		"CRONITOR_REAL_SHELL=/bin/zsh",
+		"SHELL=" + shimPath,
+		"0 * * * * MONITORIO=abc /bin/true",
+		"SHELL=/bin/bash",
+	}, "\n") + "\n"
+	path := writeCron(t, body)
+	stderr := runSync(t, serverURL, path)
+	if !strings.Contains(stderr, "SHELL= line follows") {
+		t.Fatalf("expected a notice:\n%s", stderr)
+	}
+	if got := readCron(t, path); got != body {
+		t.Fatalf("SHELL after the shim was rewritten\nwant:\n%s\ngot:\n%s", body, got)
 	}
 }
 

@@ -165,12 +165,7 @@ Example where you perform a dry-run without any crontab modifications:
       > Steps line by line, creates or updates monitors
       > Checks permissions to ensure integration can be applied later
 
-On Unix, newly monitored lines use a SHELL shim. sync writes one SHELL= line
-pointing at cronitor-shell (default /etc/cronitor/cronitor-shell) and prefixes
-each new command with MONITORIO=<key>. Existing "cronitor exec" lines are left
-unchanged unless --convert-to-shim is set. --exec-style keeps the cronitor exec
-form and, once no MONITORIO lines remain, restores the previous SHELL.
-Windows always uses cronitor exec.
+On Unix, new jobs use a SHELL shim (MONITORIO=<key>). --exec-style writes cronitor exec. --convert-to-shim converts flag-free exec lines. Windows stays exec.
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
 
@@ -396,15 +391,23 @@ func configureShellShim(crontab *lib.Crontab) error {
 	default:
 		crontab.WriteMode = lib.WriteModeShim
 	}
-	if crontab.WriteMode != lib.WriteModeExec && crontab.UserShellCount() > 1 {
-		fmt.Fprintln(os.Stderr, "notice: crontab has more than one SHELL= line; keeping exec style and not installing the shell shim")
-		crontab.WriteMode = lib.WriteModeLegacy
-		return nil
+	if crontab.WriteMode != lib.WriteModeExec {
+		if notice := crontab.ShimShellNotice(); notice != "" {
+			fmt.Fprintln(os.Stderr, notice)
+			crontab.WriteMode = lib.WriteModeLegacy
+			return nil
+		}
 	}
 	if crontab.WriteMode == lib.WriteModeShim && syncFlagsBlockShim() {
 		crontab.BlockNewShim = true
 	}
+	if noStdoutPassthru {
+		crontab.RewriteShimToExec = true
+	}
 	for _, notice := range crontab.ShimSkipNotices() {
+		fmt.Fprintln(os.Stderr, notice)
+	}
+	for _, notice := range crontab.ShimStdoutNotices() {
 		fmt.Fprintln(os.Stderr, notice)
 	}
 	if !crontab.EmitsShim() {

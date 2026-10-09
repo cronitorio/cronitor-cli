@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -109,17 +108,14 @@ Example with no command output send to Cronitor:
 	},
 }
 
-func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) int {
-	return runCommand(subcommand, withEnvironment, withMonitoring, "")
-}
-
-// RunCommandWithShell runs subcommand under shell -c, including when shell is /bin/sh.
-// Cron puts the wrapper in the child's SHELL, so that variable is not consulted.
-func RunCommandWithShell(subcommand string, withEnvironment bool, withMonitoring bool, shell string) int {
-	return runCommand(subcommand, withEnvironment, withMonitoring, shell)
-}
-
-func runCommand(subcommand string, withEnvironment bool, withMonitoring bool, explicitShell string) int {
+// RunCommand runs subcommand. explicitShell, when set, is used as-is for
+// `shell -c`, including /bin/sh. Cron puts the wrapper in SHELL, so that
+// variable is not consulted on the shim path.
+func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, explicitShell ...string) int {
+	shell := ""
+	if len(explicitShell) > 0 {
+		shell = explicitShell[0]
+	}
 	var monitoringWaitGroup sync.WaitGroup
 
 	startTime := makeStamp()
@@ -141,14 +137,12 @@ func runCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 		env = makeCronLikeEnv()
 	}
 	env = append(env, "CRONITOR_EXEC=1")
-	// The handshake fd belongs to this process. The job should see the real shell.
 	env = dropEnv(env, "CRONITOR_SHIM_FD")
-	if explicitShell != "" {
-		env = setEnv(env, "SHELL", explicitShell)
+	env = dropEnv(env, "CRONITOR_SHIM_SAVED_FD")
+	if shell != "" {
+		env = setEnv(env, "SHELL", shell)
 	}
-	// explicitShell, when set, is the crontab's real shell. It is not chosen
-	// from env: cron puts the shim path in the child's SHELL variable.
-	execCmd := makeSubcommandExecWithShell(subcommand, explicitShell, env)
+	execCmd := makeSubcommandExecWithShell(subcommand, shell, env)
 	execCmd.Env = env
 
 	// Handle stdin to the subcommand - improved pipe handling
@@ -180,20 +174,30 @@ func runCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 
 	// Invoke subcommand and send a message when it's done
 	waitCh := make(chan error, 16)
+	var jobs jobSignal
 	go func() {
 		defer close(waitCh)
 
-		// Brief pause to allow gochannel selects
+		// The byte is the promise that this process runs the job once.
+		// It is sent before Start so a crash after Start cannot look like
+		// "never started" and make the wrapper run the command again.
+		if shell != "" {
+			commitShimHandshake()
+			if shimAfterHandshake != nil {
+				shimAfterHandshake()
+			}
+		}
 		time.Sleep(20 * time.Millisecond)
 
 		if err := execCmd.Start(); err != nil {
+			if shell != "" {
+				execRealShell(shell, subcommand)
+			}
 			waitCh <- err
-		} else {
-			// After Start the job is running. The wrapper treats this byte as
-			// "do not run the command again" even if we later crash.
-			signalShimStarted()
-			waitCh <- execCmd.Wait()
+			return
 		}
+		jobs.started(execCmd.Process)
+		waitCh <- execCmd.Wait()
 	}()
 
 	// Improved signal handling
@@ -204,16 +208,7 @@ func runCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 	for {
 		select {
 		case sig := <-sigChan:
-			// Stop listening for signals once process exits
-			if execCmd.Process == nil {
-				signal.Stop(sigChan)
-				continue
-			}
-
-			if err := execCmd.Process.Signal(sig); err != nil {
-				// Process may have already exited, stop listening for signals
-				signal.Stop(sigChan)
-			}
+			jobs.deliver(sig)
 
 		case err := <-waitCh:
 			// Stop listening for signals since process has exited
@@ -278,7 +273,7 @@ func runCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 				}
 			}
 
-			if explicitShell != "" {
+			if shell != "" {
 				// Shim path only. exec keeps its own retry budget.
 				waitForTelemetry(&monitoringWaitGroup, 3*time.Second)
 			} else {
@@ -484,21 +479,32 @@ func waitForTelemetry(wg *sync.WaitGroup, bound time.Duration) {
 	}
 }
 
-func signalShimStarted() {
-	raw := os.Getenv("CRONITOR_SHIM_FD")
-	if raw == "" {
+// jobSignal holds a signal that arrives before Start and delivers it once
+// the job exists, including to its process group.
+type jobSignal struct {
+	mu   sync.Mutex
+	sig  os.Signal
+	proc *os.Process
+}
+
+func (j *jobSignal) deliver(sig os.Signal) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.proc == nil {
+		j.sig = sig
 		return
 	}
-	fd, err := strconv.Atoi(raw)
-	if err != nil || fd < 0 {
-		return
+	signalJob(j.proc, sig)
+}
+
+func (j *jobSignal) started(proc *os.Process) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.proc = proc
+	if j.sig != nil {
+		signalJob(proc, j.sig)
+		j.sig = nil
 	}
-	f := os.NewFile(uintptr(fd), "cronitor-shim")
-	if f == nil {
-		return
-	}
-	_, _ = f.Write([]byte("1\n"))
-	_ = f.Close()
 }
 
 func setEnv(env []string, key, value string) []string {

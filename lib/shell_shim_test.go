@@ -1,11 +1,13 @@
 package lib
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -220,11 +222,22 @@ func TestWrapperRoutesAndFallsBack(t *testing.T) {
 		t.Fatalf("stripped command=\n%s", got)
 	}
 
+	// A marked command with an extra argument is not monitored; argv stays intact.
+	run(t, "-c", "MONITORIO=k1 echo hi", "EXTRA")
+	if got := readFile(t, out); got != "-c\nMONITORIO=k1 echo hi\nEXTRA\n" {
+		t.Fatalf("marked extra args=\n%s", got)
+	}
+
 	// Exit codes survive a missing binary, and a shim real-shell does not loop.
-	cmd := exec.Command(wrapper, "-c", "MONITORIO=abc exit 9")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, wrapper, "-c", "MONITORIO=abc exit 9")
 	cmd.Env = append(os.Environ(), "CRONITOR_REAL_SHELL="+wrapper)
 	err = cmd.Run()
 	exit, ok := err.(*exec.ExitError)
+	if ctx.Err() != nil {
+		t.Fatal("wrapper looped on itself instead of falling back to /bin/sh")
+	}
 	if !ok || exit.ExitCode() != 9 {
 		t.Fatalf("shim real-shell exit=%v, want 9", err)
 	}
@@ -296,6 +309,39 @@ func TestWrapperExecsHealthyBinaryOnce(t *testing.T) {
 	}
 	if got := readFile(t, log); got != "y" {
 		t.Fatalf("unmarked log=%q", got)
+	}
+}
+
+func TestInstallShimKeepsSymlinkPath(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "real-cronitor")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "cronitor")
+	if err := os.Symlink(bin, link); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(dir, "cronitor-shell")
+	if _, err := InstallShimWrapper(dest, link); err != nil {
+		t.Fatal(err)
+	}
+	body := readFile(t, dest)
+	if !strings.Contains(body, link) {
+		t.Fatalf("wrapper dropped the invoked path:\n%s", body)
+	}
+	if strings.Contains(body, "real-cronitor") {
+		t.Fatalf("wrapper resolved the symlink:\n%s", body)
+	}
+}
+
+func TestInstallShimRejectsRelativeCronitorUnderEtc(t *testing.T) {
+	_, err := InstallShimWrapper("/etc/cronitor/cronitor-shell", "cronitor")
+	if err == nil {
+		t.Fatal("relative cronitor path was accepted under /etc")
+	}
+	if _, statErr := os.Stat("/etc/cronitor/cronitor-shell"); statErr == nil {
+		t.Fatal("relative path installed a wrapper")
 	}
 }
 

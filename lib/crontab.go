@@ -42,6 +42,9 @@ type Crontab struct {
 	// BlockNewShim forces new lines to exec style when this sync was invoked
 	// with flags a MONITORIO line cannot express.
 	BlockNewShim bool `json:"-"`
+	// RewriteShimToExec turns existing MONITORIO lines into exec lines.
+	// Set when sync was invoked with --no-stdout.
+	RewriteShimToExec bool `json:"-"`
 }
 
 // isExampleCronLine checks if a line contains obvious placeholder/example text
@@ -594,9 +597,11 @@ func (l Line) writeUsing(c Crontab) string {
 		lineParts = append(lineParts, code)
 
 		if l.Integration == IntegrationShim {
-			if cmd := strings.TrimLeft(l.rawTail, " \t\v\f\r\n"); cmd != "" {
+			if cmd := shimExecCommand(l); cmd != "" {
 				lineParts = append(lineParts, cmd)
 			}
+		} else if quoted := preservedRawCommand(l); quoted != "" {
+			lineParts = append(lineParts, quoted)
 		} else if len(l.CommandToRun) > 0 {
 			lineParts = append(lineParts, formatWrappedCommand(l.CommandToRun))
 		}
