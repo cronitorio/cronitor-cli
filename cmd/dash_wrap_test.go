@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/cronitorio/cronitor-cli/lib"
-	"github.com/spf13/viper"
 )
 
 func TestDashDisableReenableAndKeyChange(t *testing.T) {
@@ -43,9 +42,7 @@ func TestDashDisableReenableAndKeyChange(t *testing.T) {
 
 	cleanup := setupIntegrationTest(srv.URL + "/api")
 	defer cleanup()
-	originalEnv := viper.GetString("CRONITOR_ENV")
-	viper.Set("CRONITOR_ENV", "")
-	t.Cleanup(func() { viper.Set("CRONITOR_ENV", originalEnv) })
+	withCronitorEnv(t, "")
 
 	plain := filepath.Join(t.TempDir(), "crontab")
 	if err := os.WriteFile(plain, []byte("0 * * * * cronitor exec k1 /bin/true\n"), 0644); err != nil {

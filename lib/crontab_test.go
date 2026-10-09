@@ -4,8 +4,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/spf13/viper"
 )
 
 func TestCronitorIgnoreComment(t *testing.T) {
@@ -122,9 +120,6 @@ func TestCronitorIgnoreComment(t *testing.T) {
 }
 
 func TestLineWriteWithEnvFlag(t *testing.T) {
-	// Save original viper value
-	originalEnv := viper.GetString("CRONITOR_ENV")
-
 	// Test cases
 	testCases := []struct {
 		name          string
@@ -172,8 +167,7 @@ func TestLineWriteWithEnvFlag(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Set the environment value
-			viper.Set("CRONITOR_ENV", tc.envValue)
+			withCronitorEnv(t, tc.envValue)
 
 			// Write the line
 			output := tc.line.Write()
@@ -237,17 +231,10 @@ func TestLineWriteWithEnvFlag(t *testing.T) {
 			}
 		})
 	}
-
-	// Restore original viper value
-	viper.Set("CRONITOR_ENV", originalEnv)
 }
 
 func TestLineWriteWithNoStdoutAndEnv(t *testing.T) {
-	// Save original viper value
-	originalEnv := viper.GetString("CRONITOR_ENV")
-
-	// Set environment
-	viper.Set("CRONITOR_ENV", "testing")
+	withCronitorEnv(t, "testing")
 
 	line := Line{
 		IsJob:          true,
@@ -263,7 +250,4 @@ func TestLineWriteWithNoStdoutAndEnv(t *testing.T) {
 	if !strings.Contains(output, "cronitor --env testing exec --no-stdout test123") {
 		t.Errorf("Expected 'cronitor --env testing exec --no-stdout test123' in output but got: %s", output)
 	}
-
-	// Restore original viper value
-	viper.Set("CRONITOR_ENV", originalEnv)
 }

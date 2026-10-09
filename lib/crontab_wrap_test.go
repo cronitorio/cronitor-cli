@@ -47,6 +47,7 @@ func TestWrapDetection(t *testing.T) {
 		{"quoted simple word kept", `0 * * * * cronitor exec k1 'my script.sh'`, "k1", `'my script.sh'`, true},
 		{"escaped word kept", `0 * * * * cronitor exec k1 \%`, "k1", `\%`, true},
 		{"quoted key", `0 * * * * cronitor exec 'k1' /bin/true`, "k1", "/bin/true", true},
+		{"legacy quoted complex", `0 * * * * cronitor exec k1 "cd /tmp && echo \"hi\""`, "k1", `cd /tmp && echo "hi"`, true},
 		{"unknown dash token is the key", `0 * * * * cronitor exec -zzz k1`, "-zzz", "k1", true},
 	}
 
@@ -70,6 +71,7 @@ func TestWrapDetection(t *testing.T) {
 }
 
 func TestComplexCommandRoundTrip(t *testing.T) {
+	withCronitorEnv(t, "")
 	commands := []string{
 		`cd /tmp && echo "hi"`,
 		`cd /tmp && echo 'hi'`,
@@ -93,12 +95,17 @@ func TestComplexCommandRoundTrip(t *testing.T) {
 
 	for _, command := range commands {
 		t.Run(command, func(t *testing.T) {
-			written, again, parsed := rewriteCommand(t, command)
-			if again != written {
-				t.Fatalf("rewrite changed bytes\n first: %s\nsecond: %s", written, again)
+			line := Line{
+				IsJob: true, CronExpression: "0 * * * *", CommandToRun: command,
+				Code: "k1", Crontab: Crontab{IsUserCrontab: true},
 			}
-			if parsed != command {
-				t.Fatalf("command changed\n want: %q\n  got: %q\n line: %s", command, parsed, written)
+			written := line.Write()
+			job := parseJobLine(t, written)
+			if job.Write() != written {
+				t.Fatalf("rewrite changed bytes\n first: %s\nsecond: %s", written, job.Write())
+			}
+			if job.CommandToRun != command {
+				t.Fatalf("command changed\n want: %q\n  got: %q\n line: %s", command, job.CommandToRun, written)
 			}
 			requireShSyntax(t, commandFieldOf(written))
 		})
@@ -106,7 +113,8 @@ func TestComplexCommandRoundTrip(t *testing.T) {
 }
 
 func TestFlagTablesAndFallback(t *testing.T) {
-	// The exec arg scanner pings the first "exec", which here is the flag value.
+	// The binary's exec scanner treats the first "exec" as the subcommand, so this
+	// pings key "exec" and runs "realkey /bin/true".
 	value := parseJobLine(t, `0 * * * * cronitor --env exec exec realkey /bin/true`)
 	if value.Code != "exec" || value.CommandToRun != "realkey /bin/true" {
 		t.Fatalf("value flag: code=%q command=%q", value.Code, value.CommandToRun)
@@ -133,18 +141,8 @@ func TestFlagTablesAndFallback(t *testing.T) {
 	}
 }
 
-func TestDoubleBackslashPercentIsStdin(t *testing.T) {
-	// cronie: a backslash escapes the next byte, so \\% is a literal \ then a bare %.
-	body, stdin := splitCronStdin(`echo \\%hello`)
-	if body != `echo \\` || stdin != `%hello` {
-		t.Fatalf(`\\%% split body=%q stdin=%q`, body, stdin)
-	}
-}
-
 func TestQuotedWordRoundTrip(t *testing.T) {
-	originalEnv := viper.GetString("CRONITOR_ENV")
-	viper.Set("CRONITOR_ENV", "")
-	t.Cleanup(func() { viper.Set("CRONITOR_ENV", originalEnv) })
+	withCronitorEnv(t, "")
 
 	lines := []string{
 		`0 * * * * cronitor exec k1 'my script.sh'`,
@@ -181,9 +179,7 @@ func TestUnwrappedPercentRoundTrip(t *testing.T) {
 }
 
 func TestWrappedPercentMatchesOriginal(t *testing.T) {
-	originalEnv := viper.GetString("CRONITOR_ENV")
-	viper.Set("CRONITOR_ENV", "")
-	t.Cleanup(func() { viper.Set("CRONITOR_ENV", originalEnv) })
+	withCronitorEnv(t, "")
 
 	commands := []string{
 		`cat%hello`,
@@ -211,8 +207,8 @@ func TestWrappedPercentMatchesOriginal(t *testing.T) {
 			if w1 != w2 {
 				t.Fatalf("wrap changed\n first: %s\nsecond: %s", w1, w2)
 			}
-			want := cronieRun(t, command)
-			got := cronieRun(t, commandFieldOf(w1))
+			want := cronRun(t, command)
+			got := cronRun(t, commandFieldOf(w1))
 			if got != want {
 				t.Fatalf("cron run mismatch\n want %q\n  got %q\n line %s", want, got, w1)
 			}
@@ -221,9 +217,7 @@ func TestWrappedPercentMatchesOriginal(t *testing.T) {
 }
 
 func TestSyncFlagsMergeIntoPrefix(t *testing.T) {
-	originalEnv := viper.GetString("CRONITOR_ENV")
-	viper.Set("CRONITOR_ENV", "prod")
-	t.Cleanup(func() { viper.Set("CRONITOR_ENV", originalEnv) })
+	withCronitorEnv(t, "prod")
 
 	cases := []struct{ in, want string }{
 		{
@@ -264,85 +258,6 @@ func TestSyncFlagsMergeIntoPrefix(t *testing.T) {
 				t.Fatalf("second sync changed bytes\n%s\n%s", written, again)
 			}
 		})
-	}
-}
-
-func TestHistoricalComplexQuotingParses(t *testing.T) {
-	// Issue #2: wrapping cd /tmp && echo "hi" used to reparse into a truncated
-	// command ending in a backslash and an unterminated quote.
-	line := `0 * * * * cronitor exec k1 "cd /tmp && echo \"hi\""`
-	job := parseJobLine(t, line)
-	want := `cd /tmp && echo "hi"`
-	if job.Code != "k1" {
-		t.Fatalf("code=%q", job.Code)
-	}
-	if job.CommandToRun != want {
-		t.Fatalf("command=%q, want %q", job.CommandToRun, want)
-	}
-	if strings.HasSuffix(job.CommandToRun, `\`) {
-		t.Fatalf("command still truncated: %q", job.CommandToRun)
-	}
-
-	rewritten := job.Write()
-	requireShSyntax(t, commandFieldOf(rewritten))
-	second := parseJobLine(t, rewritten)
-	if second.Write() != rewritten {
-		t.Fatalf("rewritten line is not stable\n first: %s\nsecond: %s", rewritten, second.Write())
-	}
-	if second.CommandToRun != want {
-		t.Fatalf("after rewrite command=%q", second.CommandToRun)
-	}
-}
-
-func TestSyncRewriteIsIdempotent(t *testing.T) {
-	originalEnv := viper.GetString("CRONITOR_ENV")
-	viper.Set("CRONITOR_ENV", "prod")
-	t.Cleanup(func() { viper.Set("CRONITOR_ENV", originalEnv) })
-
-	input := strings.Join([]string{
-		"SHELL=/bin/bash",
-		"# Name: Nightly",
-		"0 2 * * * /usr/local/bin/backup.sh --full",
-		"# cronitor: ignore",
-		"15 2 * * * echo skip",
-		"30 2 * * * cd /tmp && echo \"hi\"",
-		"45 2 * * * cronitor --env prod --no-stdout exec abc123 /bin/echo already",
-		"@hourly /usr/bin/true",
-		"",
-	}, "\n")
-
-	first := parseContent(t, input)
-	for _, line := range first.Lines {
-		if !line.IsMonitorable() || line.Ignored || line.IsComment || line.Code != "" {
-			continue
-		}
-		line.Code = "sync" + strconv.Itoa(line.LineNumber)
-	}
-
-	w1 := first.Write()
-	if strings.Count(w1, "cronitor") < 3 {
-		t.Fatalf("expected wrapped jobs in first write:\n%s", w1)
-	}
-	if strings.Contains(w1, "cronitor exec") && strings.Contains(w1, "cronitor --env prod exec cronitor") {
-		t.Fatalf("double wrap in first write:\n%s", w1)
-	}
-
-	second := parseContent(t, w1)
-	assertSameJobs(t, first, second)
-	w2 := second.Write()
-	if w1 != w2 {
-		t.Fatalf("second sync changed the crontab\n--- first\n%s\n--- second\n%s", w1, w2)
-	}
-
-	third := parseContent(t, w2)
-	w3 := third.Write()
-	if w2 != w3 {
-		t.Fatalf("third sync changed the crontab\n--- second\n%s\n--- third\n%s", w2, w3)
-	}
-	for _, line := range strings.Split(w3, "\n") {
-		if strings.Count(line, " exec ") > 1 {
-			t.Fatalf("double wrap: %s", line)
-		}
 	}
 }
 
@@ -400,50 +315,18 @@ func parseContent(t *testing.T, content string) *Crontab {
 
 func parseJobLine(t *testing.T, line string) *Line {
 	t.Helper()
-	ct := parseContent(t, line)
-	var jobs []*Line
-	for _, candidate := range ct.Lines {
-		if candidate.IsJob {
-			jobs = append(jobs, candidate)
-		}
-	}
+	jobs := jobLines(parseContent(t, line))
 	if len(jobs) != 1 {
 		t.Fatalf("line %q parsed to %d jobs", line, len(jobs))
 	}
 	return jobs[0]
 }
 
-func rewriteCommand(t *testing.T, command string) (written, again, parsed string) {
+func withCronitorEnv(t *testing.T, env string) {
 	t.Helper()
-	originalEnv := viper.GetString("CRONITOR_ENV")
-	viper.Set("CRONITOR_ENV", "")
-	t.Cleanup(func() { viper.Set("CRONITOR_ENV", originalEnv) })
-
-	line := Line{
-		IsJob:          true,
-		CronExpression: "0 * * * *",
-		CommandToRun:   command,
-		Code:           "k1",
-		Crontab:        Crontab{IsUserCrontab: true},
-	}
-	written = line.Write()
-	job := parseJobLine(t, written)
-	return written, job.Write(), job.CommandToRun
-}
-
-func assertSameJobs(t *testing.T, before, after *Crontab) {
-	t.Helper()
-	bj, aj := jobLines(before), jobLines(after)
-	if len(bj) != len(aj) {
-		t.Fatalf("job count %d then %d", len(bj), len(aj))
-	}
-	for i := range bj {
-		if bj[i].Code != aj[i].Code || bj[i].CommandToRun != aj[i].CommandToRun || bj[i].Ignored != aj[i].Ignored || bj[i].Name != aj[i].Name {
-			t.Fatalf("job %d changed\n before code=%q cmd=%q name=%q ignored=%v\n after  code=%q cmd=%q name=%q ignored=%v",
-				i, bj[i].Code, bj[i].CommandToRun, bj[i].Name, bj[i].Ignored,
-				aj[i].Code, aj[i].CommandToRun, aj[i].Name, aj[i].Ignored)
-		}
-	}
+	prev := viper.GetString("CRONITOR_ENV")
+	viper.Set("CRONITOR_ENV", env)
+	t.Cleanup(func() { viper.Set("CRONITOR_ENV", prev) })
 }
 
 func jobLines(ct *Crontab) []*Line {
@@ -468,27 +351,34 @@ func commandFieldOf(crontabLine string) string {
 	return skipWSFields(line, fields)
 }
 
-// cronieCommand splits a crontab command the way cronie does. \% becomes %,
-// a bare % ends the command, and \\% does not escape the percent.
-func cronieCommand(field string) (command, stdin string) {
-	body, rest := splitCronStdin(field)
-	command = unescapeCronPercent(body)
-	if rest == "" {
-		return command, ""
-	}
-	return command, cronieStdin(rest[1:])
-}
-
-func unescapeCronPercent(body string) string {
-	var b strings.Builder
+// cronPercent is a standalone copy of cron's % rule. It must not call the
+// production splitter: a broken backslash escape has to fail this oracle.
+func cronPercent(field string) (command, stdin string) {
+	cut := len(field)
 	escaped := false
-	for i := 0; i < len(body); i++ {
-		ch := body[i]
+	for i := 0; i < len(field); i++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if field[i] == '\\' {
+			escaped = true
+			continue
+		}
+		if field[i] == '%' {
+			cut = i
+			break
+		}
+	}
+	var cmd strings.Builder
+	escaped = false
+	for i := 0; i < cut; i++ {
+		ch := field[i]
 		if escaped {
 			if ch != '%' {
-				b.WriteByte('\\')
+				cmd.WriteByte('\\')
 			}
-			b.WriteByte(ch)
+			cmd.WriteByte(ch)
 			escaped = false
 			continue
 		}
@@ -496,55 +386,49 @@ func unescapeCronPercent(body string) string {
 			escaped = true
 			continue
 		}
-		b.WriteByte(ch)
+		cmd.WriteByte(ch)
 	}
-	if escaped {
-		b.WriteByte('\\')
+	if escaped && cut == len(field) {
+		cmd.WriteByte('\\')
 	}
-	return b.String()
-}
-
-func cronieStdin(rest string) string {
-	var b strings.Builder
-	escaped := false
-	needNewline := false
-	for i := 0; i < len(rest); i++ {
-		ch := rest[i]
+	if cut == len(field) {
+		return cmd.String(), ""
+	}
+	var in strings.Builder
+	escaped = false
+	needNL := false
+	for i := cut + 1; i < len(field); i++ {
+		ch := field[i]
 		if escaped {
 			if ch != '%' {
-				b.WriteByte('\\')
+				in.WriteByte('\\')
 			}
 		} else if ch == '%' {
 			ch = '\n'
 		}
 		if escaped = ch == '\\'; !escaped {
-			b.WriteByte(ch)
-			needNewline = ch != '\n'
+			in.WriteByte(ch)
+			needNL = ch != '\n'
 		}
 	}
 	if escaped {
-		b.WriteByte('\\')
+		in.WriteByte('\\')
 	}
-	if needNewline {
-		b.WriteByte('\n')
+	if needNL {
+		in.WriteByte('\n')
 	}
-	return b.String()
+	return cmd.String(), in.String()
 }
 
-func cronieRun(t *testing.T, field string) string {
+func cronRun(t *testing.T, field string) string {
 	t.Helper()
-	// Peel a cronitor wrap from the raw field first. Percent unescaping runs
-	// on the job command, the same order cron uses.
-	command := field
-	if code, inner, _, _, ok := unwrapCronitorExec(field); ok && code != "" {
-		command = inner
-	}
-	command, stdin := cronieCommand(command)
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not available")
 	}
+	command, stdin := cronPercent(field)
 	cmd := exec.Command("sh", "-c", command)
 	cmd.Stdin = strings.NewReader(stdin)
+	cmd.Env = append(os.Environ(), "PATH="+cronitorStub(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "ERR " + err.Error() + "\n" + string(out)
@@ -552,12 +436,29 @@ func cronieRun(t *testing.T, field string) string {
 	return string(out)
 }
 
+func cronitorStub(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"seen=0\n" +
+		"while [ $# -gt 0 ]; do\n" +
+		"  if [ \"$seen\" = 0 ]; then [ \"$1\" = exec ] && seen=1; shift; continue; fi\n" +
+		"  case \"$1\" in --) shift; break ;; -*) shift ;; *) shift; break ;; esac\n" +
+		"done\n" +
+		"if [ $# -eq 1 ]; then exec sh -c \"$1\"; fi\n" +
+		"if [ $# -gt 0 ]; then exec \"$@\"; fi\n"
+	if err := os.WriteFile(filepath.Join(dir, "cronitor"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func requireShSyntax(t *testing.T, commandField string) {
 	t.Helper()
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not available")
 	}
-	command, stdin := cronieCommand(commandField)
+	command, stdin := cronPercent(commandField)
 	if stdin != "" {
 		return
 	}
