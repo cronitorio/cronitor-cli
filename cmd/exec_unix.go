@@ -23,8 +23,8 @@ func getPlatformSysProcAttrForDash() *syscall.SysProcAttr {
 	}
 }
 
-// commitShimHandshake writes the newline-terminated byte, then makes sure the
-// job does not inherit the fifo. An fd 3 that was already open is restored.
+// commitShimHandshake writes the newline-terminated byte and keeps the fifo
+// out of the job. The wrapper does not call this when fd 3 is already open.
 func commitShimHandshake() {
 	raw := os.Getenv("CRONITOR_SHIM_FD")
 	if raw == "" {
@@ -35,16 +35,8 @@ func commitShimHandshake() {
 		return
 	}
 	_, _ = syscall.Write(fd, []byte("1\n"))
-	if saved := os.Getenv("CRONITOR_SHIM_SAVED_FD"); saved != "" {
-		if sfd, err := strconv.Atoi(saved); err == nil && sfd >= 0 {
-			_ = syscall.Dup2(sfd, fd)
-			_ = syscall.Close(sfd)
-		}
-	} else {
-		syscall.CloseOnExec(fd)
-	}
+	syscall.CloseOnExec(fd)
 	_ = os.Unsetenv("CRONITOR_SHIM_FD")
-	_ = os.Unsetenv("CRONITOR_SHIM_SAVED_FD")
 }
 
 func signalJob(proc *os.Process, sig os.Signal) {

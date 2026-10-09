@@ -614,6 +614,51 @@ func TestSyncShellAfterShimIsLeftAlone(t *testing.T) {
 	}
 }
 
+func TestSyncConvertRedactsAPIKey(t *testing.T) {
+	serverURL, _ := withSyncFixture(t)
+	const secret = "supersecretvalue"
+	const secretEq = "othersupersecret"
+	const secretShort = "thirdsecret"
+	path := writeCron(t, strings.Join([]string{
+		"0 9 * * * cronitor --api-key " + secret + " exec k9 /bin/true",
+		"0 8 * * * cronitor --api-key=" + secretEq + " exec k8 /bin/true",
+		"0 7 * * * cronitor -k " + secretShort + " exec k7 /bin/true",
+	}, "\n"))
+	stderr := runSync(t, serverURL, path, "--convert-to-shim")
+	for _, leak := range []string{secret, secretEq, secretShort} {
+		if strings.Contains(stderr, leak) {
+			t.Fatalf("convert-skip notice leaked %q:\n%s", leak, stderr)
+		}
+	}
+	if !strings.Contains(stderr, "--api-key") || !strings.Contains(stderr, "-k") || !strings.Contains(stderr, "<redacted>") {
+		t.Fatalf("notice dropped the flag name:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "monitor k9") {
+		t.Fatalf("notice is not keyed by monitor code:\n%s", stderr)
+	}
+	got := readCron(t, path)
+	if strings.Contains(got, "MONITORIO=k9") || strings.Contains(got, "MONITORIO=k8") || strings.Contains(got, "MONITORIO=k7") {
+		t.Fatalf("keyed line was converted:\n%s", got)
+	}
+}
+
+func TestSyncNewLinesKeepVerbatimCommand(t *testing.T) {
+	serverURL, _ := withSyncFixture(t)
+	commands := []string{
+		`echo "a  b"   >  /tmp/out`,
+		`"/opt/my app/run.sh"`,
+	}
+	body := "0 * * * * " + commands[0] + "\n15 * * * * " + commands[1] + "\n"
+	path := writeCron(t, body)
+	runSync(t, serverURL, path)
+	got := readCron(t, path)
+	for _, cmd := range commands {
+		if !strings.Contains(got, "MONITORIO=") || !strings.Contains(got, " "+cmd) {
+			t.Fatalf("new line lost verbatim bytes %q\n%s", cmd, got)
+		}
+	}
+}
+
 func TestInvokedExecutableKeepsSymlink(t *testing.T) {
 	got := invokedExecutable("cronitor", func(string) (string, error) {
 		return "/opt/homebrew/bin/cronitor", nil
@@ -627,6 +672,32 @@ func TestInvokedExecutableKeepsSymlink(t *testing.T) {
 	}, os.Getwd)
 	if got != "/opt/homebrew/bin/cronitor" {
 		t.Fatalf("absolute = %q", got)
+	}
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real-cronitor")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "cronitor")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skip(err)
+	}
+	got = invokedExecutable(link, func(string) (string, error) {
+		t.Fatal("absolute path must not call LookPath")
+		return "", nil
+	}, func() (string, error) {
+		t.Fatal("absolute path must not call Getwd")
+		return "", nil
+	})
+	if got != link {
+		t.Fatalf("symlink resolved to %q, want %q", got, link)
+	}
+	got = invokedExecutable("cronitor", func(string) (string, error) {
+		return link, nil
+	}, os.Getwd)
+	if got != link {
+		t.Fatalf("LookPath symlink resolved to %q, want %q", got, link)
 	}
 }
 

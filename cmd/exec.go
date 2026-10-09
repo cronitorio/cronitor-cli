@@ -138,7 +138,6 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 	}
 	env = append(env, "CRONITOR_EXEC=1")
 	env = dropEnv(env, "CRONITOR_SHIM_FD")
-	env = dropEnv(env, "CRONITOR_SHIM_SAVED_FD")
 	if shell != "" {
 		env = setEnv(env, "SHELL", shell)
 	}
@@ -178,21 +177,19 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 	go func() {
 		defer close(waitCh)
 
+		time.Sleep(20 * time.Millisecond)
+
 		// The byte is the promise that this process runs the job once.
-		// It is sent before Start so a crash after Start cannot look like
-		// "never started" and make the wrapper run the command again.
+		// It is written immediately before Start so a crash after Start
+		// cannot look like "never started".
 		if shell != "" {
 			commitShimHandshake()
 			if shimAfterHandshake != nil {
 				shimAfterHandshake()
 			}
 		}
-		time.Sleep(20 * time.Millisecond)
 
 		if err := execCmd.Start(); err != nil {
-			if shell != "" {
-				execRealShell(shell, subcommand)
-			}
 			waitCh <- err
 			return
 		}
@@ -257,10 +254,18 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 				// Cribbed from aws-vault.
 				if exiterr, ok := err.(*exec.ExitError); ok {
 					if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-						exitCode = exitStatusOf(status)
+						// 128+n is the shim only. Plain exec keeps ExitStatus.
+						if shell != "" {
+							exitCode = exitStatusOf(status)
+						} else {
+							exitCode = status.ExitStatus()
+						}
 					} else {
 						exitCode = 1
 					}
+				} else if shell != "" {
+					// Start failed (the real shell is missing). Don't report success.
+					exitCode = 127
 				}
 
 				if withMonitoring {

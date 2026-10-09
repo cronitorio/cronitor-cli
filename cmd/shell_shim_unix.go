@@ -5,7 +5,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"syscall"
 
 	"github.com/cronitorio/cronitor-cli/lib"
 	"github.com/spf13/cobra"
@@ -60,12 +59,4 @@ func shellShimDashC(args []string) (string, bool) {
 
 func shellShimUsage() {
 	fmt.Fprintln(os.Stderr, "shell-shim: expected: cronitor shell-shim -c 'MONITORIO=<key> <command>'")
-}
-
-// execRealShell replaces this process with `shell -c command`.
-func execRealShell(shell, command string) int {
-	argv := []string{shell, "-c", command}
-	err := syscall.Exec(shell, argv, os.Environ())
-	fmt.Fprintf(os.Stderr, "shell-shim: exec %s: %v\n", shell, err)
-	return 127
 }

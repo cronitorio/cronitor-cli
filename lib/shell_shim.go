@@ -11,11 +11,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// pathWritableFn is replaced on Unix. The Windows default is false.
-var pathWritableFn = func(string) bool { return false }
-
-func pathWritable(path string) bool { return pathWritableFn(path) }
-
 const (
 	// MonitorPrefix is the per-line marker. The wrapper invokes cronitor only
 	// when the command field starts with MONITORIO=<key> and whitespace.
@@ -215,68 +210,72 @@ func (c Crontab) EmitsShim() bool {
 	return false
 }
 
-// ShimShellNotice reports a SHELL layout the shim must not rewrite.
-// A SHELL= after the wrapper, or more than one real SHELL=, stays as written.
-func (c Crontab) ShimShellNotice() string {
-	seenShim := false
-	users := 0
-	after := false
-	for _, l := range c.Lines {
-		if l == nil || !l.isManagedEnv() || l.GetEnvVarKey() != "SHELL" {
-			continue
+// ShimNotices reports shell-layout, convert-skip, and --no-stdout rewrites.
+// stop means SHELL= lines must be left alone and the shim must not be installed.
+func (c Crontab) ShimNotices() (stop bool, notices []string) {
+	if runtime.GOOS == "windows" {
+		return false, nil
+	}
+	if c.WriteMode != WriteModeExec {
+		seenShim, users, after := false, 0, false
+		for _, l := range c.Lines {
+			if l == nil || !l.isManagedEnv() || l.GetEnvVarKey() != "SHELL" {
+				continue
+			}
+			if IsShimShellPath(l.GetEnvVarValue()) {
+				seenShim = true
+				continue
+			}
+			users++
+			if seenShim {
+				after = true
+			}
 		}
-		if IsShimShellPath(l.GetEnvVarValue()) {
-			seenShim = true
-			continue
+		if after {
+			return true, []string{"notice: a SHELL= line follows the cronitor shell shim; leaving SHELL lines unchanged and keeping exec style"}
 		}
-		users++
-		if seenShim {
-			after = true
+		if users > 1 {
+			return true, []string{"notice: crontab has more than one SHELL= line; keeping exec style and not installing the shell shim"}
 		}
 	}
-	if after {
-		return "notice: a SHELL= line follows the cronitor shell shim; leaving SHELL lines unchanged and keeping exec style"
+	if c.WriteMode == WriteModeConvertToShim {
+		for _, line := range c.Lines {
+			if line.Integration != IntegrationExec || line.GetCode() == "" || len(line.execFlags) == 0 {
+				continue
+			}
+			notices = append(notices, fmt.Sprintf(
+				"notice: monitor %s: skipped --convert-to-shim; flags cannot be expressed as MONITORIO=<key> (%s); left as exec",
+				line.GetCode(), redactExecFlags(line.execFlags)))
+		}
 	}
-	if users > 1 {
-		return "notice: crontab has more than one SHELL= line; keeping exec style and not installing the shell shim"
+	if c.RewriteShimToExec {
+		for _, line := range c.Lines {
+			if line.Integration != IntegrationShim || line.GetCode() == "" {
+				continue
+			}
+			notices = append(notices, fmt.Sprintf(
+				"notice: monitor %s: --no-stdout cannot be expressed on a MONITORIO line; rewritten as exec",
+				line.GetCode()))
+		}
 	}
-	return ""
+	return false, notices
 }
 
-// ShimSkipNotices describes exec lines --convert-to-shim leaves unchanged.
-// The monitor code is stable across syncs; a line number is not.
-func (c Crontab) ShimSkipNotices() []string {
-	if c.WriteMode != WriteModeConvertToShim || runtime.GOOS == "windows" {
-		return nil
-	}
-	var out []string
-	for _, line := range c.Lines {
-		if line.Integration != IntegrationExec || line.GetCode() == "" || len(line.execFlags) == 0 {
+func redactExecFlags(flags []string) string {
+	out := make([]string, 0, len(flags))
+	for i := 0; i < len(flags); i++ {
+		tok := flags[i]
+		if strings.HasPrefix(tok, "--api-key=") {
+			out = append(out, "--api-key=<redacted>")
 			continue
 		}
-		out = append(out, fmt.Sprintf(
-			"notice: monitor %s: skipped --convert-to-shim; flags cannot be expressed as MONITORIO=<key> (%s); left as exec",
-			line.GetCode(), strings.Join(line.execFlags, " ")))
-	}
-	return out
-}
-
-// ShimStdoutNotices describes MONITORIO lines rewritten because --no-stdout
-// cannot be carried on the marker.
-func (c Crontab) ShimStdoutNotices() []string {
-	if !c.RewriteShimToExec || runtime.GOOS == "windows" {
-		return nil
-	}
-	var out []string
-	for _, line := range c.Lines {
-		if line.Integration != IntegrationShim || line.GetCode() == "" {
-			continue
+		out = append(out, tok)
+		if (tok == "--api-key" || tok == "-k") && i+1 < len(flags) {
+			i++
+			out = append(out, "<redacted>")
 		}
-		out = append(out, fmt.Sprintf(
-			"notice: monitor %s: --no-stdout cannot be expressed on a MONITORIO line; rewritten as exec",
-			line.GetCode()))
 	}
-	return out
+	return strings.Join(out, " ")
 }
 
 func (c Crontab) linesForWrite() []*Line {
@@ -388,11 +387,12 @@ func (c Crontab) withoutShimShell() []*Line {
 }
 
 // ResolveShimInstallPath picks the wrapper path. It does not create directories.
+// Root uses /etc/cronitor; everyone else uses ~/.cronitor.
 func ResolveShimInstallPath() string {
 	if ShimShellPathOverride != "" {
 		return ShimShellPathOverride
 	}
-	if runtime.GOOS != "windows" && systemCronitorDirOK() {
+	if os.Geteuid() == 0 {
 		return DefaultShimShellPath
 	}
 	home, err := os.UserHomeDir()
@@ -402,18 +402,8 @@ func ResolveShimInstallPath() string {
 	return filepath.Join(home, ".cronitor", ShimWrapperBase)
 }
 
-func systemCronitorDirOK() bool {
-	if pathWritable("/etc/cronitor") {
-		return true
-	}
-	if _, err := os.Stat("/etc/cronitor"); os.IsNotExist(err) {
-		return pathWritable("/etc")
-	}
-	return false
-}
-
-// InstallShimWrapper writes the wrapper atomically. cronitorBin is the invoked
-// path, symlink included, so a later upgrade is still the path cron runs.
+// InstallShimWrapper writes the wrapper via a temp file in the same directory.
+// cronitorBin is the invoked path, symlink included.
 func InstallShimWrapper(dest, cronitorBin string) (string, error) {
 	if dest == "" {
 		dest = ResolveShimInstallPath()
@@ -421,42 +411,29 @@ func InstallShimWrapper(dest, cronitorBin string) (string, error) {
 	if strings.HasPrefix(dest, "/etc/") && !filepath.IsAbs(cronitorBin) {
 		return "", fmt.Errorf("refusing to install %s: cronitor path %q is relative", dest, cronitorBin)
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+	dir := filepath.Dir(dest)
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
-	content := renderShimWrapper(cronitorBin)
-	if existing, err := os.ReadFile(dest); err == nil && string(existing) == content {
-		if err := os.Chmod(dest, 0755); err != nil {
-			return "", err
-		}
-		return dest, nil
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(dest), "."+ShimWrapperBase+".*")
+	tmp, err := os.CreateTemp(dir, "."+ShimWrapperBase+".*")
 	if err != nil {
 		return "", err
 	}
-	tmpName := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			os.Remove(tmpName)
+	name := tmp.Name()
+	_, werr := tmp.WriteString(renderShimWrapper(cronitorBin))
+	cerr := tmp.Chmod(0755)
+	tmp.Close()
+	if werr != nil || cerr != nil {
+		os.Remove(name)
+		if werr != nil {
+			return "", werr
 		}
-	}()
-	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
+		return "", cerr
+	}
+	if err := os.Rename(name, dest); err != nil {
+		os.Remove(name)
 		return "", err
 	}
-	if err := tmp.Chmod(0755); err != nil {
-		tmp.Close()
-		return "", err
-	}
-	if err := tmp.Close(); err != nil {
-		return "", err
-	}
-	if err := os.Rename(tmpName, dest); err != nil {
-		return "", err
-	}
-	cleanup = false
 	return dest, nil
 }
 
@@ -502,14 +479,13 @@ if [ ! -x "$CRONITOR_BIN" ]; then
   exec "$REAL_SHELL" -c "$after"
 fi
 
-# dash points a background command at /dev/null before redirections, so keep
-# the real stdin on fd 4. Park an already-open fd 3 on fd 9 for the job.
-exec 4<&0
-CRONITOR_SHIM_SAVED_FD=
+# An open fd 3 belongs to the caller. Run the job once, unmonitored, and
+# do not dup or close anything.
 if ( : <&3 ) 2>/dev/null || ( : >&3 ) 2>/dev/null; then
-  exec 9<&3
-  CRONITOR_SHIM_SAVED_FD=9
+  exec "$REAL_SHELL" -c "$after"
 fi
+# dash points a background command at /dev/null before redirections.
+exec 4<&0
 hs=$(mktemp -d "${TMPDIR:-/tmp}/cronitor-shim.XXXXXX") || exec "$REAL_SHELL" -c "$after"
 fifo=$hs/started
 if ! mkfifo "$fifo"; then
@@ -525,13 +501,9 @@ fi
   fi
 ) &
 reader=$!
-# The assignment has to be literal. A value produced by ${var:+...} is a
-# command word, and dash tries to exec it.
-CRONITOR_SHIM_FD=3 CRONITOR_SHIM_SAVED_FD="$CRONITOR_SHIM_SAVED_FD" "$CRONITOR_BIN" shell-shim -c "$cmd" 3>"$fifo" <&4 4<&- &
+CRONITOR_SHIM_FD=3 "$CRONITOR_BIN" shell-shim -c "$cmd" 3>"$fifo" <&4 4<&- &
 child=$!
 exec 4<&-
-# sleep is a child of this helper so a kill of the helper reaches it, and
-# stdio is /dev/null so a leftover never holds the job's pipes.
 (
   exec </dev/null >/dev/null 2>&1
   sleep 3 &
@@ -541,10 +513,11 @@ exec 4<&-
   : >"$hs/timeout"
 ) &
 watch=$!
-trap 'kill -TERM "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' TERM
-trap 'kill -INT "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' INT
-trap 'kill -HUP "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' HUP
+trap 'rm -rf "$hs"; kill -TERM "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' TERM
+trap 'rm -rf "$hs"; kill -INT "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' INT
+trap 'rm -rf "$hs"; kill -HUP "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' HUP
 while [ ! -s "$hs/byte" ] && [ ! -f "$hs/timeout" ]; do
+  kill -0 "$child" 2>/dev/null || break
   sleep 0.05
 done
 kill "$watch" 2>/dev/null

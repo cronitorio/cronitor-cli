@@ -136,3 +136,22 @@ jobs:
         env:
           CRONITOR_API_KEY: "${{ secrets.CRONITOR_API_KEY }}"
         run: ./cleanup-ci-monitors.sh
+
+  cross-compile:
+    name: Cross-compile arm64 and riscv64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - uses: actions/setup-go@v3
+        with:
+          go-version-file: '${{ github.workspace }}/go.mod'
+
+      - name: Placeholder embedded assets
+        run: mkdir -p web/static && printf 'placeholder\n' > web/static/index.html
+
+      - name: Build linux/arm64 and linux/riscv64
+        run: |
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./...
+          GOOS=linux GOARCH=riscv64 CGO_ENABLED=0 go build ./...

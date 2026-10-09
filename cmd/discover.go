@@ -391,24 +391,20 @@ func configureShellShim(crontab *lib.Crontab) error {
 	default:
 		crontab.WriteMode = lib.WriteModeShim
 	}
-	if crontab.WriteMode != lib.WriteModeExec {
-		if notice := crontab.ShimShellNotice(); notice != "" {
-			fmt.Fprintln(os.Stderr, notice)
-			crontab.WriteMode = lib.WriteModeLegacy
-			return nil
-		}
-	}
-	if crontab.WriteMode == lib.WriteModeShim && syncFlagsBlockShim() {
-		crontab.BlockNewShim = true
-	}
 	if noStdoutPassthru {
 		crontab.RewriteShimToExec = true
 	}
-	for _, notice := range crontab.ShimSkipNotices() {
+	stop, notices := crontab.ShimNotices()
+	for _, notice := range notices {
 		fmt.Fprintln(os.Stderr, notice)
 	}
-	for _, notice := range crontab.ShimStdoutNotices() {
-		fmt.Fprintln(os.Stderr, notice)
+	if stop {
+		crontab.WriteMode = lib.WriteModeLegacy
+		crontab.RewriteShimToExec = false
+		return nil
+	}
+	if crontab.WriteMode == lib.WriteModeShim && syncFlagsBlockShim() {
+		crontab.BlockNewShim = true
 	}
 	if !crontab.EmitsShim() {
 		return nil

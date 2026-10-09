@@ -2,6 +2,7 @@ package lib
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,25 @@ import (
 
 	"github.com/spf13/viper"
 )
+
+func TestMain(m *testing.M) {
+	closeInheritedFDs()
+	shimRoot, err := os.MkdirTemp("", "cronitor-shim-tests-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	_ = os.Setenv("TMPDIR", shimRoot)
+	code := m.Run()
+	if leftovers, _ := filepath.Glob(filepath.Join(shimRoot, "cronitor-shim.*")); len(leftovers) > 0 {
+		fmt.Fprintf(os.Stderr, "leftover cronitor-shim temp dirs: %s\n", strings.Join(leftovers, " "))
+		if code == 0 {
+			code = 1
+		}
+	}
+	os.RemoveAll(shimRoot)
+	os.Exit(code)
+}
 
 func TestParseMonitorMarker(t *testing.T) {
 	tests := []struct {
@@ -256,8 +276,12 @@ func TestWrapperTruncatedBinaryRunsJobOnce(t *testing.T) {
 	count := filepath.Join(dir, "count")
 	marked := exec.Command(wrapper, "-c", "MONITORIO=k1 printf x >> "+count)
 	marked.Env = append(os.Environ(), "CRONITOR_REAL_SHELL=/bin/sh")
+	start := time.Now()
 	if err := marked.Run(); err != nil {
 		t.Fatal(err)
+	}
+	if time.Since(start) > 1500*time.Millisecond {
+		t.Fatalf("broken binary waited %s; the poll must stop when the child has exited", time.Since(start))
 	}
 	plain := exec.Command(wrapper, "-c", "printf y >> "+count)
 	plain.Env = append(os.Environ(), "CRONITOR_REAL_SHELL=/bin/sh")
@@ -332,6 +356,27 @@ func TestInstallShimKeepsSymlinkPath(t *testing.T) {
 	}
 	if strings.Contains(body, "real-cronitor") {
 		t.Fatalf("wrapper resolved the symlink:\n%s", body)
+	}
+}
+
+func TestWrapperRechecksByteAfterKill(t *testing.T) {
+	dir := t.TempDir()
+	dest, err := InstallShimWrapper(filepath.Join(dir, "cronitor-shell"), "/bin/true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readFile(t, dest)
+	killAt := strings.Index(body, `kill -KILL "$child"`)
+	if killAt < 0 {
+		t.Fatal("wrapper does not SIGKILL a timed-out cronitor")
+	}
+	rest := body[killAt:]
+	fallback := strings.LastIndex(rest, `exec "$REAL_SHELL" -c "$after"`)
+	if fallback < 0 {
+		t.Fatal("wrapper has no fallback after SIGKILL")
+	}
+	if !strings.Contains(rest[:fallback], `$hs/byte`) {
+		t.Fatalf("no byte re-check between SIGKILL and the fallback exec:\n%s", rest[:fallback])
 	}
 }
 

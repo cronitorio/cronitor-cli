@@ -26,8 +26,6 @@ func getPlatformSysProcAttrForDash() *syscall.SysProcAttr {
 
 func commitShimHandshake() {}
 
-func execRealShell(string, string) int { return 127 }
-
 func signalJob(proc *os.Process, sig os.Signal) {
 	if proc != nil && sig != nil {
 		_ = proc.Signal(sig)

@@ -4,6 +4,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -28,9 +29,31 @@ func TestMain(m *testing.M) {
 		if os.Getenv("CRONITOR_SHIM_CRASH_AFTER_BYTE") == "1" {
 			shimAfterHandshake = func() { os.Exit(99) }
 		}
+		if os.Getenv("CRONITOR_SHIM_SIGNAL_BEFORE_START") == "1" {
+			shimAfterHandshake = func() {
+				time.Sleep(50 * time.Millisecond)
+				_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+			}
+		}
 		os.Exit(RunShellShim(os.Args))
 	}
-	os.Exit(m.Run())
+	closeOnExecInherited()
+	// Isolate wrapper mktemp from other packages running in parallel.
+	shimRoot, err := os.MkdirTemp("", "cronitor-shim-tests-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	_ = os.Setenv("TMPDIR", shimRoot)
+	code := m.Run()
+	if leftovers, _ := filepath.Glob(filepath.Join(shimRoot, "cronitor-shim.*")); len(leftovers) > 0 {
+		fmt.Fprintf(os.Stderr, "leftover cronitor-shim temp dirs: %s\n", strings.Join(leftovers, " "))
+		if code == 0 {
+			code = 1
+		}
+	}
+	os.RemoveAll(shimRoot)
+	os.Exit(code)
 }
 
 func TestShellShimDashCIsNotTheConfigFlag(t *testing.T) {
@@ -212,6 +235,53 @@ func TestSignalExitCode(t *testing.T) {
 	code := RunCommand("kill -TERM $$", false, false, "/bin/sh")
 	if code != 143 {
 		t.Fatalf("signal exit=%d, want 143", code)
+	}
+}
+
+func TestPlainExecSignalStatusUnchanged(t *testing.T) {
+	code := RunCommand("kill -TERM $$", false, false)
+	if code != -1 {
+		t.Fatalf("plain exec signal status=%d, want -1", code)
+	}
+}
+
+func TestMissingRealShellExits127(t *testing.T) {
+	dir := t.TempDir()
+	count := filepath.Join(dir, "count")
+	wrapper := installRealShim(t, os.Args[0])
+	cmd := shimCommand(wrapper, "-c", "MONITORIO=k1 printf x >> "+shellQuote(count))
+	env := make([]string, 0, len(cmd.Env))
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "CRONITOR_REAL_SHELL=") {
+			continue
+		}
+		env = append(env, e)
+	}
+	cmd.Env = append(env, "CRONITOR_REAL_SHELL=/bin/nonexistent")
+	err := cmd.Run()
+	exit, ok := err.(*exec.ExitError)
+	if !ok || exit.ExitCode() != 127 {
+		t.Fatalf("exit=%v, want 127", err)
+	}
+	if _, statErr := os.Stat(count); !os.IsNotExist(statErr) {
+		t.Fatalf("missing shell ran the job as %q", readTestFile(t, count))
+	}
+}
+
+func TestSignalBeforeStartReachesJob(t *testing.T) {
+	wrapper := installRealShim(t, os.Args[0])
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	closeOnExecInherited()
+	cmd := exec.CommandContext(ctx, wrapper, "-c", "MONITORIO=k1 sleep 30")
+	cmd.Env = shimEnv("CRONITOR_SHIM_SIGNAL_BEFORE_START=1")
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		t.Fatal("signal queued before Start was dropped; sleep 30 was still running")
+	}
+	exit, ok := err.(*exec.ExitError)
+	if !ok || exit.ExitCode() != 143 {
+		t.Fatalf("exit=%v, want 143", err)
 	}
 }
 
