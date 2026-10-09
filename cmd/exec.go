@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -278,12 +279,18 @@ func makeCronLikeEnv() []string {
 
 // makeSubcommandExec starts the monitored command.
 //
-// Unix: cron exports SHELL into the job (default /bin/sh when the crontab does
-// not set it). An interactive login shell is a different variable — the user's
-// own $SHELL — and is not what cron put in the environment. Honor SHELL only
-// when it is set, absolute, and executable; otherwise keep the historical
-// bash-then-sh fallback. Jobs that depended on cronitor always using bash need
-// SHELL=/bin/bash in the crontab.
+// Unix shell choice, with no regression versus historical bash:
+//   - If SHELL is set, absolute, executable, and its cleaned path is not
+//     /bin/sh, use that path with -c.
+//   - Otherwise bash -c when /bin/bash exists, else sh -c.
+//
+// /bin/sh is excluded on purpose. When a crontab has no SHELL= line, cron's
+// default is /bin/sh and cron exports that value, so it is indistinguishable
+// from an explicit SHELL=/bin/sh. Honoring it would move existing jobs from
+// bash to sh and break bashisms. The tradeoff is that an explicit SHELL=/bin/sh
+// still gets bash, the same as today. A follow-up SHELL shim can honor /bin/sh
+// exactly, because it reads the crontab's SHELL rather than the inherited
+// environment.
 //
 // Windows always uses powershell.exe -Command.
 func makeSubcommandExec(subcommand string) *exec.Cmd {
@@ -303,8 +310,8 @@ func interpreterForExec(goos, shellEnv string, stat func(string) (os.FileInfo, e
 	if goos == "windows" {
 		return "powershell.exe", "-Command"
 	}
-	if usableShell(shellEnv, stat) {
-		return strings.TrimSpace(shellEnv), "-c"
+	if shell, ok := selectableShell(shellEnv, stat); ok {
+		return shell, "-c"
 	}
 	if _, err := stat("/bin/bash"); err == nil {
 		return "bash", "-c"
@@ -312,19 +319,39 @@ func interpreterForExec(goos, shellEnv string, stat func(string) (os.FileInfo, e
 	return "sh", "-c"
 }
 
-// usableShell reports whether shellEnv is safe to exec as the crontab shell.
-// Relative paths are rejected so a login-shell name or a PATH lookup cannot
-// override the bash/sh fallback.
-func usableShell(shellEnv string, stat func(string) (os.FileInfo, error)) bool {
-	shellEnv = strings.TrimSpace(shellEnv)
-	if shellEnv == "" || !filepath.IsAbs(shellEnv) {
-		return false
+// selectableShell reports the cleaned SHELL path when it is safe to use.
+// /bin/sh is not selectable; see makeSubcommandExec.
+func selectableShell(shellEnv string, stat func(string) (os.FileInfo, error)) (string, bool) {
+	cleaned := cleanShellPath(shellEnv)
+	if !absoluteShellPath(cleaned) || cleaned == "/bin/sh" {
+		return "", false
 	}
-	info, err := stat(shellEnv)
+	info, err := stat(cleaned)
 	if err != nil || info.IsDir() {
-		return false
+		return "", false
 	}
-	return info.Mode().Perm()&0111 != 0
+	if info.Mode().Perm()&0111 == 0 {
+		return "", false
+	}
+	return cleaned, true
+}
+
+// cleanShellPath trims space and lexically cleans the path so /bin//sh and
+// /bin/../bin/sh compare equal to /bin/sh. Slash-separated cleaning is used
+// so the comparison does not depend on the host OS separator.
+func cleanShellPath(shellEnv string) string {
+	shellEnv = strings.TrimSpace(shellEnv)
+	if shellEnv == "" {
+		return ""
+	}
+	return path.Clean(strings.ReplaceAll(shellEnv, `\`, "/"))
+}
+
+func absoluteShellPath(cleaned string) bool {
+	if strings.HasPrefix(cleaned, "/") {
+		return true
+	}
+	return filepath.IsAbs(cleaned)
 }
 
 func getTempFile() (*os.File, error) {

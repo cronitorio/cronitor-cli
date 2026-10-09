@@ -29,6 +29,20 @@ func TestInterpreterForExec(t *testing.T) {
 	}
 
 	abs := testAbsPath("custom-shell")
+	// /bin/sh is cron's default and stays on the historical bash-then-sh fallback.
+	// Any other absolute executable is used as-is.
+	nonExec := func(name string) (os.FileInfo, error) {
+		if name == "/bin/bash" {
+			return fakeFileInfo{mode: 0755}, nil
+		}
+		return statPlain(name)
+	}
+	missingShell := func(name string) (os.FileInfo, error) {
+		if name == "/bin/bash" {
+			return fakeFileInfo{mode: 0755}, nil
+		}
+		return nil, os.ErrNotExist
+	}
 
 	tests := []struct {
 		name     string
@@ -38,27 +52,31 @@ func TestInterpreterForExec(t *testing.T) {
 		wantName string
 		wantFlag string
 	}{
-		{name: "windows ignores SHELL", goos: "windows", shell: abs, stat: statFile, wantName: "powershell.exe", wantFlag: "-Command"},
+		{name: "windows ignores SHELL", goos: "windows", shell: "/bin/zsh", stat: statFile, wantName: "powershell.exe", wantFlag: "-Command"},
 		{name: "windows ignores empty SHELL", goos: "windows", shell: "", stat: statMissing, wantName: "powershell.exe", wantFlag: "-Command"},
-		{name: "absolute executable", goos: "linux", shell: abs, stat: statFile, wantName: abs, wantFlag: "-c"},
-		{name: "trims shell", goos: "linux", shell: "  " + abs + "  ", stat: statFile, wantName: abs, wantFlag: "-c"},
+		{name: "windows ignores /bin/sh", goos: "windows", shell: "/bin/sh", stat: statFile, wantName: "powershell.exe", wantFlag: "-Command"},
+		{name: "/bin/sh keeps bash fallback", goos: "linux", shell: "/bin/sh", stat: statBash, wantName: "bash", wantFlag: "-c"},
+		{name: "cleaned /bin/sh keeps bash fallback", goos: "linux", shell: "/bin//sh", stat: statBash, wantName: "bash", wantFlag: "-c"},
+		{name: "dotdot /bin/sh keeps bash fallback", goos: "linux", shell: "/bin/../bin/sh", stat: statBash, wantName: "bash", wantFlag: "-c"},
+		{name: "padded /bin/sh keeps bash fallback", goos: "linux", shell: "  /bin/sh  ", stat: statBash, wantName: "bash", wantFlag: "-c"},
+		{name: "/bin/sh without bash falls back to sh", goos: "linux", shell: "/bin/sh", stat: statMissing, wantName: "sh", wantFlag: "-c"},
+		{name: "/bin/zsh honored", goos: "linux", shell: "/bin/zsh", stat: statFile, wantName: "/bin/zsh", wantFlag: "-c"},
+		{name: "/usr/bin/bash honored", goos: "linux", shell: "/usr/bin/bash", stat: statFile, wantName: "/usr/bin/bash", wantFlag: "-c"},
+		{name: "/bin/dash honored", goos: "linux", shell: "/bin/dash", stat: statFile, wantName: "/bin/dash", wantFlag: "-c"},
+		{name: "absolute executable", goos: "linux", shell: abs, stat: statFile, wantName: cleanShellPath(abs), wantFlag: "-c"},
+		{name: "trims shell", goos: "linux", shell: "  " + abs + "  ", stat: statFile, wantName: cleanShellPath(abs), wantFlag: "-c"},
 		{name: "relative falls back to bash", goos: "linux", shell: "zsh", stat: statBash, wantName: "bash", wantFlag: "-c"},
-		{name: "missing falls back to bash", goos: "linux", shell: abs, stat: statBash, wantName: "bash", wantFlag: "-c"},
-		{name: "directory falls back to bash", goos: "linux", shell: abs, stat: func(name string) (os.FileInfo, error) {
+		{name: "missing falls back to bash", goos: "linux", shell: "/bin/zsh", stat: missingShell, wantName: "bash", wantFlag: "-c"},
+		{name: "directory falls back to bash", goos: "linux", shell: "/bin/zsh", stat: func(name string) (os.FileInfo, error) {
 			if name == "/bin/bash" {
 				return fakeFileInfo{mode: 0755}, nil
 			}
 			return statDir(name)
 		}, wantName: "bash", wantFlag: "-c"},
-		{name: "non-executable falls back to bash", goos: "linux", shell: abs, stat: func(name string) (os.FileInfo, error) {
-			if name == "/bin/bash" {
-				return fakeFileInfo{mode: 0755}, nil
-			}
-			return statPlain(name)
-		}, wantName: "bash", wantFlag: "-c"},
+		{name: "non-executable falls back to bash", goos: "linux", shell: "/bin/dash", stat: nonExec, wantName: "bash", wantFlag: "-c"},
 		{name: "empty falls back to bash", goos: "linux", shell: "", stat: statBash, wantName: "bash", wantFlag: "-c"},
 		{name: "no bash falls back to sh", goos: "linux", shell: "", stat: statMissing, wantName: "sh", wantFlag: "-c"},
-		{name: "unusable shell and no bash", goos: "linux", shell: "bash", stat: statMissing, wantName: "sh", wantFlag: "-c"},
+		{name: "relative and no bash falls back to sh", goos: "linux", shell: "bash", stat: statMissing, wantName: "sh", wantFlag: "-c"},
 	}
 
 	for _, tc := range tests {
@@ -89,13 +107,24 @@ func TestMakeSubcommandExecShell(t *testing.T) {
 		return
 	}
 
-	if _, err := os.Stat("/bin/sh"); err != nil {
-		t.Fatal("/bin/sh missing")
-	}
 	t.Setenv("SHELL", "/bin/sh")
 	cmd := makeSubcommandExec("true")
-	if cmd.Args[0] != "/bin/sh" || cmd.Args[1] != "-c" || cmd.Args[2] != "true" {
-		t.Fatalf("SHELL=/bin/sh args = %q", cmd.Args)
+	if _, err := os.Stat("/bin/bash"); err == nil {
+		if cmd.Args[0] != "bash" || cmd.Args[1] != "-c" || cmd.Args[2] != "true" {
+			t.Fatalf("SHELL=/bin/sh should keep the bash fallback, args = %q", cmd.Args)
+		}
+	} else if cmd.Args[0] != "sh" || cmd.Args[1] != "-c" {
+		t.Fatalf("SHELL=/bin/sh should fall back to sh, args = %q", cmd.Args)
+	}
+
+	script := filepath.Join(t.TempDir(), "custom-shell")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", script)
+	cmd = makeSubcommandExec("true")
+	if cmd.Args[0] != script || cmd.Args[1] != "-c" || cmd.Args[2] != "true" {
+		t.Fatalf("absolute SHELL args = %q", cmd.Args)
 	}
 
 	t.Setenv("SHELL", "zsh")
