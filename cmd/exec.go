@@ -193,11 +193,12 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 			waitCh <- err
 			return
 		}
-		jobs.started(execCmd.Process)
+		if shell != "" {
+			jobs.started(execCmd.Process)
+		}
 		waitCh <- execCmd.Wait()
 	}()
 
-	// Improved signal handling
 	sigChan := make(chan os.Signal, 16)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(sigChan)
@@ -205,7 +206,17 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 	for {
 		select {
 		case sig := <-sigChan:
-			jobs.deliver(sig)
+			if shell != "" {
+				jobs.deliver(sig)
+				continue
+			}
+			if execCmd.Process == nil {
+				signal.Stop(sigChan)
+				continue
+			}
+			if err := execCmd.Process.Signal(sig); err != nil {
+				signal.Stop(sigChan)
+			}
 
 		case err := <-waitCh:
 			// Stop listening for signals since process has exited
@@ -264,7 +275,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 						exitCode = 1
 					}
 				} else if shell != "" {
-					// Start failed (the real shell is missing). Don't report success.
+					fmt.Fprintf(os.Stderr, "shell-shim: %s: %v\n", shell, err)
 					exitCode = 127
 				}
 

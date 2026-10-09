@@ -1,3 +1,5 @@
+//go:build !windows
+
 package cmd
 
 import (
@@ -596,6 +598,30 @@ func TestSyncNoStdoutRewritesShimLines(t *testing.T) {
 	}
 }
 
+func TestSyncNoStdoutWithShellAfterRewritesLines(t *testing.T) {
+	serverURL, shimPath := withSyncFixture(t)
+	path := writeCron(t, strings.Join([]string{
+		"CRONITOR_REAL_SHELL=/bin/zsh",
+		"SHELL=" + shimPath,
+		"0 * * * * MONITORIO=abc /bin/true",
+		"SHELL=/bin/bash",
+	}, "\n")+"\n")
+	stderr := runSync(t, serverURL, path, "--no-stdout")
+	if !strings.Contains(stderr, "SHELL= line follows") || !strings.Contains(stderr, "monitor abc") || !strings.Contains(stderr, "--no-stdout") {
+		t.Fatalf("expected shell and rewrite notices:\n%s", stderr)
+	}
+	got := readCron(t, path)
+	if strings.Contains(got, "MONITORIO=") {
+		t.Fatalf("MONITORIO line still ships output:\n%s", got)
+	}
+	if !strings.Contains(got, "cronitor exec --no-stdout abc /bin/true") {
+		t.Fatalf("line was not rewritten:\n%s", got)
+	}
+	if !strings.Contains(got, "SHELL=/bin/bash") || !strings.Contains(got, "SHELL="+shimPath) {
+		t.Fatalf("SHELL lines were rewritten:\n%s", got)
+	}
+}
+
 func TestSyncShellAfterShimIsLeftAlone(t *testing.T) {
 	serverURL, shimPath := withSyncFixture(t)
 	body := strings.Join([]string{
@@ -619,18 +645,20 @@ func TestSyncConvertRedactsAPIKey(t *testing.T) {
 	const secret = "supersecretvalue"
 	const secretEq = "othersupersecret"
 	const secretShort = "thirdsecret"
+	const secretAttached = "attachedsecret"
 	path := writeCron(t, strings.Join([]string{
 		"0 9 * * * cronitor --api-key " + secret + " exec k9 /bin/true",
 		"0 8 * * * cronitor --api-key=" + secretEq + " exec k8 /bin/true",
 		"0 7 * * * cronitor -k " + secretShort + " exec k7 /bin/true",
+		"0 6 * * * cronitor -k" + "attachedsecret" + " exec k6 /bin/true",
 	}, "\n"))
 	stderr := runSync(t, serverURL, path, "--convert-to-shim")
-	for _, leak := range []string{secret, secretEq, secretShort} {
+	for _, leak := range []string{secret, secretEq, secretShort, secretAttached} {
 		if strings.Contains(stderr, leak) {
 			t.Fatalf("convert-skip notice leaked %q:\n%s", leak, stderr)
 		}
 	}
-	if !strings.Contains(stderr, "--api-key") || !strings.Contains(stderr, "-k") || !strings.Contains(stderr, "<redacted>") {
+	if !strings.Contains(stderr, "--api-key") || !strings.Contains(stderr, "-k") || !strings.Contains(stderr, "-k<redacted>") || !strings.Contains(stderr, "<redacted>") {
 		t.Fatalf("notice dropped the flag name:\n%s", stderr)
 	}
 	if !strings.Contains(stderr, "monitor k9") {

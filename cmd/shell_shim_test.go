@@ -258,13 +258,70 @@ func TestMissingRealShellExits127(t *testing.T) {
 		env = append(env, e)
 	}
 	cmd.Env = append(env, "CRONITOR_REAL_SHELL=/bin/nonexistent")
-	err := cmd.Run()
+	out, err := cmd.CombinedOutput()
 	exit, ok := err.(*exec.ExitError)
 	if !ok || exit.ExitCode() != 127 {
-		t.Fatalf("exit=%v, want 127", err)
+		t.Fatalf("exit=%v, want 127\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "/bin/nonexistent") {
+		t.Fatalf("stderr missing the shell path:\n%s", out)
 	}
 	if _, statErr := os.Stat(count); !os.IsNotExist(statErr) {
 		t.Fatalf("missing shell ran the job as %q", readTestFile(t, count))
+	}
+}
+
+func TestPlainExecDropsSignalBeforeStart(t *testing.T) {
+	done := make(chan int, 1)
+	go func() {
+		done <- RunCommand("sleep 1; echo after", false, false)
+	}()
+	time.Sleep(8 * time.Millisecond)
+	_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("plain exec exit=%d, want 0 after a signal before Start", code)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("plain exec did not finish")
+	}
+}
+
+func TestPlainExecSignalLeavesBackgroundChild(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	script := "trap 'exit 7' TERM; sleep 20 >/dev/null 2>&1 & echo $! > " + shellQuote(pidFile) + "; wait"
+	done := make(chan int, 1)
+	go func() {
+		done <- RunCommand(script, false, false)
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if _, err := os.Stat(pidFile); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("background child did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+	select {
+	case code := <-done:
+		if code != 7 {
+			t.Fatalf("plain exec exit=%d, want 7", code)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("plain exec did not return after TERM")
+	}
+	pidText := strings.TrimSpace(readTestFile(t, pidFile))
+	pid, err := strconv.Atoi(pidText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("background child %d was killed with the job: %v", pid, err)
 	}
 }
 

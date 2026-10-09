@@ -12,17 +12,13 @@ import (
 )
 
 const (
-	// MonitorPrefix is the per-line marker. The wrapper invokes cronitor only
-	// when the command field starts with MONITORIO=<key> and whitespace.
-	MonitorPrefix = "MONITORIO="
-	// RealShellEnv is the crontab SHELL= from before the wrapper was installed.
+	MonitorPrefix        = "MONITORIO="
 	RealShellEnv         = "CRONITOR_REAL_SHELL"
 	DefaultRealShell     = "/bin/sh"
 	ShimWrapperBase      = "cronitor-shell"
 	DefaultShimShellPath = "/etc/cronitor/cronitor-shell"
 )
 
-// WriteMode selects how monitored lines are rendered. Zero keeps exec lines.
 type WriteMode int
 
 const (
@@ -37,12 +33,9 @@ const (
 	IntegrationShim = "shim"
 )
 
-// ShimShellPathOverride, when set, is the wrapper path sync installs.
-// Tests use it so sync does not touch /etc/cronitor.
+// ShimShellPathOverride is the wrapper path tests install instead of /etc/cronitor.
 var ShimShellPathOverride string
 
-// ParseMonitorMarker matches a leading MONITORIO=<key> only when whitespace
-// follows the key. The command text after that is returned unchanged.
 func ParseMonitorMarker(command string) (key, rest string, ok bool) {
 	if !strings.HasPrefix(command, MonitorPrefix) {
 		return "", "", false
@@ -75,8 +68,6 @@ func isPOSIXSpace(b byte) bool {
 	}
 }
 
-// ResolveRealShell returns the shell to exec, including /bin/sh.
-// A path that is this wrapper falls back to /bin/sh.
 func ResolveRealShell(envValue string) string {
 	shell := strings.TrimSpace(envValue)
 	if shell == "" || IsShimShellPath(shell) {
@@ -85,8 +76,6 @@ func ResolveRealShell(envValue string) string {
 	return shell
 }
 
-// formatShimCommand renders MONITORIO=<key> plus the original command bytes.
-// An existing shim line's rawTail already includes the separator.
 func formatShimCommand(line Line, code string) string {
 	tail := shimTail(line)
 	if tail == "" {
@@ -95,9 +84,6 @@ func formatShimCommand(line Line, code string) string {
 	return MonitorPrefix + code + tail
 }
 
-// shimTail is the bytes after MONITORIO=<key>. An existing shim line keeps
-// rawTail, separator included. An exec line uses CommandToRun when that is
-// the unquoted single argument #65 stored for a compound command.
 func shimTail(line Line) string {
 	if line.Integration == IntegrationShim && line.rawTail != "" {
 		return line.rawTail
@@ -128,9 +114,6 @@ func unquotedExecCommand(rawTail, command string) string {
 	return command
 }
 
-// shimExecCommand is the job text for a MONITORIO line rewritten as exec.
-// A compound command is one quoted argument, matching #65. Anything else
-// keeps the original bytes.
 func shimExecCommand(line Line) string {
 	cmd := strings.TrimLeft(line.rawTail, " \t\v\f\r\n")
 	if cmd == "" {
@@ -145,8 +128,6 @@ func shimExecCommand(line Line) string {
 	return cmd
 }
 
-// preservedRawCommand keeps a quoted command Fields would split, so dash
-// re-enable does not rebuild "/opt/my app/run.sh".
 func preservedRawCommand(line Line) string {
 	raw := line.rawCommand
 	if line.wrapPrefix != "" || line.Integration != "" || raw == "" || raw == line.CommandToRun {
@@ -158,7 +139,6 @@ func preservedRawCommand(line Line) string {
 	return raw
 }
 
-// IsShimShellPath reports whether p is the fall-through wrapper.
 func IsShimShellPath(p string) bool {
 	return filepath.Base(strings.TrimSpace(p)) == ShimWrapperBase
 }
@@ -200,7 +180,6 @@ func (l Line) renderIntegration(c Crontab) string {
 	}
 }
 
-// EmitsShim reports whether Write will emit at least one MONITORIO line.
 func (c Crontab) EmitsShim() bool {
 	for _, line := range c.Lines {
 		if line.renderIntegration(c) == IntegrationShim {
@@ -210,8 +189,6 @@ func (c Crontab) EmitsShim() bool {
 	return false
 }
 
-// ShimNotices reports shell-layout, convert-skip, and --no-stdout rewrites.
-// stop means SHELL= lines must be left alone and the shim must not be installed.
 func (c Crontab) ShimNotices() (stop bool, notices []string) {
 	if runtime.GOOS == "windows" {
 		return false, nil
@@ -232,10 +209,17 @@ func (c Crontab) ShimNotices() (stop bool, notices []string) {
 			}
 		}
 		if after {
-			return true, []string{"notice: a SHELL= line follows the cronitor shell shim; leaving SHELL lines unchanged and keeping exec style"}
-		}
-		if users > 1 {
-			return true, []string{"notice: crontab has more than one SHELL= line; keeping exec style and not installing the shell shim"}
+			notices = append(notices, "notice: a SHELL= line follows the cronitor shell shim; leaving SHELL lines unchanged and keeping exec style")
+			if !c.RewriteShimToExec {
+				return true, notices
+			}
+			stop = true
+		} else if users > 1 {
+			notices = append(notices, "notice: crontab has more than one SHELL= line; keeping exec style and not installing the shell shim")
+			if !c.RewriteShimToExec {
+				return true, notices
+			}
+			stop = true
 		}
 	}
 	if c.WriteMode == WriteModeConvertToShim {
@@ -258,7 +242,7 @@ func (c Crontab) ShimNotices() (stop bool, notices []string) {
 				line.GetCode()))
 		}
 	}
-	return false, notices
+	return stop, notices
 }
 
 func redactExecFlags(flags []string) string {
@@ -267,6 +251,10 @@ func redactExecFlags(flags []string) string {
 		tok := flags[i]
 		if strings.HasPrefix(tok, "--api-key=") {
 			out = append(out, "--api-key=<redacted>")
+			continue
+		}
+		if strings.HasPrefix(tok, "-k") && !strings.HasPrefix(tok, "--") && len(tok) > 2 {
+			out = append(out, "-k<redacted>")
 			continue
 		}
 		out = append(out, tok)
@@ -386,13 +374,13 @@ func (c Crontab) withoutShimShell() []*Line {
 	return out
 }
 
-// ResolveShimInstallPath picks the wrapper path. It does not create directories.
-// Root uses /etc/cronitor; everyone else uses ~/.cronitor.
+var shimEuid = os.Geteuid
+
 func ResolveShimInstallPath() string {
 	if ShimShellPathOverride != "" {
 		return ShimShellPathOverride
 	}
-	if os.Geteuid() == 0 {
+	if shimEuid() == 0 {
 		return DefaultShimShellPath
 	}
 	home, err := os.UserHomeDir()
@@ -402,8 +390,6 @@ func ResolveShimInstallPath() string {
 	return filepath.Join(home, ".cronitor", ShimWrapperBase)
 }
 
-// InstallShimWrapper writes the wrapper via a temp file in the same directory.
-// cronitorBin is the invoked path, symlink included.
 func InstallShimWrapper(dest, cronitorBin string) (string, error) {
 	if dest == "" {
 		dest = ResolveShimInstallPath()
@@ -479,12 +465,10 @@ if [ ! -x "$CRONITOR_BIN" ]; then
   exec "$REAL_SHELL" -c "$after"
 fi
 
-# An open fd 3 belongs to the caller. Run the job once, unmonitored, and
-# do not dup or close anything.
+# An open fd 3 belongs to the caller. Run once, unmonitored, and do not touch fds.
 if ( : <&3 ) 2>/dev/null || ( : >&3 ) 2>/dev/null; then
   exec "$REAL_SHELL" -c "$after"
 fi
-# dash points a background command at /dev/null before redirections.
 exec 4<&0
 hs=$(mktemp -d "${TMPDIR:-/tmp}/cronitor-shim.XXXXXX") || exec "$REAL_SHELL" -c "$after"
 fifo=$hs/started
@@ -514,7 +498,7 @@ exec 4<&-
 ) &
 watch=$!
 trap 'rm -rf "$hs"; kill -TERM "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' TERM
-trap 'rm -rf "$hs"; kill -INT "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' INT
+trap 'rm -rf "$hs"; kill -INT "$child" 2>/dev/null; i=0; while kill -0 "$child" 2>/dev/null && [ "$i" -lt 20 ]; do i=$((i+1)); sleep 0.05; done; kill -KILL "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' INT
 trap 'rm -rf "$hs"; kill -HUP "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' HUP
 while [ ! -s "$hs/byte" ] && [ ! -f "$hs/timeout" ]; do
   kill -0 "$child" 2>/dev/null || break

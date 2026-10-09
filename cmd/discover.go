@@ -400,7 +400,9 @@ func configureShellShim(crontab *lib.Crontab) error {
 	}
 	if stop {
 		crontab.WriteMode = lib.WriteModeLegacy
-		crontab.RewriteShimToExec = false
+		if !noStdoutPassthru {
+			crontab.RewriteShimToExec = false
+		}
 		return nil
 	}
 	if crontab.WriteMode == lib.WriteModeShim && syncFlagsBlockShim() {
