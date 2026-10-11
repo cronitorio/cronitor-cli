@@ -443,7 +443,14 @@ func clearManagedAuthMetadataIfReplacingKey(cmd *cobra.Command) {
 }
 
 func confirmAuthAction(prompt string) bool {
-	if authYes {
+	return confirmYesNo(prompt, authYes)
+}
+
+// confirmYesNo asks prompt with a [y/N] suffix through readLineFn unless yes
+// (from --yes) already answered it. Only y or yes confirms; a read error such
+// as EOF is a no.
+func confirmYesNo(prompt string, yes bool) bool {
+	if yes {
 		return true
 	}
 	line, err := readLineFn(prompt + " [y/N] ")
@@ -456,6 +463,22 @@ func confirmAuthAction(prompt string) bool {
 	default:
 		return false
 	}
+}
+
+// confirmAccountChange asks prompt before a destructive team or API key
+// change. yes (from --yes) skips the question. Without it a non-interactive
+// stdin is refused rather than read, so a script fails instead of waiting.
+func confirmAccountChange(prompt string, yes bool) error {
+	if yes {
+		return nil
+	}
+	if !stdinIsTerminalFn() {
+		return fmt.Errorf("stdin is not a terminal; pass --yes to confirm")
+	}
+	if !confirmYesNo(prompt, false) {
+		return fmt.Errorf("cancelled")
+	}
+	return nil
 }
 
 func runAuthStatus() {

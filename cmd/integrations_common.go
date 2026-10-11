@@ -22,6 +22,8 @@ var (
 	readSecretFn  = readSecretFromTerminal
 	readLineFn    = readLineFromTerminal
 	nowFn         = time.Now
+
+	stdinIsTerminalFn = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 )
 
 var integrationSecretValues []string
