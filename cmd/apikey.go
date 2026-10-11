@@ -1,0 +1,403 @@
+package cmd
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"strings"
+
+	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+)
+
+var apiKeyCmd = &cobra.Command{
+	Use:     "apikey",
+	Aliases: []string{"apikeys", "keys"},
+	Short:   "Manage API keys",
+	Long: `Manage your organization's API keys.
+
+API key commands act as the user who created the API key in use, with that
+user's current role. They need a key with account access: run
+'cronitor auth login --admin' on a machine you trust. You can only grant
+scopes that your own role has.
+
+Kinds: custom (choose scopes with --scope), sdk, telemetry.
+Scopes: monitor:telemetry, monitor:read, monitor:write, site:read, site:write,
+statuspage:read, statuspage:write, issue:read, issue:write,
+integration:read, integration:write.
+
+The list table masks key values. --format json prints them in full.
+
+Examples:
+  cronitor apikey list
+  cronitor apikey list --search deploy --page 2
+  cronitor apikey list --format json
+  cronitor apikey get <key>
+  cronitor apikey create --name "Deploy bot" --scope monitor:read --scope monitor:write
+  cronitor apikey create --name "Telemetry" --kind telemetry
+  cronitor apikey update <key> --name "Deploy bot (old)"
+  cronitor apikey update <key> --scope monitor:read
+  cronitor apikey delete <key>
+  cronitor apikey delete <key> --yes`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(viper.GetString(varApiKey)) < 10 {
+			return errors.New("API key required. Run 'cronitor configure' or use --api-key flag")
+		}
+		return nil
+	},
+	Run: func(cmd *cobra.Command, args []string) {
+		cmd.Help()
+	},
+}
+
+var apiKeyKinds = []string{"custom", "sdk", "telemetry"}
+
+var (
+	apiKeyFormat string
+	apiKeyOutput string
+	apiKeyPage   int
+	apiKeySearch string
+	apiKeyName   string
+	apiKeyKind   string
+	apiKeyScopes []string
+	apiKeyYes    bool
+)
+
+func init() {
+	RootCmd.AddCommand(apiKeyCmd)
+	apiKeyCmd.PersistentFlags().StringVar(&apiKeyFormat, "format", "", "Output format: json, table")
+	apiKeyCmd.PersistentFlags().StringVarP(&apiKeyOutput, "output", "o", "", "Write output to file")
+}
+
+func resetAPIKeyFlags() {
+	apiKeyFormat = ""
+	apiKeyOutput = ""
+	apiKeyPage = 1
+	apiKeySearch = ""
+	apiKeyName = ""
+	apiKeyKind = "custom"
+	apiKeyScopes = nil
+	apiKeyYes = false
+}
+
+// --- LIST ---
+var apiKeyListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List API keys",
+	Long: `List API keys. The table masks each key; --format json prints them in full.
+
+Examples:
+  cronitor apikey list
+  cronitor apikey list --page 2
+  cronitor apikey list --search deploy
+  cronitor apikey list --format json`,
+	Run: func(cmd *cobra.Command, args []string) {
+		client := lib.NewAPIClient(dev, log)
+		params := make(map[string]string)
+		if apiKeyPage > 1 {
+			params["page"] = fmt.Sprintf("%d", apiKeyPage)
+		}
+		if apiKeySearch != "" {
+			params["search"] = apiKeySearch
+		}
+
+		resp, err := client.GET("/keys", params)
+		if err != nil {
+			failAndExit(fmt.Sprintf("Failed to list API keys: %s", err))
+			return
+		}
+
+		if !resp.IsSuccess() {
+			failAndExit(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+			return
+		}
+
+		var result struct {
+			Page       int `json:"page"`
+			PageCount  int `json:"page_count"`
+			TotalCount int `json:"total_count"`
+			Data       []struct {
+				Key      string   `json:"key"`
+				Name     string   `json:"name"`
+				Kind     string   `json:"kind"`
+				Scopes   []string `json:"scopes"`
+				LastUsed *string  `json:"last_used"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(resp.Body, &result); err != nil {
+			failAndExit(fmt.Sprintf("Failed to parse response: %s", err))
+			return
+		}
+
+		format := apiKeyFormat
+		if format == "" {
+			format = "table"
+		}
+
+		if format == "json" {
+			writeCLIOutput(apiKeyOutput, FormatJSON(resp.Body))
+			return
+		}
+
+		table := &UITable{
+			Headers: []string{"NAME", "KIND", "SCOPES", "KEY", "LAST USED"},
+		}
+
+		for _, k := range result.Data {
+			lastUsed := "never"
+			if k.LastUsed != nil && *k.LastUsed != "" {
+				lastUsed = *k.LastUsed
+			}
+			table.Rows = append(table.Rows, []string{k.Name, k.Kind, strings.Join(k.Scopes, ", "), maskAPIKey(k.Key), lastUsed})
+		}
+
+		output := table.Render()
+		if result.TotalCount > 0 {
+			output += mutedStyle.Render(fmt.Sprintf("\nShowing page %d of %d • %d keys total",
+				result.Page, result.PageCount, result.TotalCount))
+		}
+		writeCLIOutput(apiKeyOutput, output)
+	},
+}
+
+// --- GET ---
+var apiKeyGetCmd = &cobra.Command{
+	Use:   "get <key>",
+	Short: "Get an API key",
+	Long: `Get an API key as JSON.
+
+Examples:
+  cronitor apikey get <key>`,
+	Args: cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		key := args[0]
+		client := lib.NewAPIClient(dev, log)
+
+		resp, err := client.GET(apiKeyPath(key), nil)
+		if err != nil {
+			failAndExit(fmt.Sprintf("Failed to get API key: %s", err))
+			return
+		}
+
+		if resp.IsNotFound() {
+			failAndExit(fmt.Sprintf("API key '%s' not found", maskAPIKey(key)))
+			return
+		}
+
+		if !resp.IsSuccess() {
+			failAndExit(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+			return
+		}
+
+		writeCLIOutput(apiKeyOutput, FormatJSON(resp.Body))
+	},
+}
+
+// --- CREATE ---
+var apiKeyCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create an API key",
+	Long: `Create an API key. The full key is printed once; list output masks it.
+
+The kind defaults to custom, which needs at least one --scope. Repeat --scope
+to grant more than one.
+
+Examples:
+  cronitor apikey create --name "Deploy bot" --scope monitor:read --scope monitor:write
+  cronitor apikey create --name "Telemetry" --kind telemetry
+  cronitor apikey create --name "SDK" --kind sdk --format json`,
+	Run: func(cmd *cobra.Command, args []string) {
+		if strings.TrimSpace(apiKeyName) == "" {
+			failAndExit("Name required. Use --name")
+			return
+		}
+		if err := validateAPIKeyKind(apiKeyKind); err != nil {
+			failAndExit(err.Error())
+			return
+		}
+		if apiKeyKind == "custom" && len(apiKeyScopes) == 0 {
+			failAndExit("Custom keys need at least one --scope")
+			return
+		}
+
+		scopes := apiKeyScopes
+		if scopes == nil {
+			scopes = []string{}
+		}
+		body, _ := json.Marshal(map[string]interface{}{"name": apiKeyName, "kind": apiKeyKind, "scopes": scopes})
+
+		client := lib.NewAPIClient(dev, log)
+		resp, err := client.POST("/keys", body, nil)
+		if err != nil {
+			failAndExit(fmt.Sprintf("Failed to create API key: %s", err))
+			return
+		}
+
+		if !resp.IsSuccess() {
+			failAndExit(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+			return
+		}
+
+		if apiKeyFormat == "json" {
+			writeCLIOutput(apiKeyOutput, FormatJSON(resp.Body))
+			return
+		}
+
+		var result struct {
+			Key  string `json:"key"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(resp.Body, &result); err != nil || result.Key == "" {
+			Success("API key created")
+			return
+		}
+		Success(fmt.Sprintf("Created API key: %s", result.Name))
+		fmt.Printf("Key: %s\n", result.Key)
+		Info("This is the only time the CLI shows this key unmasked. Store it somewhere safe.")
+	},
+}
+
+// --- UPDATE ---
+var apiKeyUpdateCmd = &cobra.Command{
+	Use:   "update <key>",
+	Short: "Update an API key's name or scopes",
+	Long: `Update an API key. Only the fields you pass are changed. --scope replaces
+the key's scopes; repeat it to grant more than one.
+
+Examples:
+  cronitor apikey update <key> --name "Deploy bot (old)"
+  cronitor apikey update <key> --scope monitor:read --scope issue:read`,
+	Args: cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		key := args[0]
+
+		fields := map[string]interface{}{}
+		if apiKeyName != "" {
+			fields["name"] = apiKeyName
+		}
+		if len(apiKeyScopes) > 0 {
+			fields["scopes"] = apiKeyScopes
+		}
+		if len(fields) == 0 {
+			failAndExit("Nothing to update. Use --name or --scope")
+			return
+		}
+		body, _ := json.Marshal(fields)
+
+		client := lib.NewAPIClient(dev, log)
+		resp, err := client.PATCH(apiKeyPath(key), body, nil)
+		if err != nil {
+			failAndExit(fmt.Sprintf("Failed to update API key: %s", err))
+			return
+		}
+
+		if resp.IsNotFound() {
+			failAndExit(fmt.Sprintf("API key '%s' not found", maskAPIKey(key)))
+			return
+		}
+
+		if !resp.IsSuccess() {
+			failAndExit(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+			return
+		}
+
+		Success(fmt.Sprintf("API key '%s' updated", maskAPIKey(key)))
+		if apiKeyFormat == "json" {
+			writeCLIOutput(apiKeyOutput, FormatJSON(resp.Body))
+		}
+	},
+}
+
+// --- DELETE ---
+var apiKeyDeleteCmd = &cobra.Command{
+	Use:   "delete <key>",
+	Short: "Delete an API key",
+	Long: `Delete an API key. Anything using it stops authenticating.
+
+Asks for confirmation unless --yes is set. The last telemetry or SDK key
+can't be deleted.
+
+Examples:
+  cronitor apikey delete <key>
+  cronitor apikey delete <key> --yes`,
+	Args: cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		key := args[0]
+		masked := maskAPIKey(key)
+
+		if err := confirmAccountChange(fmt.Sprintf("Delete API key %s?", masked), apiKeyYes); err != nil {
+			failAndExit(fmt.Sprintf("API key '%s' not deleted: %s", masked, err))
+			return
+		}
+
+		client := lib.NewAPIClient(dev, log)
+		resp, err := client.DELETE(apiKeyPath(key), nil, nil)
+		if err != nil {
+			failAndExit(fmt.Sprintf("Failed to delete API key: %s", err))
+			return
+		}
+
+		if resp.IsNotFound() {
+			failAndExit(fmt.Sprintf("API key '%s' not found", masked))
+			return
+		}
+
+		if !resp.IsSuccess() {
+			failAndExit(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+			return
+		}
+
+		Success(fmt.Sprintf("API key '%s' deleted", masked))
+	},
+}
+
+func init() {
+	apiKeyCmd.AddCommand(apiKeyListCmd)
+	apiKeyCmd.AddCommand(apiKeyGetCmd)
+	apiKeyCmd.AddCommand(apiKeyCreateCmd)
+	apiKeyCmd.AddCommand(apiKeyUpdateCmd)
+	apiKeyCmd.AddCommand(apiKeyDeleteCmd)
+
+	// List flags
+	apiKeyListCmd.Flags().IntVar(&apiKeyPage, "page", 1, "Page number")
+	apiKeyListCmd.Flags().StringVar(&apiKeySearch, "search", "", "Filter keys by name")
+
+	// Create flags
+	apiKeyCreateCmd.Flags().StringVar(&apiKeyName, "name", "", "Key name")
+	apiKeyCreateCmd.Flags().StringVar(&apiKeyKind, "kind", "custom", "Key kind: custom, sdk, telemetry")
+	apiKeyCreateCmd.Flags().StringArrayVar(&apiKeyScopes, "scope", nil, "Scope to grant, e.g. monitor:read (repeatable; required for custom keys)")
+
+	// Update flags
+	apiKeyUpdateCmd.Flags().StringVar(&apiKeyName, "name", "", "New key name")
+	apiKeyUpdateCmd.Flags().StringArrayVar(&apiKeyScopes, "scope", nil, "Scope to grant, replacing the current scopes (repeatable)")
+
+	// Delete flags
+	apiKeyDeleteCmd.Flags().BoolVar(&apiKeyYes, "yes", false, "Delete without prompting")
+}
+
+func apiKeyPath(key string) string {
+	return "/keys/" + url.PathEscape(key)
+}
+
+// maskAPIKey shows the first and last four characters of a key. Keys too
+// short to hide anything that way are hidden entirely.
+func maskAPIKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	if len(key) <= 12 {
+		return "…"
+	}
+	return key[:4] + "…" + key[len(key)-4:]
+}
+
+func validateAPIKeyKind(kind string) error {
+	for _, k := range apiKeyKinds {
+		if kind == k {
+			return nil
+		}
+	}
+	return fmt.Errorf("Invalid kind '%s'. Use one of: %s", kind, strings.Join(apiKeyKinds, ", "))
+}

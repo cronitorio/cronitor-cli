@@ -70,6 +70,7 @@ func withAccountTest(t *testing.T, mock *testutil.MockAPI) {
 	t.Helper()
 	cleanup := setupIntegrationTest(mock.Server.URL)
 	resetTeamFlags()
+	resetAPIKeyFlags()
 	oldLine := readLineFn
 	oldTerminal := stdinIsTerminalFn
 	readLineFn = func(string) (string, error) { return "n", nil }
@@ -79,6 +80,7 @@ func withAccountTest(t *testing.T, mock *testutil.MockAPI) {
 		readLineFn = oldLine
 		stdinIsTerminalFn = oldTerminal
 		resetTeamFlags()
+		resetAPIKeyFlags()
 		RootCmd.SetArgs([]string{"--help"})
 	})
 }
