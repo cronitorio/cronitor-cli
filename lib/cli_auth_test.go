@@ -36,7 +36,7 @@ func TestCreateMachineCredential_FrozenContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cred, err := lib.CreateMachineCredential(server.URL+"/api", testAccessToken, "testhost")
+	cred, err := lib.CreateMachineCredential(server.URL+"/api", testAccessToken, "testhost", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,13 +48,74 @@ func TestCreateMachineCredential_FrozenContract(t *testing.T) {
 		t.Fatalf("body: %s", gotBody)
 	}
 	if payload["hostname"] != "testhost" || len(payload) != 1 {
-		t.Errorf("frozen body must be hostname only: %#v", payload)
+		t.Errorf("frozen body without account access must be hostname only: %#v", payload)
 	}
 	if cred.Key != testMachineKey || cred.Name != "cli-testhost" || cred.Kind != "machine" || cred.Organization != "Acme" {
 		t.Errorf("cred: %+v", cred)
 	}
 	if len(cred.Scopes) != 2 {
 		t.Errorf("scopes: %#v", cred.Scopes)
+	}
+}
+
+func TestCreateMachineCredential_AccountAccess(t *testing.T) {
+	var gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.WriteHeader(201)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"key":            testMachineKey,
+			"name":           "cli-testhost",
+			"kind":           "machine",
+			"scopes":         []string{"monitors:read"},
+			"organization":   "Acme",
+			"account_access": true,
+		})
+	}))
+	defer server.Close()
+
+	cred, err := lib.CreateMachineCredential(server.URL+"/api", testAccessToken, "testhost", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]interface{}
+	if json.Unmarshal([]byte(gotBody), &payload) != nil {
+		t.Fatalf("body: %s", gotBody)
+	}
+	if payload["hostname"] != "testhost" || payload["account_access"] != true || len(payload) != 2 {
+		t.Errorf("body must be hostname plus account_access: %#v", payload)
+	}
+	if !cred.AccountAccess {
+		t.Errorf("expected account access in response: %+v", cred)
+	}
+}
+
+func TestGetCurrentMachineCredential_AccountAccess(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"granted", `{"name":"cli-testhost","kind":"machine","account_access":true}`, true},
+		{"denied", `{"name":"cli-testhost","kind":"machine","account_access":false}`, false},
+		{"older server omits field", `{"name":"cli-testhost","kind":"machine"}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				io.WriteString(w, tc.body)
+			}))
+			defer server.Close()
+
+			cred, err := lib.GetCurrentMachineCredential(server.URL+"/api", testMachineKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cred.AccountAccess != tc.want {
+				t.Errorf("AccountAccess = %v, want %v", cred.AccountAccess, tc.want)
+			}
+		})
 	}
 }
 
