@@ -49,6 +49,12 @@ Keep using that config path (`CRONITOR_CONFIG` or `--config`) for subsequent com
 `auth status` shows the credential's organization and permissions without exposing the key. Full-access users receive SDK Integration credentials; read-only users receive telemetry-only credentials and cannot manage account resources. Reuse working credentials rather than logging in again for every task.
 
 ```bash
+cronitor auth login --admin
+```
+
+`--admin` also gives the credential account access, so this machine can manage your team and API keys (`cronitor team`, `cronitor apikey`). On those commands the credential acts as you, with your current role. Don't use `--admin` on shared servers: anyone who can read the config file can act as you. `auth status` shows whether the credential has account access.
+
+```bash
 cronitor auth logout
 ```
 
@@ -180,17 +186,44 @@ cronitor environment update <key> -d '{"name":"Updated"}'
 cronitor environment delete <key>
 ```
 
-**Aliases:** `cronitor env` → `environment`, `cronitor notifications` → `notification`, `cronitor integrations` → `integration`
+#### Team
+
+```bash
+cronitor team list
+cronitor team list --format json
+cronitor team invite jane@example.com --name "Jane Doe"        # Role defaults to user
+cronitor team invite ops@example.com --name "Ops" --role readonly
+cronitor team role <id> admin                                  # admin, user, or readonly
+cronitor team remove <id>                                      # Asks first; --yes skips
+```
+
+#### API Keys
+
+```bash
+cronitor apikey list                                           # Table masks each key
+cronitor apikey list --search deploy --page 2
+cronitor apikey list --format json                             # Prints full keys
+cronitor apikey get <key>
+cronitor apikey create --name "Deploy bot" --scope monitor:read --scope monitor:write
+cronitor apikey create --name "Telemetry" --kind telemetry
+cronitor apikey update <key> --name "Renamed"
+cronitor apikey update <key> --scope monitor:read              # Replaces the scopes
+cronitor apikey delete <key>                                   # Asks first; --yes skips
+```
+
+Team and API key commands need a credential from `cronitor auth login --admin` and act with the logged-in user's current role. Any role can list the team; inviting, changing roles, and removing members need the admin role. You can only grant API key scopes your own role has. `apikey create` prints the full key once. Without `--yes`, `team remove` and `apikey delete` refuse to run when stdin is not a terminal.
+
+**Aliases:** `cronitor env` → `environment`, `cronitor notifications` → `notification`, `cronitor integrations` → `integration`, `cronitor teams` → `team`, `cronitor apikeys` / `cronitor keys` → `apikey`
 
 ### Common Flags
 
 | Flag | Description |
 |------|-------------|
-| `--format json\|table\|yaml` | Output format (default: `table` for list, `json` for get) |
+| `--format json\|table` | Output format (default: `table` for list, `json` for get). `monitor` also accepts `yaml` |
 | `-o, --output <file>` | Write output to a file |
 | `--page <n>` | Page number for paginated results |
 | `-d, --data <json>` | JSON data for create/update |
-| `-f, --file <path>` | Read JSON or YAML from a file |
+| `-f, --file <path>` | Read JSON from a file (`monitor create`/`update` and `integration create`; `monitor create` also reads YAML) |
 | `-k, --api-key <key>` | Cronitor API key (appears in shell history and process lists; prefer `CRONITOR_API_KEY`) |
 
 ## Crontab Guru Dashboard
