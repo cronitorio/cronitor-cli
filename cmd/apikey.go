@@ -204,6 +204,8 @@ var apiKeyCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create an API key",
 	Long: `Create an API key. The full key is printed once; list output masks it.
+With --output the key is written to that file (owner-only) instead of the
+terminal; with --format json the file gets the full JSON.
 
 The kind defaults to custom, which needs at least one --scope. Repeat --scope
 to grant more than one.
@@ -211,7 +213,8 @@ to grant more than one.
 Examples:
   cronitor apikey create --name "Deploy bot" --scope monitor:read --scope monitor:write
   cronitor apikey create --name "Telemetry" --kind telemetry
-  cronitor apikey create --name "SDK" --kind sdk --format json`,
+  cronitor apikey create --name "SDK" --kind sdk --format json
+  cronitor apikey create --name "CI" --scope monitor:write --output ci-key.txt`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if strings.TrimSpace(apiKeyName) == "" {
 			failAndExit("Name required. Use --name")
@@ -259,6 +262,10 @@ Examples:
 			return
 		}
 		if result.Key == "" {
+			return
+		}
+		if apiKeyOutput != "" {
+			writeSecretOutput(apiKeyOutput, result.Key)
 			return
 		}
 		fmt.Printf("Key: %s\n", result.Key)

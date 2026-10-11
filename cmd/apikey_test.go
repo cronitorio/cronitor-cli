@@ -537,3 +537,38 @@ func TestAPIKey_OutputFileIsOwnerOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestAPIKeyCreate_OutputFileGetsKeyNotStdout(t *testing.T) {
+	mock := testutil.NewMockAPI()
+	defer mock.Close()
+	mock.On("POST", "/keys", 201, testutil.LoadFixture("apikey_create.json"))
+	withAccountTest(t, mock)
+
+	out := filepath.Join(t.TempDir(), "new-key.txt")
+	output, code, err := executeWithExit("apikey", "create", "--name", "Deploy bot", "--scope", "monitor:read", "--output", out)
+	if err != nil || code != 0 {
+		t.Fatalf("exit %d err %v\n%s", code, err, output)
+	}
+	if strings.Contains(output, apiKeyTestCreated) {
+		t.Errorf("stdout must not show the key when --output is set:\n%s", output)
+	}
+	if !strings.Contains(output, "Deploy bot") || !strings.Contains(output, out) {
+		t.Errorf("expected a short confirmation naming the key and file:\n%s", output)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != apiKeyTestCreated+"\n" {
+		t.Errorf("file = %q, want the key", data)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0600 {
+			t.Errorf("mode %o, want 0600", info.Mode().Perm())
+		}
+	}
+}
