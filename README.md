@@ -58,7 +58,7 @@ cronitor auth login --admin
 cronitor auth logout
 ```
 
-Logout revokes this installation's credential and removes it locally. **Scheduled jobs using that credential will stop authenticating.** Agents should not log out as routine task cleanup. The credential persists independently of the browser session; removing a user or changing their role does not automatically revoke it. Replacing a credential with another login also does not revoke the previous key; remove unused keys in the dashboard.
+Logout revokes this installation's credential and removes it locally. **Scheduled jobs using that credential will stop authenticating.** Agents should not log out as routine task cleanup. The credential persists independently of the browser session. Removing a user from the team revokes the CLI credentials they created for that organization; changing their role does not, and a credential created with `--admin` always acts with the user's current role on team and API key commands. Replacing a credential with another login also does not revoke the previous key; remove unused keys in the dashboard.
 
 ### Cron Management
 | Command | Description |
