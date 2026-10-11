@@ -358,3 +358,48 @@ func TestTeamRemove_NonTerminalRefusesWithoutYes(t *testing.T) {
 		t.Errorf("expected no request, got %d", mock.RequestCount())
 	}
 }
+
+func TestAccountMutations_JSONStdoutIsParseable(t *testing.T) {
+	member := `{"id":42,"name":"Grace Hopper","email":"grace@example.com","role":"admin","state":"active","is_owner":false}`
+	cases := []struct {
+		name      string
+		route     [3]string // method, path, body
+		args      []string
+		emptyBody bool // 204: no JSON to print, so stdout stays empty
+	}{
+		{"team invite", [3]string{"POST", "/team", member}, []string{"team", "invite", "grace@example.com", "--name", "Grace"}, false},
+		{"team role", [3]string{"PUT", "/team/42", member}, []string{"team", "role", "42", "admin"}, false},
+		{"team remove", [3]string{"DELETE", "/team/42", ""}, []string{"team", "remove", "42", "--yes"}, true},
+		{"apikey create", [3]string{"POST", "/keys", testutil.LoadFixture("apikey_create.json")}, []string{"apikey", "create", "--name", "Deploy bot", "--scope", "monitor:read"}, false},
+		{"apikey update", [3]string{"PATCH", "/keys/" + apiKeyTestCustom, testutil.LoadFixture("apikey_get.json")}, []string{"apikey", "update", apiKeyTestCustom, "--name", "Renamed"}, false},
+		{"apikey delete", [3]string{"DELETE", "/keys/" + apiKeyTestCustom, ""}, []string{"apikey", "delete", apiKeyTestCustom, "--yes"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := testutil.NewMockAPI()
+			defer mock.Close()
+			status := 200
+			if tc.emptyBody {
+				status = 204
+			}
+			mock.On(tc.route[0], tc.route[1], status, tc.route[2])
+			withAccountTest(t, mock)
+
+			args := append(append([]string{}, tc.args...), "--format", "json")
+			stdout, stderr, code, err := executeAuth(args...)
+			if err != nil || code != 0 {
+				t.Fatalf("exit %d err %v\n%s%s", code, err, stdout, stderr)
+			}
+			if tc.emptyBody {
+				if strings.TrimSpace(stdout) != "" {
+					t.Errorf("expected empty stdout, got:\n%s", stdout)
+				}
+			} else if !json.Valid([]byte(stdout)) {
+				t.Errorf("stdout is not JSON:\n%s", stdout)
+			}
+			if !strings.Contains(stderr, "✓") {
+				t.Errorf("expected the status line on stderr, got:\n%s", stderr)
+			}
+		})
+	}
+}

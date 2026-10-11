@@ -244,20 +244,23 @@ Examples:
 			return
 		}
 
-		if apiKeyFormat == "json" {
-			writeSecretOutput(apiKeyOutput, FormatJSON(resp.Body))
-			return
-		}
-
 		var result struct {
 			Key  string `json:"key"`
 			Name string `json:"name"`
 		}
 		if err := json.Unmarshal(resp.Body, &result); err != nil || result.Key == "" {
-			Success("API key created")
+			successForFormat(apiKeyFormat, "API key created")
+		} else {
+			successForFormat(apiKeyFormat, fmt.Sprintf("Created API key: %s", result.Name))
+		}
+
+		if apiKeyFormat == "json" {
+			writeSecretOutput(apiKeyOutput, FormatJSON(resp.Body))
 			return
 		}
-		Success(fmt.Sprintf("Created API key: %s", result.Name))
+		if result.Key == "" {
+			return
+		}
 		fmt.Printf("Key: %s\n", result.Key)
 		Info("This is the only time the CLI shows this key unmasked. Store it somewhere safe.")
 	},
@@ -308,7 +311,7 @@ Examples:
 			return
 		}
 
-		Success(fmt.Sprintf("API key '%s' updated", maskAPIKey(key)))
+		successForFormat(apiKeyFormat, fmt.Sprintf("API key '%s' updated", maskAPIKey(key)))
 		if apiKeyFormat == "json" {
 			writeSecretOutput(apiKeyOutput, FormatJSON(resp.Body))
 		}
@@ -355,7 +358,7 @@ Examples:
 			return
 		}
 
-		Success(fmt.Sprintf("API key '%s' deleted", masked))
+		successForFormat(apiKeyFormat, fmt.Sprintf("API key '%s' deleted", masked))
 	},
 }
 

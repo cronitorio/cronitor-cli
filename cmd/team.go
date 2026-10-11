@@ -173,7 +173,7 @@ Examples:
 			return
 		}
 
-		Success(fmt.Sprintf("Invited %s as %s", email, teamRole))
+		successForFormat(teamFormat, fmt.Sprintf("Invited %s as %s", email, teamRole))
 		if teamFormat == "json" {
 			writeCLIOutput(teamOutput, FormatJSON(resp.Body))
 		}
@@ -224,7 +224,7 @@ Examples:
 			return
 		}
 
-		Success(fmt.Sprintf("Team member '%s' is now %s", id, role))
+		successForFormat(teamFormat, fmt.Sprintf("Team member '%s' is now %s", id, role))
 		if teamFormat == "json" {
 			writeCLIOutput(teamOutput, FormatJSON(resp.Body))
 		}
@@ -273,7 +273,7 @@ Examples:
 			return
 		}
 
-		Success(fmt.Sprintf("Team member '%s' removed", id))
+		successForFormat(teamFormat, fmt.Sprintf("Team member '%s' removed", id))
 	},
 }
 
