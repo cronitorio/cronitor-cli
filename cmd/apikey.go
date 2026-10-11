@@ -67,6 +67,9 @@ var (
 
 func init() {
 	RootCmd.AddCommand(apiKeyCmd)
+	apiKeyCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		resetSecretRedaction()
+	}
 	apiKeyCmd.PersistentFlags().StringVar(&apiKeyFormat, "format", "", "Output format: json, table")
 	apiKeyCmd.PersistentFlags().StringVarP(&apiKeyOutput, "output", "o", "", "Write output to file")
 }
@@ -94,7 +97,7 @@ Examples:
   cronitor apikey list --search deploy
   cronitor apikey list --format json`,
 	Run: func(cmd *cobra.Command, args []string) {
-		client := lib.NewAPIClient(dev, log)
+		client := newAPIKeyClient()
 		params := make(map[string]string)
 		if apiKeyPage > 1 {
 			params["page"] = fmt.Sprintf("%d", apiKeyPage)
@@ -173,7 +176,8 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
-		client := lib.NewAPIClient(dev, log)
+		rememberAPIKey(key)
+		client := newAPIKeyClient()
 
 		resp, err := client.GET(apiKeyPath(key), nil)
 		if err != nil {
@@ -228,7 +232,7 @@ Examples:
 		}
 		body, _ := json.Marshal(map[string]interface{}{"name": apiKeyName, "kind": apiKeyKind, "scopes": scopes})
 
-		client := lib.NewAPIClient(dev, log)
+		client := newAPIKeyClient()
 		resp, err := client.POST("/keys", body, nil)
 		if err != nil {
 			failAndExit(fmt.Sprintf("Failed to create API key: %s", err))
@@ -272,6 +276,7 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
+		rememberAPIKey(key)
 
 		fields := map[string]interface{}{}
 		if apiKeyName != "" {
@@ -286,7 +291,7 @@ Examples:
 		}
 		body, _ := json.Marshal(fields)
 
-		client := lib.NewAPIClient(dev, log)
+		client := newAPIKeyClient()
 		resp, err := client.PATCH(apiKeyPath(key), body, nil)
 		if err != nil {
 			failAndExit(fmt.Sprintf("Failed to update API key: %s", err))
@@ -325,6 +330,7 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
+		rememberAPIKey(key)
 		masked := maskAPIKey(key)
 
 		if err := confirmAccountChange(fmt.Sprintf("Delete API key %s?", masked), apiKeyYes); err != nil {
@@ -332,7 +338,7 @@ Examples:
 			return
 		}
 
-		client := lib.NewAPIClient(dev, log)
+		client := newAPIKeyClient()
 		resp, err := client.DELETE(apiKeyPath(key), nil, nil)
 		if err != nil {
 			failAndExit(fmt.Sprintf("Failed to delete API key: %s", err))
@@ -375,6 +381,63 @@ func init() {
 
 	// Delete flags
 	apiKeyDeleteCmd.Flags().BoolVar(&apiKeyYes, "yes", false, "Delete without prompting")
+}
+
+// newAPIKeyClient is the API client for key endpoints. Its log lines go
+// through redactAPIKeyLogMessage, so --verbose and CRONITOR_LOG never record
+// a key value. Keys named on the command line are remembered as secrets
+// before the request (rememberAPIKey), which covers the URL path and error
+// strings.
+func newAPIKeyClient() *lib.APIClient {
+	return lib.NewAPIClient(dev, func(msg string) {
+		log(redactAPIKeyLogMessage(msg))
+	})
+}
+
+// redactAPIKeyLogMessage blanks every "key" value in a logged JSON body. On
+// these endpoints "key" is the API key itself, which the shared redactor
+// does not treat as secret because elsewhere it names a monitor.
+func redactAPIKeyLogMessage(msg string) string {
+	idx := strings.Index(msg, "{")
+	if idx < 0 {
+		return msg
+	}
+	var v interface{}
+	if json.Unmarshal([]byte(msg[idx:]), &v) != nil {
+		return msg
+	}
+	redactKeyValues(v)
+	out, err := json.Marshal(v)
+	if err != nil {
+		return msg
+	}
+	return msg[:idx] + string(out)
+}
+
+func redactKeyValues(v interface{}) {
+	switch node := v.(type) {
+	case map[string]interface{}:
+		for k, child := range node {
+			if k == "key" && isScalar(child) {
+				node[k] = "[REDACTED]"
+				continue
+			}
+			redactKeyValues(child)
+		}
+	case []interface{}:
+		for _, child := range node {
+			redactKeyValues(child)
+		}
+	}
+}
+
+// rememberAPIKey registers a key named on the command line for redaction,
+// in the form it is typed and the form it takes in a request path.
+func rememberAPIKey(key string) {
+	rememberSecret(key)
+	if escaped := url.PathEscape(key); escaped != key {
+		rememberSecret(escaped)
+	}
 }
 
 func apiKeyPath(key string) string {

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cronitorio/cronitor-cli/internal/testutil"
+	"github.com/spf13/viper"
 )
 
 func TestTeamCommandStructure(t *testing.T) {
@@ -75,10 +76,14 @@ func withAccountTest(t *testing.T, mock *testutil.MockAPI) {
 	oldTerminal := stdinIsTerminalFn
 	readLineFn = func(string) (string, error) { return "n", nil }
 	stdinIsTerminalFn = func() bool { return true }
+	resetSecretRedaction()
 	t.Cleanup(func() {
 		cleanup()
 		readLineFn = oldLine
 		stdinIsTerminalFn = oldTerminal
+		verbose = false
+		viper.Set(varLog, "")
+		resetSecretRedaction()
 		resetTeamFlags()
 		resetAPIKeyFlags()
 		RootCmd.SetArgs([]string{"--help"})

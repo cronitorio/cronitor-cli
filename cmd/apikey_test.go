@@ -2,10 +2,14 @@ package cmd
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/cronitorio/cronitor-cli/internal/testutil"
+	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/spf13/viper"
 )
 
 const (
@@ -379,5 +383,97 @@ func TestAPIKeyDelete_LastKeyShowsDetail(t *testing.T) {
 	}
 	if !strings.Contains(output, "You cannot delete your last telemetry key.") {
 		t.Errorf("expected the server detail, got:\n%s", output)
+	}
+}
+
+func assertNoAPIKeys(t *testing.T, where, text string) {
+	t.Helper()
+	for _, key := range []string{apiKeyTestCustom, apiKeyTestSDK, apiKeyTestTelemetry, apiKeyTestCreated} {
+		if strings.Contains(text, key) {
+			t.Errorf("%s leaked full key %s:\n%s", where, key, text)
+		}
+	}
+}
+
+func TestAPIKey_VerboseAndLogFileRedactKeys(t *testing.T) {
+	cases := []struct {
+		name  string
+		route [3]string // method, path, fixture
+		args  []string
+	}{
+		{"list", [3]string{"GET", "/keys", "apikeys_list.json"}, []string{"apikey", "list"}},
+		{"get", [3]string{"GET", "/keys/" + apiKeyTestCustom, "apikey_get.json"}, []string{"apikey", "get", apiKeyTestCustom}},
+		{"create", [3]string{"POST", "/keys", "apikey_create.json"}, []string{"apikey", "create", "--name", "Deploy bot", "--scope", "monitor:read"}},
+		{"update", [3]string{"PATCH", "/keys/" + apiKeyTestCustom, "apikey_get.json"}, []string{"apikey", "update", apiKeyTestCustom, "--name", "Renamed"}},
+		{"delete", [3]string{"DELETE", "/keys/" + apiKeyTestCustom, ""}, []string{"apikey", "delete", apiKeyTestCustom, "--yes"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := testutil.NewMockAPI()
+			defer mock.Close()
+			body := ""
+			if tc.route[2] != "" {
+				body = testutil.LoadFixture(tc.route[2])
+			}
+			mock.On(tc.route[0], tc.route[1], 200, body)
+			withAccountTest(t, mock)
+
+			dir := t.TempDir()
+			logFile := filepath.Join(dir, "debug.log")
+			viper.Set(varLog, logFile)
+			args := append(append([]string{}, tc.args...), "--verbose")
+			stdout, stderr, code, err := executeAuth(args...)
+			if err != nil || code != 0 {
+				t.Fatalf("exit %d err %v\n%s%s", code, err, stdout, stderr)
+			}
+			// get and create print a full key on purpose; only the verbose
+			// log lines must not.
+			var logLines []string
+			for _, line := range strings.Split(stdout, "\n") {
+				for _, prefix := range []string{"API Request:", "Request Body:", "Response Status:", "Response Body:"} {
+					if strings.HasPrefix(line, prefix) {
+						logLines = append(logLines, line)
+					}
+				}
+			}
+			if len(logLines) < 3 {
+				t.Fatalf("expected verbose request logs on stdout:\n%s", stdout)
+			}
+			assertNoAPIKeys(t, "verbose output", strings.Join(logLines, "\n"))
+
+			logged, err := os.ReadFile(logFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(logged), "Response Body:") {
+				t.Fatalf("expected response logging in the log file:\n%s", logged)
+			}
+			assertNoAPIKeys(t, "log file", string(logged))
+		})
+	}
+}
+
+func TestAPIKey_NetworkErrorRedactsKey(t *testing.T) {
+	mock := testutil.NewMockAPI()
+	withAccountTest(t, mock)
+	mock.Close()
+	// Nothing listens here any more, so the request fails with an error
+	// that quotes the URL, which ends in the key.
+	lib.BaseURLOverride = mock.Server.URL
+
+	for _, args := range [][]string{
+		{"apikey", "get", apiKeyTestCustom},
+		{"apikey", "update", apiKeyTestCustom, "--name", "Renamed"},
+		{"apikey", "delete", apiKeyTestCustom, "--yes"},
+	} {
+		resetAPIKeyFlags()
+		stdout, stderr, code, _ := executeAuth(args...)
+		if code != 1 {
+			t.Fatalf("%v: expected exit 1, got %d\n%s%s", args, code, stdout, stderr)
+		}
+		if !strings.Contains(stdout, "Failed to") {
+			t.Errorf("%v: expected a network error, got:\n%s", args, stdout)
+		}
+		assertNoAPIKeys(t, strings.Join(args[:2], " ")+" error", stdout+stderr)
 	}
 }
