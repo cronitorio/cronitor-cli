@@ -140,7 +140,7 @@ Examples:
 		}
 
 		if format == "json" {
-			writeCLIOutput(apiKeyOutput, FormatJSON(resp.Body))
+			writeSecretOutput(apiKeyOutput, FormatJSON(resp.Body))
 			return
 		}
 
@@ -161,7 +161,7 @@ Examples:
 			output += mutedStyle.Render(fmt.Sprintf("\nShowing page %d of %d • %d keys total",
 				result.Page, result.PageCount, result.TotalCount))
 		}
-		writeCLIOutput(apiKeyOutput, output)
+		writeSecretOutput(apiKeyOutput, output)
 	},
 }
 
@@ -195,7 +195,7 @@ Examples:
 			return
 		}
 
-		writeCLIOutput(apiKeyOutput, FormatJSON(resp.Body))
+		writeSecretOutput(apiKeyOutput, FormatJSON(resp.Body))
 	},
 }
 
@@ -245,7 +245,7 @@ Examples:
 		}
 
 		if apiKeyFormat == "json" {
-			writeCLIOutput(apiKeyOutput, FormatJSON(resp.Body))
+			writeSecretOutput(apiKeyOutput, FormatJSON(resp.Body))
 			return
 		}
 
@@ -310,7 +310,7 @@ Examples:
 
 		Success(fmt.Sprintf("API key '%s' updated", maskAPIKey(key)))
 		if apiKeyFormat == "json" {
-			writeCLIOutput(apiKeyOutput, FormatJSON(resp.Body))
+			writeSecretOutput(apiKeyOutput, FormatJSON(resp.Body))
 		}
 	},
 }

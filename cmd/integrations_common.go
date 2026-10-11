@@ -401,8 +401,36 @@ func resolveIntegrationByLabel(client *lib.APIClient, label, service string) (in
 }
 
 func writeCLIOutput(outputPath, content string) {
+	writeOutputWith(outputPath, content, func(path string, data []byte) error {
+		return os.WriteFile(path, data, 0644)
+	})
+}
+
+// writeSecretOutput is writeCLIOutput for content that holds secrets, such as
+// API keys. The file is owner-only (0600, or an owner-only ACL on Windows),
+// and a file that already exists is narrowed to that before it is written.
+func writeSecretOutput(outputPath, content string) {
+	writeOutputWith(outputPath, content, writeOwnerOnlyFile)
+}
+
+func writeOwnerOnlyFile(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := persistLockdownNewFile(path); err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+func writeOutputWith(outputPath, content string, write func(path string, data []byte) error) {
 	if outputPath != "" {
-		if err := os.WriteFile(outputPath, []byte(content+"\n"), 0644); err != nil {
+		if err := write(outputPath, []byte(content+"\n")); err != nil {
 			Error(fmt.Sprintf("Failed to write to %s: %s", outputPath, err))
 			exitFn(1)
 			return

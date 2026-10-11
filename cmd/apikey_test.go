@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -475,5 +476,64 @@ func TestAPIKey_NetworkErrorRedactsKey(t *testing.T) {
 			t.Errorf("%v: expected a network error, got:\n%s", args, stdout)
 		}
 		assertNoAPIKeys(t, strings.Join(args[:2], " ")+" error", stdout+stderr)
+	}
+}
+
+func TestAPIKey_OutputFileIsOwnerOnly(t *testing.T) {
+	cases := []struct {
+		name  string
+		route [3]string
+		args  []string
+	}{
+		{"list", [3]string{"GET", "/keys", "apikeys_list.json"}, []string{"apikey", "list", "--format", "json"}},
+		{"get", [3]string{"GET", "/keys/" + apiKeyTestCustom, "apikey_get.json"}, []string{"apikey", "get", apiKeyTestCustom}},
+		{"create", [3]string{"POST", "/keys", "apikey_create.json"}, []string{"apikey", "create", "--name", "Deploy bot", "--scope", "monitor:read", "--format", "json"}},
+	}
+	for _, tc := range cases {
+		for _, existing := range []bool{false, true} {
+			name := tc.name + "/new file"
+			if existing {
+				name = tc.name + "/existing 0644 file"
+			}
+			t.Run(name, func(t *testing.T) {
+				mock := testutil.NewMockAPI()
+				defer mock.Close()
+				mock.On(tc.route[0], tc.route[1], 200, testutil.LoadFixture(tc.route[2]))
+				withAccountTest(t, mock)
+
+				out := filepath.Join(t.TempDir(), "keys.json")
+				if existing {
+					if err := os.WriteFile(out, []byte("old content that is longer than nothing\n"), 0644); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Chmod(out, 0644); err != nil {
+						t.Fatal(err)
+					}
+				}
+
+				args := append(append([]string{}, tc.args...), "--output", out)
+				output, code, err := executeWithExit(args...)
+				if err != nil || code != 0 {
+					t.Fatalf("exit %d err %v\n%s", code, err, output)
+				}
+				data, err := os.ReadFile(out)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !json.Valid(data) {
+					t.Errorf("expected only the JSON in %s, got:\n%s", out, data)
+				}
+				if runtime.GOOS == "windows" {
+					return
+				}
+				info, err := os.Stat(out)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if info.Mode().Perm() != 0600 {
+					t.Errorf("mode %o, want 0600", info.Mode().Perm())
+				}
+			})
+		}
 	}
 }
