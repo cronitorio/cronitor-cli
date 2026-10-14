@@ -302,6 +302,34 @@ func TestAPIKeyUpdate_SendsOnlyGivenFields(t *testing.T) {
 	}
 }
 
+func TestAPIKeyUpdate_NameOnlyOmitsScopes(t *testing.T) {
+	// Name-only PATCH must send only {"name": ...}. The server treats an
+	// omitted scopes field as "leave unchanged". Sending the existing list
+	// can rewrite a machine credential's name in a way that breaks auth.
+	mock := testutil.NewMockAPI()
+	defer mock.Close()
+	mock.On("PATCH", "/keys/"+apiKeyTestCustom, 200, testutil.LoadFixture("apikey_get.json"))
+	withAccountTest(t, mock)
+
+	output, code, err := executeWithExit("apikey", "update", apiKeyTestCustom, "--name", "Renamed")
+	if err != nil || code != 0 {
+		t.Fatalf("exit %d err %v\n%s", code, err, output)
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal([]byte(mock.LastRequest().Body), &body); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if _, ok := body["scopes"]; ok {
+		t.Errorf("name-only PATCH must omit scopes, body=%s", mock.LastRequest().Body)
+	}
+	if body["name"] != "Renamed" {
+		t.Errorf("name = %v, want Renamed", body["name"])
+	}
+	if len(body) != 1 {
+		t.Errorf("expected only name, got %s", mock.LastRequest().Body)
+	}
+}
+
 func TestAPIKeyUpdate_NothingToUpdate(t *testing.T) {
 	mock := testutil.NewMockAPI()
 	defer mock.Close()
@@ -454,6 +482,69 @@ func TestAPIKey_VerboseAndLogFileRedactKeys(t *testing.T) {
 	}
 }
 
+func TestRedactAPIKeyLogMessage(t *testing.T) {
+	resetSecretRedaction()
+	t.Cleanup(resetSecretRedaction)
+
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"object", `Response Body: {"key":"` + apiKeyTestCustom + `","name":"Deploy bot"}`},
+		{"array", `Response Body: [{"key":"` + apiKeyTestCustom + `"}]`},
+		{"nested page", `Response Body: {"data":[{"key":"` + apiKeyTestCustom + `"},{"key":"` + apiKeyTestCreated + `"}]}`},
+		{"pretty", "Response Body: {\n  \"key\": \"" + apiKeyTestCustom + "\"\n}"},
+		{"trailing text", `Response Body: {"key":"` + apiKeyTestCustom + `"} extra`},
+		{"truncated", `{"key":"` + apiKeyTestCustom + `","name":`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetSecretRedaction()
+			got := redactAPIKeyLogMessage(tc.in)
+			assertNoAPIKeys(t, tc.name, got)
+			if !strings.Contains(got, "[REDACTED]") {
+				t.Errorf("expected [REDACTED] in %q", got)
+			}
+		})
+	}
+}
+
+func TestRedactAPIKeyLogMessage_RemembersKeyForLaterErrors(t *testing.T) {
+	resetSecretRedaction()
+	t.Cleanup(resetSecretRedaction)
+
+	_ = redactAPIKeyLogMessage(`Response Body: {"data":[{"key":"` + apiKeyTestCustom + `"}]}`)
+	got := redactAPIKeyLogMessage("request failed: GET https://cronitor.io/api/keys/" + apiKeyTestCustom)
+	assertNoAPIKeys(t, "later error", got)
+	if !strings.Contains(got, "[REDACTED]") {
+		t.Errorf("expected the remembered key to be redacted, got %q", got)
+	}
+}
+
+func TestAPIKeyList_ErrorBodyRedactsKeys(t *testing.T) {
+	mock := testutil.NewMockAPI()
+	defer mock.Close()
+	// ParseError renders {"key":"..."} as "key: <secret>". The redactor
+	// must remember the value from the logged body and strip it from the
+	// printed error.
+	mock.On("GET", "/keys", 500, `{"key":"`+apiKeyTestCustom+`"}`)
+	withAccountTest(t, mock)
+
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "debug.log")
+	viper.Set(varLog, logFile)
+	stdout, stderr, code, _ := executeAuth("apikey", "list", "--verbose")
+	if code != 1 {
+		t.Fatalf("expected exit 1, got %d\n%s%s", code, stdout, stderr)
+	}
+	assertNoAPIKeys(t, "error output", stdout+stderr)
+	logged, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoAPIKeys(t, "log file", string(logged))
+}
+
 func TestAPIKey_NetworkErrorRedactsKey(t *testing.T) {
 	mock := testutil.NewMockAPI()
 	withAccountTest(t, mock)
@@ -570,5 +661,70 @@ func TestAPIKeyCreate_OutputFileGetsKeyNotStdout(t *testing.T) {
 		if info.Mode().Perm() != 0600 {
 			t.Errorf("mode %o, want 0600", info.Mode().Perm())
 		}
+	}
+}
+
+func TestWriteOwnerOnlyFile_NewAndExisting(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows ACL coverage is in TestWriteOwnerOnlyFile_WindowsACL")
+	}
+	dir := t.TempDir()
+
+	newPath := filepath.Join(dir, "new.txt")
+	if err := writeOwnerOnlyFile(newPath, []byte("secret-one")); err != nil {
+		t.Fatal(err)
+	}
+	assertOwnerOnlyFile(t, newPath, "secret-one")
+
+	exist := filepath.Join(dir, "exist.txt")
+	if err := os.WriteFile(exist, []byte("old content that is longer than nothing"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(exist, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeOwnerOnlyFile(exist, []byte("secret-two")); err != nil {
+		t.Fatal(err)
+	}
+	assertOwnerOnlyFile(t, exist, "secret-two")
+}
+
+func TestWriteOwnerOnlyFile_RefusesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	if err := writeOwnerOnlyFile(link, []byte("secret")); err == nil {
+		t.Fatal("expected refusing a symlink")
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "keep" {
+		t.Errorf("symlink target was overwritten: %q", data)
+	}
+}
+
+func assertOwnerOnlyFile(t *testing.T, path, want string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != want {
+		t.Errorf("content = %q, want %q", data, want)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Errorf("mode %o, want 0600", info.Mode().Perm())
 	}
 }

@@ -414,12 +414,26 @@ func writeSecretOutput(outputPath, content string) {
 }
 
 func writeOwnerOnlyFile(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to write secrets through symlink %s", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, configModeOwnerOnly)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	if err := persistLockdownNewFile(path); err != nil {
+	// Restrict before the first secret byte: 0600 on Unix, owner-only ACL
+	// on Windows, and drop an inherited POSIX ACL a 0600 mode would not
+	// remove on its own.
+	if err := persistApplyMode(f, path, configModeOwnerOnly); err != nil {
+		return err
+	}
+	if err := persistClearACL(path); err != nil {
 		return err
 	}
 	if _, err := f.Write(data); err != nil {

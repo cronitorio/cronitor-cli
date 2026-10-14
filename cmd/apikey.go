@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/cronitorio/cronitor-cli/lib"
@@ -108,12 +110,12 @@ Examples:
 
 		resp, err := client.GET("/keys", params)
 		if err != nil {
-			failAndExit(fmt.Sprintf("Failed to list API keys: %s", err))
+			failAPIKey("Failed to list API keys: %s", err)
 			return
 		}
 
 		if !resp.IsSuccess() {
-			failAndExit(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+			failAPIKey("API Error (%d): %s", resp.StatusCode, resp.ParseError())
 			return
 		}
 
@@ -130,7 +132,7 @@ Examples:
 			} `json:"data"`
 		}
 		if err := json.Unmarshal(resp.Body, &result); err != nil {
-			failAndExit(fmt.Sprintf("Failed to parse response: %s", err))
+			failAPIKey("Failed to parse response: %s", err)
 			return
 		}
 
@@ -181,17 +183,17 @@ Examples:
 
 		resp, err := client.GET(apiKeyPath(key), nil)
 		if err != nil {
-			failAndExit(fmt.Sprintf("Failed to get API key: %s", err))
+			failAPIKey("Failed to get API key: %s", err)
 			return
 		}
 
 		if resp.IsNotFound() {
-			failAndExit(fmt.Sprintf("API key '%s' not found", maskAPIKey(key)))
+			failAPIKey("API key '%s' not found", maskAPIKey(key))
 			return
 		}
 
 		if !resp.IsSuccess() {
-			failAndExit(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+			failAPIKey("API Error (%d): %s", resp.StatusCode, resp.ParseError())
 			return
 		}
 
@@ -217,15 +219,15 @@ Examples:
   cronitor apikey create --name "CI" --scope monitor:write --output ci-key.txt`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if strings.TrimSpace(apiKeyName) == "" {
-			failAndExit("Name required. Use --name")
+			failAPIKey("Name required. Use --name")
 			return
 		}
 		if err := validateAPIKeyKind(apiKeyKind); err != nil {
-			failAndExit(err.Error())
+			failAPIKey("%s", err.Error())
 			return
 		}
 		if apiKeyKind == "custom" && len(apiKeyScopes) == 0 {
-			failAndExit("Custom keys need at least one --scope")
+			failAPIKey("Custom keys need at least one --scope")
 			return
 		}
 
@@ -238,12 +240,12 @@ Examples:
 		client := newAPIKeyClient()
 		resp, err := client.POST("/keys", body, nil)
 		if err != nil {
-			failAndExit(fmt.Sprintf("Failed to create API key: %s", err))
+			failAPIKey("Failed to create API key: %s", err)
 			return
 		}
 
 		if !resp.IsSuccess() {
-			failAndExit(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+			failAPIKey("API Error (%d): %s", resp.StatusCode, resp.ParseError())
 			return
 		}
 
@@ -296,7 +298,7 @@ Examples:
 			fields["scopes"] = apiKeyScopes
 		}
 		if len(fields) == 0 {
-			failAndExit("Nothing to update. Use --name or --scope")
+			failAPIKey("Nothing to update. Use --name or --scope")
 			return
 		}
 		body, _ := json.Marshal(fields)
@@ -304,17 +306,17 @@ Examples:
 		client := newAPIKeyClient()
 		resp, err := client.PATCH(apiKeyPath(key), body, nil)
 		if err != nil {
-			failAndExit(fmt.Sprintf("Failed to update API key: %s", err))
+			failAPIKey("Failed to update API key: %s", err)
 			return
 		}
 
 		if resp.IsNotFound() {
-			failAndExit(fmt.Sprintf("API key '%s' not found", maskAPIKey(key)))
+			failAPIKey("API key '%s' not found", maskAPIKey(key))
 			return
 		}
 
 		if !resp.IsSuccess() {
-			failAndExit(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+			failAPIKey("API Error (%d): %s", resp.StatusCode, resp.ParseError())
 			return
 		}
 
@@ -344,24 +346,24 @@ Examples:
 		masked := maskAPIKey(key)
 
 		if err := confirmAccountChange(fmt.Sprintf("Delete API key %s?", masked), apiKeyYes); err != nil {
-			failAndExit(fmt.Sprintf("API key '%s' not deleted: %s", masked, err))
+			failAPIKey("API key '%s' not deleted: %s", masked, err)
 			return
 		}
 
 		client := newAPIKeyClient()
 		resp, err := client.DELETE(apiKeyPath(key), nil, nil)
 		if err != nil {
-			failAndExit(fmt.Sprintf("Failed to delete API key: %s", err))
+			failAPIKey("Failed to delete API key: %s", err)
 			return
 		}
 
 		if resp.IsNotFound() {
-			failAndExit(fmt.Sprintf("API key '%s' not found", masked))
+			failAPIKey("API key '%s' not found", masked)
 			return
 		}
 
 		if !resp.IsSuccess() {
-			failAndExit(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
+			failAPIKey("API Error (%d): %s", resp.StatusCode, resp.ParseError())
 			return
 		}
 
@@ -397,31 +399,113 @@ func init() {
 // through redactAPIKeyLogMessage, so --verbose and CRONITOR_LOG never record
 // a key value. Keys named on the command line are remembered as secrets
 // before the request (rememberAPIKey), which covers the URL path and error
-// strings.
+// strings. Keys seen in a response body are remembered too, so a later
+// ParseError or network error cannot print them.
 func newAPIKeyClient() *lib.APIClient {
 	return lib.NewAPIClient(dev, func(msg string) {
 		log(redactAPIKeyLogMessage(msg))
 	})
 }
 
-// redactAPIKeyLogMessage blanks every "key" value in a logged JSON body. On
+func failAPIKey(format string, args ...interface{}) {
+	failAndExit(redactAPIKeyLogMessage(fmt.Sprintf(format, args...)))
+}
+
+// apiKeyJSONField finds "key":"..." even when the surrounding text is not
+// valid JSON, so a truncated or pretty-printed body still gets redacted.
+var apiKeyJSONField = regexp.MustCompile(`"key"\s*:\s*"((?:\\.|[^"\\])*)"`)
+
+// redactAPIKeyLogMessage blanks every "key" value in a logged JSON body and
+// replaces any remembered key everywhere else (URL path, error text). On
 // these endpoints "key" is the API key itself, which the shared redactor
 // does not treat as secret because elsewhere it names a monitor.
 func redactAPIKeyLogMessage(msg string) string {
-	idx := strings.Index(msg, "{")
+	rememberAPIKeysInJSON(msg)
+	msg = redactSecrets(msg)
+
+	idx := indexJSONStart(msg)
 	if idx < 0 {
-		return msg
+		return redactKeyJSONFallback(msg)
 	}
 	var v interface{}
-	if json.Unmarshal([]byte(msg[idx:]), &v) != nil {
-		return msg
+	dec := json.NewDecoder(strings.NewReader(msg[idx:]))
+	if err := dec.Decode(&v); err != nil {
+		return redactKeyJSONFallback(msg)
 	}
 	redactKeyValues(v)
 	out, err := json.Marshal(v)
 	if err != nil {
-		return msg
+		return redactKeyJSONFallback(msg)
 	}
-	return msg[:idx] + string(out)
+	rest := idx + int(dec.InputOffset())
+	if rest < idx || rest > len(msg) {
+		return msg[:idx] + string(out)
+	}
+	return msg[:idx] + string(out) + msg[rest:]
+}
+
+func indexJSONStart(msg string) int {
+	brace := strings.IndexByte(msg, '{')
+	bracket := strings.IndexByte(msg, '[')
+	switch {
+	case brace < 0:
+		return bracket
+	case bracket < 0:
+		return brace
+	case brace < bracket:
+		return brace
+	default:
+		return bracket
+	}
+}
+
+func rememberAPIKeysInJSON(msg string) {
+	idx := indexJSONStart(msg)
+	if idx >= 0 {
+		var v interface{}
+		dec := json.NewDecoder(strings.NewReader(msg[idx:]))
+		if dec.Decode(&v) == nil {
+			walkRememberKeys(v)
+			return
+		}
+	}
+	rememberAPIKeysFromJSONText(msg)
+}
+
+func walkRememberKeys(v interface{}) {
+	switch node := v.(type) {
+	case map[string]interface{}:
+		for k, child := range node {
+			if k == "key" {
+				if s, ok := child.(string); ok {
+					rememberAPIKey(s)
+				}
+			}
+			walkRememberKeys(child)
+		}
+	case []interface{}:
+		for _, child := range node {
+			walkRememberKeys(child)
+		}
+	}
+}
+
+func rememberAPIKeysFromJSONText(msg string) {
+	for _, m := range apiKeyJSONField.FindAllStringSubmatch(msg, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		if s, err := strconv.Unquote(`"` + m[1] + `"`); err == nil {
+			rememberAPIKey(s)
+		} else {
+			rememberAPIKey(m[1])
+		}
+	}
+}
+
+func redactKeyJSONFallback(msg string) string {
+	rememberAPIKeysFromJSONText(msg)
+	return apiKeyJSONField.ReplaceAllString(msg, `"key":"[REDACTED]"`)
 }
 
 func redactKeyValues(v interface{}) {
@@ -441,8 +525,8 @@ func redactKeyValues(v interface{}) {
 	}
 }
 
-// rememberAPIKey registers a key named on the command line for redaction,
-// in the form it is typed and the form it takes in a request path.
+// rememberAPIKey registers a key for redaction, in the form it is typed
+// and the form it takes in a request path.
 func rememberAPIKey(key string) {
 	rememberSecret(key)
 	if escaped := url.PathEscape(key); escaped != key {
