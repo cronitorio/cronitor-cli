@@ -28,6 +28,7 @@ var (
 	authNoBrowser bool
 	authTimeout   string
 	authForce     bool
+	authAdmin     bool
 )
 
 const authLoginLong = `Start browser authorization with PKCE, then exchange the approved session
@@ -39,7 +40,12 @@ into this terminal. Authorization codes, tokens, and API keys are never printed.
 The CLI waits 30 minutes by default and prints when that wait ends, in local
 time, next to the authorization URL. After you open the link, finish signing in
 within about 5 minutes. Pass --timeout (for example 2h) to wait longer.
-Starting a new login replaces the previous URL.`
+Starting a new login replaces the previous URL.
+
+Pass --admin to give the credential account access. It lets this machine
+manage your team and API keys with your current role (cronitor team,
+cronitor apikey). Don't use --admin on shared servers: anyone who can read
+the config file can act as you on those account endpoints.`
 
 var authCmd = &cobra.Command{
 	Use:   "auth",
@@ -52,9 +58,14 @@ as CRONITOR_API_KEY. WorkOS tokens are used once to create that credential
 and are then discarded. They are never refreshed or written to disk.
 
   cronitor auth login
+  cronitor auth login --admin
   cronitor signup        (alias for auth login)
   cronitor auth status
-  cronitor auth logout`,
+  cronitor auth logout
+
+--admin also gives the credential account access, so this machine can manage
+the team and API keys with the logged-in user's role. Don't use it on shared
+servers.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		_ = cmd.Help()
 	},
@@ -121,12 +132,14 @@ func addAuthLoginFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&authYes, "yes", false, "Install or replace a machine credential without prompting")
 	cmd.Flags().BoolVar(&authNoBrowser, "no-browser", false, "Print the authorization URL and accept callback URL paste-back (remote/headless login)")
 	cmd.Flags().StringVar(&authTimeout, "timeout", "", "Maximum time for browser authorization and token exchange (default: 30m)")
+	cmd.Flags().BoolVar(&authAdmin, "admin", false, "Give the credential account access to manage the team and API keys with your role (not for shared servers)")
 }
 
 func resetAuthLoginFlags(cmd *cobra.Command) {
 	_ = cmd.Flags().Set("yes", "false")
 	_ = cmd.Flags().Set("no-browser", "false")
 	_ = cmd.Flags().Set("timeout", "")
+	_ = cmd.Flags().Set("admin", "false")
 }
 
 func resetCobraHelpFlags(cmd *cobra.Command) {
@@ -151,6 +164,7 @@ func resetAuthFlags() {
 	authNoBrowser = false
 	authTimeout = ""
 	authForce = false
+	authAdmin = false
 	resetAuthLoginFlags(authLoginCmd)
 	resetAuthLoginFlags(signupCmd)
 	_ = authLogoutCmd.Flags().Set("yes", "false")
@@ -201,7 +215,7 @@ func runAuthLogin() {
 	rememberSecret(token.IDToken)
 
 	hostname := effectiveHostname()
-	cred, err := lib.CreateMachineCredential(lib.APIBaseURL(dev), token.AccessToken, hostname)
+	cred, err := lib.CreateMachineCredential(lib.APIBaseURL(dev), token.AccessToken, hostname, authAdmin)
 	token.Discard()
 	if err != nil {
 		failAndExit(redactSecrets(err.Error()))
@@ -228,7 +242,18 @@ func printAuthLoginSuccess(cred *lib.MachineCredential) {
 	if len(cred.Scopes) > 0 {
 		fmt.Printf("Scopes: %s\n", strings.Join(cred.Scopes, ", "))
 	}
+	fmt.Printf("Account access: %s\n", yesNo(cred.AccountAccess))
 	fmt.Printf("Config: %s\n", configFilePath())
+	if authAdmin && !cred.AccountAccess {
+		Warning("The server did not grant account access. Team and API key commands will be refused with this credential.")
+	}
+}
+
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
 }
 
 func parseAuthTimeout(raw string) (time.Duration, error) {
@@ -418,7 +443,14 @@ func clearManagedAuthMetadataIfReplacingKey(cmd *cobra.Command) {
 }
 
 func confirmAuthAction(prompt string) bool {
-	if authYes {
+	return confirmYesNo(prompt, authYes)
+}
+
+// confirmYesNo asks prompt with a [y/N] suffix through readLineFn unless yes
+// (from --yes) already answered it. Only y or yes confirms; a read error such
+// as EOF is a no.
+func confirmYesNo(prompt string, yes bool) bool {
+	if yes {
 		return true
 	}
 	line, err := readLineFn(prompt + " [y/N] ")
@@ -431,6 +463,22 @@ func confirmAuthAction(prompt string) bool {
 	default:
 		return false
 	}
+}
+
+// confirmAccountChange asks prompt before a destructive team or API key
+// change. yes (from --yes) skips the question. Without it a non-interactive
+// stdin is refused rather than read, so a script fails instead of waiting.
+func confirmAccountChange(prompt string, yes bool) error {
+	if yes {
+		return nil
+	}
+	if !stdinIsTerminalFn() {
+		return fmt.Errorf("stdin is not a terminal; pass --yes to confirm")
+	}
+	if !confirmYesNo(prompt, false) {
+		return fmt.Errorf("cancelled")
+	}
+	return nil
 }
 
 func runAuthStatus() {
@@ -474,6 +522,7 @@ func runAuthStatus() {
 	if len(cred.Scopes) > 0 {
 		fmt.Printf("Scopes: %s\n", strings.Join(cred.Scopes, ", "))
 	}
+	fmt.Printf("Account access: %s\n", yesNo(cred.AccountAccess))
 	fmt.Printf("Config: %s\n", configFilePath())
 	if cred.Key != "" {
 		// Defensive: the contract forbids returning the key. Never print it.

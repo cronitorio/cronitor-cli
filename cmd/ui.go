@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -12,12 +13,12 @@ import (
 
 // Color palette
 var (
-	primaryColor   = lipgloss.Color("#7C3AED") // Purple
-	successColor   = lipgloss.Color("#10B981") // Green
-	warningColor   = lipgloss.Color("#F59E0B") // Amber
-	errorColor     = lipgloss.Color("#EF4444") // Red
-	mutedColor     = lipgloss.Color("#6B7280") // Gray
-	borderColor    = lipgloss.Color("#374151") // Dark gray
+	primaryColor = lipgloss.Color("#7C3AED") // Purple
+	successColor = lipgloss.Color("#10B981") // Green
+	warningColor = lipgloss.Color("#F59E0B") // Amber
+	errorColor   = lipgloss.Color("#EF4444") // Red
+	mutedColor   = lipgloss.Color("#6B7280") // Gray
+	borderColor  = lipgloss.Color("#374151") // Dark gray
 )
 
 // Styles
@@ -88,19 +89,19 @@ var (
 
 // Icons
 const (
-	iconCheck    = "✓"
-	iconCross    = "✗"
-	iconWarning  = "⚠"
-	iconInfo     = "ℹ"
-	iconArrow    = "→"
-	iconDot      = "•"
-	iconSpinner  = "◐"
+	iconCheck   = "✓"
+	iconCross   = "✗"
+	iconWarning = "⚠"
+	iconInfo    = "ℹ"
+	iconArrow   = "→"
+	iconDot     = "•"
+	iconSpinner = "◐"
 )
 
 // UITable represents a styled table
 type UITable struct {
-	Headers []string
-	Rows    [][]string
+	Headers  []string
+	Rows     [][]string
 	MaxWidth int
 }
 
@@ -182,6 +183,16 @@ func StatusBadge(passing bool, paused bool) string {
 // Success prints a success message
 func Success(msg string) {
 	fmt.Println(successStyle.Render(iconCheck + " " + msg))
+}
+
+// successForFormat prints a success message. With format json it goes to
+// stderr, so stdout holds only the JSON and stays parseable.
+func successForFormat(format, msg string) {
+	if format == "json" {
+		fmt.Fprintln(os.Stderr, successStyle.Render(iconCheck+" "+msg))
+		return
+	}
+	Success(msg)
 }
 
 // Error prints an error message
