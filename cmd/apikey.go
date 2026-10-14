@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/cronitorio/cronitor-cli/lib"
@@ -431,10 +430,11 @@ func redactAPIKeyLogMessage(msg string) string {
 
 func rememberAPIKeysFromJSONText(msg string) {
 	for _, m := range apiKeyJSONField.FindAllStringSubmatch(msg, -1) {
-		if len(m) < 2 {
-			continue
+		if !strings.HasSuffix(m[0], `"`) {
+			continue // cut off; the regex replacement already covers this line
 		}
-		if s, err := strconv.Unquote(`"` + m[1] + `"`); err == nil {
+		var s string
+		if json.Unmarshal([]byte(`"`+m[1]+`"`), &s) == nil {
 			rememberAPIKey(s)
 		} else {
 			rememberAPIKey(m[1])

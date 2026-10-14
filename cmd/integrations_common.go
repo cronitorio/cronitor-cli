@@ -24,6 +24,10 @@ var (
 	nowFn         = time.Now
 
 	stdinIsTerminalFn = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+
+	// persistApplyModeFn is the owner-only mode/ACL helper used by
+	// writeOwnerOnlyFile. Tests replace it to simulate a chmod failure.
+	persistApplyModeFn = persistApplyMode
 )
 
 var integrationSecretValues []string
@@ -418,6 +422,9 @@ func writeOwnerOnlyFile(path string, data []byte) error {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("refusing to write secrets through symlink %s", path)
 		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("refusing to write secrets to non-regular file %s", path)
+		}
 	} else if !os.IsNotExist(err) {
 		return err
 	}
@@ -431,10 +438,20 @@ func writeOwnerOnlyFile(path string, data []byte) error {
 		return err
 	}
 	defer f.Close()
+	// Refuse devices, FIFOs, and anything else that is not a regular file
+	// (or a newly created one) before chmod, so --output /dev/null cannot
+	// change the device mode.
+	opened, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !opened.Mode().IsRegular() {
+		return fmt.Errorf("refusing to write secrets to non-regular file %s", path)
+	}
 	// Restrict before the first secret byte: 0600 on Unix, owner-only ACL
 	// on Windows, and drop an inherited POSIX ACL a 0600 mode would not
 	// remove on its own.
-	if err := persistApplyMode(f, path, configModeOwnerOnly); err != nil {
+	if err := persistApplyModeFn(f, path, configModeOwnerOnly); err != nil {
 		return err
 	}
 	if err := persistClearACL(path); err != nil {

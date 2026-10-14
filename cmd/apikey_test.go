@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -543,6 +544,31 @@ func TestRedactAPIKeyLogMessage(t *testing.T) {
 			t.Errorf("truncated key prefix leaked in %q", got)
 		}
 	})
+
+	t.Run("slash-escaped key is remembered decoded", func(t *testing.T) {
+		resetSecretRedaction()
+		decoded := "cust/123456789abcdefghijklmnWXYZ"
+		escaped := `cust\/123456789abcdefghijklmnWXYZ`
+		_ = redactAPIKeyLogMessage(`{"key":"` + escaped + `"}`)
+		got := redactAPIKeyLogMessage("key: " + decoded)
+		if strings.Contains(got, decoded) {
+			t.Errorf("decoded slash key leaked: %q", got)
+		}
+		if !strings.Contains(got, "[REDACTED]") {
+			t.Errorf("expected remembered decoded key to be redacted, got %q", got)
+		}
+	})
+
+	t.Run("truncated key is not remembered", func(t *testing.T) {
+		resetSecretRedaction()
+		// A 1-character prefix would otherwise be substituted into every later line.
+		_ = redactAPIKeyLogMessage(`{"key":"F`)
+		later := "Failed to create key"
+		got := redactAPIKeyLogMessage(later)
+		if got != later {
+			t.Errorf("truncated prefix was remembered: got %q", got)
+		}
+	})
 }
 
 func TestRedactAPIKeyLogMessage_RemembersKeyForLaterErrors(t *testing.T) {
@@ -723,6 +749,70 @@ func TestWriteOwnerOnlyFile_NewAndExisting(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertOwnerOnlyFile(t, exist, "secret-two")
+}
+
+func TestWriteOwnerOnlyFile_RefusesNonRegular(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeOwnerOnlyFile(dir, []byte("secret")); err == nil {
+		t.Fatal("expected refusing a directory")
+	}
+
+	if runtime.GOOS == "windows" {
+		return
+	}
+	before, err := os.Lstat("/dev/null")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeOwnerOnlyFile("/dev/null", []byte("secret")); err == nil {
+		t.Fatal("expected refusing /dev/null")
+	}
+	after, err := os.Lstat("/dev/null")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Mode() != before.Mode() {
+		t.Errorf("/dev/null mode changed from %v to %v", before.Mode(), after.Mode())
+	}
+}
+
+func TestWriteOwnerOnlyFile_KeepsContentsWhenChmodFails(t *testing.T) {
+	dir := t.TempDir()
+	exist := filepath.Join(dir, "exist.txt")
+	const old = "old content that must stay"
+	if err := os.WriteFile(exist, []byte(old), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(exist, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	prev := persistApplyModeFn
+	persistApplyModeFn = func(*os.File, string, os.FileMode) error {
+		return fmt.Errorf("chmod denied")
+	}
+	t.Cleanup(func() { persistApplyModeFn = prev })
+
+	if err := writeOwnerOnlyFile(exist, []byte("secret-must-not-be-written")); err == nil {
+		t.Fatal("expected chmod failure")
+	}
+	data, err := os.ReadFile(exist)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != old {
+		t.Errorf("existing file was changed: %q", data)
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+	info, err := os.Stat(exist)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0644 {
+		t.Errorf("mode %o, want 0644 (unchanged)", info.Mode().Perm())
+	}
 }
 
 func TestWriteOwnerOnlyFile_RefusesSymlink(t *testing.T) {
