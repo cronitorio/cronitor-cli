@@ -422,7 +422,11 @@ func writeOwnerOnlyFile(path string, data []byte) error {
 		return err
 	}
 
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, configModeOwnerOnly)
+	// Open without O_TRUNC so a later persistApplyMode failure does not
+	// empty an existing file. secretFileOpenFlags adds O_NOFOLLOW on Unix
+	// to close the race between Lstat and open; Windows keeps the Lstat
+	// check above.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|secretFileOpenFlags(), configModeOwnerOnly)
 	if err != nil {
 		return err
 	}
@@ -436,10 +440,22 @@ func writeOwnerOnlyFile(path string, data []byte) error {
 	if err := persistClearACL(path); err != nil {
 		return err
 	}
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
 	if _, err := f.Write(data); err != nil {
 		return err
 	}
 	return f.Close()
+}
+
+func validateOutputFormat(format string) error {
+	switch format {
+	case "", "json", "table":
+		return nil
+	default:
+		return fmt.Errorf("Invalid --format '%s'. Use one of: json, table", format)
+	}
 }
 
 func writeOutputWith(outputPath, content string, write func(path string, data []byte) error) {

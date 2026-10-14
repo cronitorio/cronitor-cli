@@ -57,6 +57,11 @@ var (
 
 func init() {
 	RootCmd.AddCommand(teamCmd)
+	teamCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		if err := validateOutputFormat(teamFormat); err != nil {
+			failAndExit(err.Error())
+		}
+	}
 	teamCmd.PersistentFlags().StringVar(&teamFormat, "format", "", "Output format: json, table")
 	teamCmd.PersistentFlags().StringVarP(&teamOutput, "output", "o", "", "Write output to file")
 }

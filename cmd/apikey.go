@@ -71,6 +71,9 @@ func init() {
 	RootCmd.AddCommand(apiKeyCmd)
 	apiKeyCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		resetSecretRedaction()
+		if err := validateOutputFormat(apiKeyFormat); err != nil {
+			failAndExit(err.Error())
+		}
 	}
 	apiKeyCmd.PersistentFlags().StringVar(&apiKeyFormat, "format", "", "Output format: json, table")
 	apiKeyCmd.PersistentFlags().StringVarP(&apiKeyOutput, "output", "o", "", "Write output to file")
@@ -412,82 +415,18 @@ func failAPIKey(format string, args ...interface{}) {
 }
 
 // apiKeyJSONField finds "key":"..." even when the surrounding text is not
-// valid JSON, so a truncated or pretty-printed body still gets redacted.
-var apiKeyJSONField = regexp.MustCompile(`"key"\s*:\s*"((?:\\.|[^"\\])*)"`)
+// valid JSON. The closing quote is optional so a body cut off inside the
+// key string is still redacted.
+var apiKeyJSONField = regexp.MustCompile(`"key"\s*:\s*"((?:\\.|[^"\\])*)"?`)
 
 // redactAPIKeyLogMessage blanks every "key" value in a logged JSON body and
 // replaces any remembered key everywhere else (URL path, error text). On
 // these endpoints "key" is the API key itself, which the shared redactor
 // does not treat as secret because elsewhere it names a monitor.
 func redactAPIKeyLogMessage(msg string) string {
-	rememberAPIKeysInJSON(msg)
-	msg = redactSecrets(msg)
-
-	idx := indexJSONStart(msg)
-	if idx < 0 {
-		return redactKeyJSONFallback(msg)
-	}
-	var v interface{}
-	dec := json.NewDecoder(strings.NewReader(msg[idx:]))
-	if err := dec.Decode(&v); err != nil {
-		return redactKeyJSONFallback(msg)
-	}
-	redactKeyValues(v)
-	out, err := json.Marshal(v)
-	if err != nil {
-		return redactKeyJSONFallback(msg)
-	}
-	rest := idx + int(dec.InputOffset())
-	if rest < idx || rest > len(msg) {
-		return msg[:idx] + string(out)
-	}
-	return msg[:idx] + string(out) + msg[rest:]
-}
-
-func indexJSONStart(msg string) int {
-	brace := strings.IndexByte(msg, '{')
-	bracket := strings.IndexByte(msg, '[')
-	switch {
-	case brace < 0:
-		return bracket
-	case bracket < 0:
-		return brace
-	case brace < bracket:
-		return brace
-	default:
-		return bracket
-	}
-}
-
-func rememberAPIKeysInJSON(msg string) {
-	idx := indexJSONStart(msg)
-	if idx >= 0 {
-		var v interface{}
-		dec := json.NewDecoder(strings.NewReader(msg[idx:]))
-		if dec.Decode(&v) == nil {
-			walkRememberKeys(v)
-			return
-		}
-	}
 	rememberAPIKeysFromJSONText(msg)
-}
-
-func walkRememberKeys(v interface{}) {
-	switch node := v.(type) {
-	case map[string]interface{}:
-		for k, child := range node {
-			if k == "key" {
-				if s, ok := child.(string); ok {
-					rememberAPIKey(s)
-				}
-			}
-			walkRememberKeys(child)
-		}
-	case []interface{}:
-		for _, child := range node {
-			walkRememberKeys(child)
-		}
-	}
+	msg = redactSecrets(msg)
+	return apiKeyJSONField.ReplaceAllString(msg, `"key":"[REDACTED]"`)
 }
 
 func rememberAPIKeysFromJSONText(msg string) {
@@ -499,28 +438,6 @@ func rememberAPIKeysFromJSONText(msg string) {
 			rememberAPIKey(s)
 		} else {
 			rememberAPIKey(m[1])
-		}
-	}
-}
-
-func redactKeyJSONFallback(msg string) string {
-	rememberAPIKeysFromJSONText(msg)
-	return apiKeyJSONField.ReplaceAllString(msg, `"key":"[REDACTED]"`)
-}
-
-func redactKeyValues(v interface{}) {
-	switch node := v.(type) {
-	case map[string]interface{}:
-		for k, child := range node {
-			if k == "key" && isScalar(child) {
-				node[k] = "[REDACTED]"
-				continue
-			}
-			redactKeyValues(child)
-		}
-	case []interface{}:
-		for _, child := range node {
-			redactKeyValues(child)
 		}
 	}
 }

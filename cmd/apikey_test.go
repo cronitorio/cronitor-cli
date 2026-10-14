@@ -245,6 +245,31 @@ func TestAPIKeyCreate_JSONFormat(t *testing.T) {
 	}
 }
 
+func TestAccountCommands_RejectInvalidFormat(t *testing.T) {
+	cases := [][]string{
+		{"apikey", "list", "--format", "yaml"},
+		{"team", "list", "--format", "yaml"},
+	}
+	for _, args := range cases {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			mock := testutil.NewMockAPI()
+			defer mock.Close()
+			withAccountTest(t, mock)
+
+			output, code, _ := executeWithExit(args...)
+			if code != 1 {
+				t.Fatalf("expected exit 1, got %d\n%s", code, output)
+			}
+			if !strings.Contains(output, "Invalid --format") || !strings.Contains(output, "yaml") {
+				t.Errorf("expected a clear format error, got:\n%s", output)
+			}
+			if mock.RequestCount() != 0 {
+				t.Errorf("expected no request, got %d", mock.RequestCount())
+			}
+		})
+	}
+}
+
 func TestAPIKeyCreate_RejectsBadInputWithoutRequest(t *testing.T) {
 	cases := map[string][]string{
 		"custom without scope": {"apikey", "create", "--name", "Deploy bot"},
@@ -496,6 +521,8 @@ func TestRedactAPIKeyLogMessage(t *testing.T) {
 		{"pretty", "Response Body: {\n  \"key\": \"" + apiKeyTestCustom + "\"\n}"},
 		{"trailing text", `Response Body: {"key":"` + apiKeyTestCustom + `"} extra`},
 		{"truncated", `{"key":"` + apiKeyTestCustom + `","name":`},
+		{"second value", `A {"a":1} B {"key":"` + apiKeyTestCustom + `"}`},
+		{"truncated key", `{"key":"` + apiKeyTestCustom[:16]},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -507,6 +534,15 @@ func TestRedactAPIKeyLogMessage(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("truncated key prefix is gone", func(t *testing.T) {
+		resetSecretRedaction()
+		prefix := apiKeyTestCustom[:16]
+		got := redactAPIKeyLogMessage(`{"key":"` + prefix)
+		if strings.Contains(got, prefix) {
+			t.Errorf("truncated key prefix leaked in %q", got)
+		}
+	})
 }
 
 func TestRedactAPIKeyLogMessage_RemembersKeyForLaterErrors(t *testing.T) {
