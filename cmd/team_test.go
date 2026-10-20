@@ -440,10 +440,10 @@ func TestValidateTeamMemberID(t *testing.T) {
 	}
 }
 
-// TestTeamList_EmailIDContract locks the list shape from cronitor#467
-// (feat/cli-account-access): id is the member email. The server tests use
-// id "member@example.com". Decoding runs before the format branch, so both
-// table and json must accept that body.
+// TestTeamList_EmailIDContract locks the list shape from cronitor#467:
+// {"data":[...]} and each id is the member email. Decoding runs before the
+// format branch, so both table and json must accept that body. List values
+// are the stored casing; the command prints them unchanged.
 func TestTeamList_EmailIDContract(t *testing.T) {
 	fixture := testutil.LoadFixture("team_list.json")
 	var decoded struct {
@@ -455,13 +455,19 @@ func TestTeamList_EmailIDContract(t *testing.T) {
 	if len(decoded.Data) == 0 {
 		t.Fatal("contract fixture has no members")
 	}
+	var wrappedOnly struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(fixture), &wrappedOnly); err != nil || len(wrappedOnly.Data) == 0 {
+		t.Fatal("list response must be a data envelope")
+	}
 	sawServerExample := false
 	for _, m := range decoded.Data {
 		if m.ID == "" || !strings.Contains(m.ID, "@") {
 			t.Errorf("id %q is not an email", m.ID)
 		}
 		if m.ID != m.Email {
-			t.Errorf("id %q and email %q differ", m.ID, m.Email)
+			t.Errorf("list id %q and email %q differ; list returns the stored email as id", m.ID, m.Email)
 		}
 		if m.ID == "member@example.com" {
 			sawServerExample = true
@@ -482,8 +488,8 @@ func TestTeamList_EmailIDContract(t *testing.T) {
 			t.Fatalf("exit %d err %v\n%s", code, err, output)
 		}
 		for _, m := range decoded.Data {
-			if !strings.Contains(output, m.ID) {
-				t.Errorf("table missing id %q:\n%s", m.ID, output)
+			if !strings.Contains(output, m.ID) || !strings.Contains(output, m.Name) {
+				t.Errorf("table missing stored id %q or name %q:\n%s", m.ID, m.Name, output)
 			}
 		}
 	})
@@ -499,20 +505,175 @@ func TestTeamList_EmailIDContract(t *testing.T) {
 			t.Fatalf("exit %d err %v\n%s", code, err, output)
 		}
 		if strings.TrimSpace(output) != strings.TrimSpace(FormatJSON([]byte(fixture))) {
-			t.Errorf("expected the raw response as JSON, got:\n%s", output)
+			t.Errorf("expected the raw data envelope as JSON, got:\n%s", output)
 		}
-		if !strings.Contains(output, `"id": "member@example.com"`) {
-			t.Errorf("json output lost the email id:\n%s", output)
+		assertDataEnvelope(t, output)
+	})
+}
+
+func TestTeamList_NumericIDRejected(t *testing.T) {
+	body := `{"data":[{"id":42,"name":"Ada","email":"ada@example.com","role":"admin","state":"active","is_owner":true}]}`
+	for _, format := range [][]string{nil, {"--format", "json"}} {
+		t.Run(strings.Join(format, " "), func(t *testing.T) {
+			mock := testutil.NewMockAPI()
+			defer mock.Close()
+			mock.On("GET", "/team", 200, body)
+			withAccountTest(t, mock)
+
+			args := append([]string{"team", "list"}, format...)
+			output, code, _ := executeWithExit(args...)
+			if code == 0 {
+				t.Fatalf("numeric id must fail before formatting, got:\n%s", output)
+			}
+			if !strings.Contains(output, "cannot unmarshal number") {
+				t.Errorf("expected a string-id decode error, got:\n%s", output)
+			}
+		})
+	}
+}
+
+// Invite and role return a bare member object. Delete returns 204 and no body.
+// The invite object echoes the request's casing and name. A later list returns
+// stored casing, which can differ, so the two responses are not the same value.
+func TestTeamContract_InviteRoleDeleteShapes(t *testing.T) {
+	const (
+		reqEmail    = "New.Member+Tag@Example.com"
+		reqName     = "New Member"
+		storedEmail = "new.member+tag@example.com"
+		storedName  = "Stored Name"
+	)
+	if reqEmail == storedEmail || reqName == storedName {
+		t.Fatal("contract requires the invite echo to differ from the later list")
+	}
+
+	invite := teamMember{
+		ID: reqEmail, Name: reqName, Email: reqEmail,
+		Role: "user", State: "pending", IsOwner: false,
+	}
+	inviteBody, err := json.Marshal(invite)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("invite echoes request", func(t *testing.T) {
+		mock := testutil.NewMockAPI()
+		defer mock.Close()
+		mock.On("POST", "/team", 201, string(inviteBody))
+		withAccountTest(t, mock)
+
+		stdout, stderr, code, err := executeAuth("team", "invite", reqEmail, "--name", reqName, "--format", "json")
+		if err != nil || code != 0 {
+			t.Fatalf("exit %d err %v\n%s%s", code, err, stdout, stderr)
+		}
+		assertJSONBody(t, mock.LastRequest().Body, map[string]interface{}{
+			"email": reqEmail, "name": reqName, "role": "user",
+		})
+		assertBareTeamMember(t, stdout, invite)
+	})
+
+	t.Run("list returns stored casing", func(t *testing.T) {
+		listed := teamMember{
+			ID: storedEmail, Name: storedName, Email: storedEmail,
+			Role: "user", State: "pending", IsOwner: false,
+		}
+		listBody, err := json.Marshal(map[string]interface{}{"data": []teamMember{listed}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mock := testutil.NewMockAPI()
+		defer mock.Close()
+		mock.On("GET", "/team", 200, string(listBody))
+		withAccountTest(t, mock)
+
+		stdout, stderr, code, err := executeAuth("team", "list", "--format", "json")
+		if err != nil || code != 0 {
+			t.Fatalf("exit %d err %v\n%s%s", code, err, stdout, stderr)
+		}
+		assertDataEnvelope(t, stdout)
+		if !strings.Contains(stdout, storedEmail) || !strings.Contains(stdout, storedName) {
+			t.Errorf("list JSON lost stored casing:\n%s", stdout)
+		}
+		if strings.Contains(stdout, reqEmail) || strings.Contains(stdout, reqName) {
+			t.Errorf("list JSON must not be assumed equal to the invite echo:\n%s", stdout)
+		}
+
+		resetTeamFlags()
+		table, _, code, err := executeAuth("team", "list")
+		if err != nil || code != 0 {
+			t.Fatalf("table exit %d err %v\n%s", code, err, table)
+		}
+		if !strings.Contains(table, storedEmail) || strings.Contains(table, reqEmail) {
+			t.Errorf("table should show stored casing %q, got:\n%s", storedEmail, table)
+		}
+	})
+
+	t.Run("role bare object uses stored casing", func(t *testing.T) {
+		const typed = "Member@Example.com"
+		stored := teamMember{
+			ID: "member@example.com", Name: "Grace Hopper", Email: "member@example.com",
+			Role: "admin", State: "active", IsOwner: false,
+		}
+		body, err := json.Marshal(stored)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mock := testutil.NewMockAPI()
+		defer mock.Close()
+		mock.On("PUT", "/team/"+typed, 200, string(body))
+		withAccountTest(t, mock)
+
+		stdout, stderr, code, err := executeAuth("team", "role", typed, "admin", "--format", "json")
+		if err != nil || code != 0 {
+			t.Fatalf("exit %d err %v\n%s%s", code, err, stdout, stderr)
+		}
+		req := mock.LastRequest()
+		if req.Method != "PUT" || req.RequestURI != teamMemberPath(typed) {
+			t.Errorf("request = %s %s, want PUT %s", req.Method, req.RequestURI, teamMemberPath(typed))
+		}
+		got, ok := djangoTeamEmail(req.RequestURI)
+		if !ok || got != typed {
+			t.Errorf("Django resolved %q to %q (ok=%v), want opaque id %q", req.RequestURI, got, ok, typed)
+		}
+		assertBareTeamMember(t, stdout, stored)
+		if strings.Contains(stdout, typed) {
+			t.Errorf("role JSON should keep stored casing, not the typed id:\n%s", stdout)
+		}
+		assertJSONBody(t, req.Body, map[string]interface{}{"role": "admin"})
+	})
+
+	t.Run("delete 204", func(t *testing.T) {
+		const typed = "Member@Example.com"
+		mock := testutil.NewMockAPI()
+		defer mock.Close()
+		mock.On("DELETE", "/team/"+typed, 204, "")
+		withAccountTest(t, mock)
+
+		stdout, stderr, code, err := executeAuth("team", "remove", typed, "--yes", "--format", "json")
+		if err != nil || code != 0 {
+			t.Fatalf("exit %d err %v\n%s%s", code, err, stdout, stderr)
+		}
+		if strings.TrimSpace(stdout) != "" {
+			t.Errorf("204 delete must leave stdout empty, got:\n%s", stdout)
+		}
+		req := mock.LastRequest()
+		if req.Method != "DELETE" || req.RequestURI != teamMemberPath(typed) {
+			t.Errorf("request = %s %s, want DELETE %s", req.Method, req.RequestURI, teamMemberPath(typed))
+		}
+		if !strings.Contains(stderr, "✓") {
+			t.Errorf("expected the status line on stderr, got:\n%s", stderr)
 		}
 	})
 }
 
-// djangoTeamEmail resolves path("team/<email>") the way Django does.
-// The WSGI server percent-decodes the request target with unquote, which
-// keeps '+', and the str converter captures one segment ([^/]+).
-// Query decoding (unquote_plus) would turn '+' into a space and miss.
+// djangoTeamEmail resolves path("team/<email>") after one decode, matching
+// Django 4.2. urllib.parse.unquote keeps a literal '+', turns '%2B' into '+',
+// and turns '%40' into '@'. It does not decode twice. A slash in the decoded
+// segment, or a trailing slash, does not match (the server returns 404).
 func djangoTeamEmail(requestURI string) (string, bool) {
 	rawPath, _, _ := strings.Cut(requestURI, "?")
+	if rawPath == "" || strings.HasSuffix(rawPath, "/") {
+		return "", false
+	}
 	decoded, err := url.PathUnescape(rawPath)
 	if err != nil {
 		return "", false
@@ -524,57 +685,144 @@ func djangoTeamEmail(requestURI string) (string, bool) {
 	return email, true
 }
 
+func TestDjango42TeamPathContract(t *testing.T) {
+	cases := []struct {
+		uri  string
+		want string
+		ok   bool
+	}{
+		{uri: "/team/user+tag@example.com", want: "user+tag@example.com", ok: true},
+		{uri: "/team/user%2Btag@example.com", want: "user+tag@example.com", ok: true},
+		{uri: "/team/user%40example.com", want: "user@example.com", ok: true},
+		{uri: "/team/user@example.com", want: "user@example.com", ok: true},
+		{uri: "/team/user%252Btag@example.com", want: "user%2Btag@example.com", ok: true},
+		{uri: "/team/user/name@example.com", ok: false},
+		{uri: "/team/user%2Fname@example.com", ok: false},
+		{uri: "/team/user@example.com/", ok: false},
+		{uri: "/team/user@example.com%2F", ok: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.uri, func(t *testing.T) {
+			got, ok := djangoTeamEmail(tc.uri)
+			if ok != tc.ok || got != tc.want {
+				t.Errorf("djangoTeamEmail(%q) = %q, %v; want %q, %v", tc.uri, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+
+	if teamMemberPath("Member@Example.com") == teamMemberPath("member@example.com") {
+		t.Fatal("PathEscape must keep the id opaque, including case")
+	}
+	slashPath := teamMemberPath("user/name@example.com")
+	if _, ok := djangoTeamEmail(slashPath); ok {
+		t.Fatalf("encoded slash must 404 after one decode, path %s", slashPath)
+	}
+	if _, ok := djangoTeamEmail(teamMemberPath("user@example.com") + "/"); ok {
+		t.Fatal("trailing slash must 404")
+	}
+}
+
 func TestTeamMutation_EncodedEmailRoundTrip(t *testing.T) {
-	// '+' stays literal under PathEscape. '!', '?', apostrophe, and non-ASCII
-	// are percent-encoded and come back through Django's unquote.
+	// PathEscape leaves '+' and '@' literal. Other special characters are
+	// percent-encoded once and come back through Django's single decode.
 	emails := []string{
 		"user+tag@example.com",
 		"dev!ops@example.com",
 		"dev?ops@example.com",
 		"o'brien@example.com",
 		"üser@example.com",
+		"Member@Example.com",
 	}
 	for _, email := range emails {
 		t.Run(email, func(t *testing.T) {
-			member := `{"id":"` + email + `","name":"Ops","email":"` + email + `","role":"admin","state":"active","is_owner":false}`
+			stored := teamMember{
+				ID: email, Name: "Ops", Email: email,
+				Role: "readonly", State: "active", IsOwner: false,
+			}
+			body, err := json.Marshal(stored)
+			if err != nil {
+				t.Fatal(err)
+			}
 			cases := []struct {
 				method string
+				status int
+				body   string
 				args   []string
 			}{
-				{"PUT", []string{"team", "role", email, "readonly"}},
-				{"DELETE", []string{"team", "remove", email, "--yes"}},
+				{"PUT", 200, string(body), []string{"team", "role", email, "readonly"}},
+				{"DELETE", 204, "", []string{"team", "remove", email, "--yes"}},
 			}
 			for _, tc := range cases {
 				t.Run(tc.method, func(t *testing.T) {
 					mock := testutil.NewMockAPI()
 					defer mock.Close()
-					status := 200
-					body := member
-					if tc.method == "DELETE" {
-						status = 204
-						body = ""
-					}
-					mock.On(tc.method, "/team/"+email, status, body)
+					mock.On(tc.method, "/team/"+email, tc.status, tc.body)
 					withAccountTest(t, mock)
 
-					output, code, err := executeWithExit(tc.args...)
+					stdout, stderr, code, err := executeAuth(append(tc.args, "--format", "json")...)
 					if err != nil || code != 0 {
-						t.Fatalf("exit %d err %v\n%s", code, err, output)
+						t.Fatalf("exit %d err %v\n%s%s", code, err, stdout, stderr)
 					}
 					req := mock.LastRequest()
-					wantURI := "/team/" + url.PathEscape(email)
+					wantURI := teamMemberPath(email)
 					if req.RequestURI != wantURI {
 						t.Errorf("request target = %q, want PathEscape %q", req.RequestURI, wantURI)
 					}
 					if strings.Contains(email, "+") && strings.Contains(req.RequestURI, "%2B") {
 						t.Errorf("PathEscape must leave '+' literal, request target %q", req.RequestURI)
 					}
+					if strings.Contains(req.RequestURI, "%40") {
+						t.Errorf("PathEscape must leave '@' literal, request target %q", req.RequestURI)
+					}
+					if strings.HasSuffix(req.RequestURI, "/") {
+						t.Errorf("path must not have a trailing slash: %q", req.RequestURI)
+					}
 					got, ok := djangoTeamEmail(req.RequestURI)
 					if !ok || got != email {
 						t.Errorf("Django resolved %q to %q (ok=%v)", req.RequestURI, got, ok)
 					}
+					if tc.method == "DELETE" {
+						if strings.TrimSpace(stdout) != "" {
+							t.Errorf("204 body must not be printed, got:\n%s", stdout)
+						}
+					} else {
+						assertBareTeamMember(t, stdout, stored)
+					}
 				})
 			}
 		})
+	}
+}
+
+func assertBareTeamMember(t *testing.T, stdout string, want teamMember) {
+	t.Helper()
+	var envelope struct {
+		Data []teamMember `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if envelope.Data != nil {
+		t.Fatalf("invite and role responses are a bare object, got a data envelope:\n%s", stdout)
+	}
+	var got teamMember
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("bare member did not decode: %v\n%s", err, stdout)
+	}
+	if got != want {
+		t.Errorf("member = %+v, want %+v\n%s", got, want, stdout)
+	}
+}
+
+func assertDataEnvelope(t *testing.T, stdout string) {
+	t.Helper()
+	var envelope struct {
+		Data []teamMember `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if len(envelope.Data) == 0 {
+		t.Fatalf("list response must be {\"data\":[...]}, got:\n%s", stdout)
 	}
 }

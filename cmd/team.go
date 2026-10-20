@@ -308,15 +308,19 @@ func validateTeamRole(role string) error {
 	return fmt.Errorf("Invalid role '%s'. Use one of: %s", role, strings.Join(teamRoles, ", "))
 }
 
-// teamMemberPath is /team/<email> with the email escaped as one path segment.
-// Django resolves that route from the percent-decoded path and does not treat
-// '+' as a space, so PathEscape (not QueryEscape) is the matching encoding.
+// teamMemberPath is /team/<id> with the id escaped as one path segment.
+// The id is an opaque string (the member email, in whatever casing the
+// caller passed). Django 4.2 decodes that segment once: a literal '+' and
+// '%2B' both mean '+', and '%40' means '@'. PathEscape leaves '+' and '@'
+// literal, which matches that single decode. An encoded or literal slash,
+// or a trailing slash, does not match the route.
 func teamMemberPath(email string) string {
 	return "/team/" + url.PathEscape(email)
 }
 
-// validateTeamMemberID accepts the email the API returns as id. Numeric
-// database ids are not public identifiers.
+// validateTeamMemberID accepts the email the API returns as id. The value
+// is kept as given: it is not case-folded or rewritten. Numeric database
+// ids are not public identifiers.
 func validateTeamMemberID(id string) error {
 	addr, err := mail.ParseAddress(id)
 	if err != nil || addr.Address != id {
