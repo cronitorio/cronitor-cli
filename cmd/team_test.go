@@ -207,8 +207,10 @@ func TestTeamInvite_Role(t *testing.T) {
 
 func TestTeamInvite_RejectsBadInputWithoutRequest(t *testing.T) {
 	cases := map[string][]string{
-		"invalid role": {"team", "invite", "jane@example.com", "--name", "Jane", "--role", "owner"},
-		"missing name": {"team", "invite", "jane@example.com"},
+		"invalid role":   {"team", "invite", "jane@example.com", "--name", "Jane", "--role", "owner"},
+		"missing name":   {"team", "invite", "jane@example.com"},
+		"trailing slash": {"team", "invite", "user@example.com/", "--name", "User"},
+		"slash in local": {"team", "invite", "a/b@example.com", "--name", "User"},
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -222,6 +224,9 @@ func TestTeamInvite_RejectsBadInputWithoutRequest(t *testing.T) {
 			}
 			if mock.RequestCount() != 0 {
 				t.Errorf("expected no request, got %d", mock.RequestCount())
+			}
+			if strings.Contains(name, "slash") && !strings.Contains(output, "Emails containing '/' can't be managed from the CLI") {
+				t.Errorf("expected the slash rejection, got:\n%s", output)
 			}
 		})
 	}

@@ -158,6 +158,10 @@ Examples:
 	Run: func(cmd *cobra.Command, args []string) {
 		email := args[0]
 
+		if err := validateTeamMemberID(email); err != nil {
+			failAndExit(err.Error())
+			return
+		}
 		if strings.TrimSpace(teamName) == "" {
 			failAndExit("Name required. Use --name")
 			return
@@ -320,9 +324,10 @@ func teamMemberPath(email string) string {
 	return "/team/" + url.PathEscape(email)
 }
 
-// validateTeamMemberID accepts the email the API returns as id. The value
-// is kept as given: it is not case-folded or rewritten. Numeric database
-// ids are not public identifiers. A slash can never match the server route
+// validateTeamMemberID accepts the email the API returns as id. Invite,
+// role, and remove all use it. The value is kept as given: it is not
+// case-folded or rewritten. Numeric database ids are not public
+// identifiers. A slash can never match the server route
 // re_path(r'^api/team/(?P<email>[^/]+)$'), so it is rejected here.
 func validateTeamMemberID(id string) error {
 	if strings.Contains(id, "/") {
