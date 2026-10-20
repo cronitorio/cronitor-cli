@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
+	"net/mail"
+	"net/url"
 	"strings"
 
 	"github.com/cronitorio/cronitor-cli/lib"
@@ -31,9 +32,9 @@ Examples:
   cronitor team list --format json
   cronitor team invite jane@example.com --name "Jane Doe"
   cronitor team invite ops@example.com --name "Ops" --role readonly
-  cronitor team role 42 admin
-  cronitor team remove 42
-  cronitor team remove 42 --yes`,
+  cronitor team role jane@example.com admin
+  cronitor team remove jane@example.com
+  cronitor team remove jane@example.com --yes`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(viper.GetString(varApiKey)) < 10 {
 			return errors.New("API key required. Run 'cronitor configure' or use --api-key flag")
@@ -75,7 +76,7 @@ func resetTeamFlags() {
 }
 
 type teamMember struct {
-	ID      int    `json:"id"`
+	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Email   string `json:"email"`
 	Role    string `json:"role"`
@@ -133,7 +134,7 @@ Examples:
 			if m.IsOwner {
 				owner = "yes"
 			}
-			table.Rows = append(table.Rows, []string{strconv.Itoa(m.ID), m.Name, m.Email, m.Role, m.State, owner})
+			table.Rows = append(table.Rows, []string{m.ID, m.Name, m.Email, m.Role, m.State, owner})
 		}
 
 		writeCLIOutput(teamOutput, table.Render())
@@ -187,16 +188,17 @@ Examples:
 
 // --- ROLE ---
 var teamRoleCmd = &cobra.Command{
-	Use:   "role <id> <admin|user|readonly>",
+	Use:   "role <email> <admin|user|readonly>",
 	Short: "Change a team member's role",
-	Long: `Change a team member's role. Find the member id with 'cronitor team list'.
+	Long: `Change a team member's role. The member id is their email address.
+Find it with 'cronitor team list'.
 
 Changing roles needs the admin role. Team ownership can't be transferred
 from the CLI.
 
 Examples:
-  cronitor team role 42 admin
-  cronitor team role 42 readonly`,
+  cronitor team role jane@example.com admin
+  cronitor team role jane@example.com readonly`,
 	Args: cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		id, role := args[0], args[1]
@@ -213,7 +215,7 @@ Examples:
 		body, _ := json.Marshal(map[string]string{"role": role})
 
 		client := lib.NewAPIClient(dev, log)
-		resp, err := client.PUT(fmt.Sprintf("/team/%s", id), body, nil)
+		resp, err := client.PUT(teamMemberPath(id), body, nil)
 		if err != nil {
 			failAndExit(fmt.Sprintf("Failed to change role: %s", err))
 			return
@@ -238,16 +240,17 @@ Examples:
 
 // --- REMOVE ---
 var teamRemoveCmd = &cobra.Command{
-	Use:   "remove <id>",
+	Use:   "remove <email>",
 	Short: "Remove a team member or cancel an invite",
 	Long: `Remove a team member, or cancel a pending invite. Their API keys stop
-working at once. Find the member id with 'cronitor team list'.
+working at once. The member id is their email address. Find it with
+'cronitor team list'.
 
 Asks for confirmation unless --yes is set. Removing needs the admin role.
 
 Examples:
-  cronitor team remove 42
-  cronitor team remove 42 --yes`,
+  cronitor team remove jane@example.com
+  cronitor team remove jane@example.com --yes`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		id := args[0]
@@ -262,7 +265,7 @@ Examples:
 		}
 
 		client := lib.NewAPIClient(dev, log)
-		resp, err := client.DELETE(fmt.Sprintf("/team/%s", id), nil, nil)
+		resp, err := client.DELETE(teamMemberPath(id), nil, nil)
 		if err != nil {
 			failAndExit(fmt.Sprintf("Failed to remove team member: %s", err))
 			return
@@ -305,10 +308,19 @@ func validateTeamRole(role string) error {
 	return fmt.Errorf("Invalid role '%s'. Use one of: %s", role, strings.Join(teamRoles, ", "))
 }
 
-// validateTeamMemberID keeps the id numeric so it can only name a member.
+// teamMemberPath is /team/<email> with the email escaped as one path segment.
+// Django resolves that route from the percent-decoded path and does not treat
+// '+' as a space, so PathEscape (not QueryEscape) is the matching encoding.
+func teamMemberPath(email string) string {
+	return "/team/" + url.PathEscape(email)
+}
+
+// validateTeamMemberID accepts the email the API returns as id. Numeric
+// database ids are not public identifiers.
 func validateTeamMemberID(id string) error {
-	if n, err := strconv.Atoi(id); err != nil || n <= 0 {
-		return fmt.Errorf("Invalid team member id '%s'. Use the id from 'cronitor team list'", id)
+	addr, err := mail.ParseAddress(id)
+	if err != nil || addr.Address != id {
+		return fmt.Errorf("Invalid team member id '%s'. Use the email from 'cronitor team list'", id)
 	}
 	return nil
 }

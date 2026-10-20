@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -127,7 +128,7 @@ func TestTeamList_Table(t *testing.T) {
 		t.Errorf("got %s %s, want GET /team", req.Method, req.Path)
 	}
 	for _, want := range []string{"ID", "NAME", "EMAIL", "ROLE", "STATE", "OWNER",
-		"Ada Lovelace", "grace@example.com", "readonly", "pending", "42"} {
+		"Ada Lovelace", "ada@example.com", "member@example.com", "alan+invite@example.com", "readonly", "pending"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("expected %q in table:\n%s", want, output)
 		}
@@ -229,16 +230,16 @@ func TestTeamInvite_RejectsBadInputWithoutRequest(t *testing.T) {
 func TestTeamRole_PutsRole(t *testing.T) {
 	mock := testutil.NewMockAPI()
 	defer mock.Close()
-	mock.On("PUT", "/team/42", 200, `{"id":42,"name":"Grace Hopper","email":"grace@example.com","role":"admin","state":"active","is_owner":false}`)
+	mock.On("PUT", "/team/member@example.com", 200, `{"id":"member@example.com","name":"Grace Hopper","email":"member@example.com","role":"admin","state":"active","is_owner":false}`)
 	withAccountTest(t, mock)
 
-	output, code, err := executeWithExit("team", "role", "42", "admin")
+	output, code, err := executeWithExit("team", "role", "member@example.com", "admin")
 	if err != nil || code != 0 {
 		t.Fatalf("exit %d err %v\n%s", code, err, output)
 	}
 	req := mock.LastRequest()
-	if req.Method != "PUT" || req.Path != "/team/42" {
-		t.Errorf("got %s %s, want PUT /team/42", req.Method, req.Path)
+	if req.Method != "PUT" || req.Path != "/team/member@example.com" {
+		t.Errorf("got %s %s, want PUT /team/member@example.com", req.Method, req.Path)
 	}
 	assertJSONBody(t, req.Body, map[string]interface{}{"role": "admin"})
 	if !strings.Contains(output, "admin") {
@@ -248,8 +249,13 @@ func TestTeamRole_PutsRole(t *testing.T) {
 
 func TestTeamRole_RejectsBadInputWithoutRequest(t *testing.T) {
 	cases := map[string][]string{
-		"invalid role":   {"team", "role", "42", "owner"},
-		"non-numeric id": {"team", "role", "../keys", "admin"},
+		"invalid role": {"team", "role", "member@example.com", "owner"},
+		"numeric id":   {"team", "role", "42", "admin"},
+		"path id":      {"team", "role", "../keys", "admin"},
+		"empty id":     {"team", "role", "", "admin"},
+		"display name": {"team", "role", "Jane <jane@example.com>", "admin"},
+		"padded email": {"team", "role", " member@example.com", "admin"},
+		"missing at":   {"team", "role", "not-an-email", "admin"},
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -271,10 +277,10 @@ func TestTeamRole_RejectsBadInputWithoutRequest(t *testing.T) {
 func TestTeamRole_ForbiddenShowsDetail(t *testing.T) {
 	mock := testutil.NewMockAPI()
 	defer mock.Close()
-	mock.On("PUT", "/team/42", 403, `{"detail":"You do not have permission to perform this action."}`)
+	mock.On("PUT", "/team/member@example.com", 403, `{"detail":"You do not have permission to perform this action."}`)
 	withAccountTest(t, mock)
 
-	output, code, _ := executeWithExit("team", "role", "42", "admin")
+	output, code, _ := executeWithExit("team", "role", "member@example.com", "admin")
 	if code != 1 {
 		t.Fatalf("expected exit 1, got %d\n%s", code, output)
 	}
@@ -286,35 +292,35 @@ func TestTeamRole_ForbiddenShowsDetail(t *testing.T) {
 func TestTeamRemove_YesSkipsPrompt(t *testing.T) {
 	mock := testutil.NewMockAPI()
 	defer mock.Close()
-	mock.On("DELETE", "/team/42", 204, "")
+	mock.On("DELETE", "/team/member@example.com", 204, "")
 	withAccountTest(t, mock)
 	readLineFn = func(string) (string, error) {
 		t.Error("--yes must not prompt")
 		return "n", nil
 	}
 
-	output, code, err := executeWithExit("team", "remove", "42", "--yes")
+	output, code, err := executeWithExit("team", "remove", "member@example.com", "--yes")
 	if err != nil || code != 0 {
 		t.Fatalf("exit %d err %v\n%s", code, err, output)
 	}
-	if deletes := requestsWithMethod(mock, "DELETE"); len(deletes) != 1 || deletes[0].Path != "/team/42" {
-		t.Errorf("expected one DELETE /team/42, got %+v", deletes)
+	if deletes := requestsWithMethod(mock, "DELETE"); len(deletes) != 1 || deletes[0].Path != "/team/member@example.com" {
+		t.Errorf("expected one DELETE /team/member@example.com, got %+v", deletes)
 	}
 }
 
 func TestTeamRemove_ConfirmYes(t *testing.T) {
 	mock := testutil.NewMockAPI()
 	defer mock.Close()
-	mock.On("DELETE", "/team/42", 204, "")
+	mock.On("DELETE", "/team/member@example.com", 204, "")
 	withAccountTest(t, mock)
 	var prompt string
 	readLineFn = func(p string) (string, error) { prompt = p; return "y", nil }
 
-	output, code, err := executeWithExit("team", "remove", "42")
+	output, code, err := executeWithExit("team", "remove", "member@example.com")
 	if err != nil || code != 0 {
 		t.Fatalf("exit %d err %v\n%s", code, err, output)
 	}
-	if !strings.Contains(prompt, "42") || !strings.HasSuffix(prompt, "[y/N] ") {
+	if !strings.Contains(prompt, "member@example.com") || !strings.HasSuffix(prompt, "[y/N] ") {
 		t.Errorf("prompt = %q", prompt)
 	}
 	if deletes := requestsWithMethod(mock, "DELETE"); len(deletes) != 1 {
@@ -328,7 +334,7 @@ func TestTeamRemove_ConfirmNoSendsNothing(t *testing.T) {
 	withAccountTest(t, mock)
 	readLineFn = func(string) (string, error) { return "n", nil }
 
-	output, code, _ := executeWithExit("team", "remove", "42")
+	output, code, _ := executeWithExit("team", "remove", "member@example.com")
 	if code != 1 {
 		t.Fatalf("expected exit 1 when cancelled, got %d\n%s", code, output)
 	}
@@ -347,7 +353,7 @@ func TestTeamRemove_NonTerminalRefusesWithoutYes(t *testing.T) {
 		return "y", nil
 	}
 
-	output, code, _ := executeWithExit("team", "remove", "42")
+	output, code, _ := executeWithExit("team", "remove", "member@example.com")
 	if code != 1 {
 		t.Fatalf("expected exit 1, got %d\n%s", code, output)
 	}
@@ -360,16 +366,16 @@ func TestTeamRemove_NonTerminalRefusesWithoutYes(t *testing.T) {
 }
 
 func TestAccountMutations_JSONStdoutIsParseable(t *testing.T) {
-	member := `{"id":42,"name":"Grace Hopper","email":"grace@example.com","role":"admin","state":"active","is_owner":false}`
+	member := `{"id":"member@example.com","name":"Grace Hopper","email":"member@example.com","role":"admin","state":"active","is_owner":false}`
 	cases := []struct {
 		name      string
 		route     [3]string // method, path, body
 		args      []string
 		emptyBody bool // 204: no JSON to print, so stdout stays empty
 	}{
-		{"team invite", [3]string{"POST", "/team", member}, []string{"team", "invite", "grace@example.com", "--name", "Grace"}, false},
-		{"team role", [3]string{"PUT", "/team/42", member}, []string{"team", "role", "42", "admin"}, false},
-		{"team remove", [3]string{"DELETE", "/team/42", ""}, []string{"team", "remove", "42", "--yes"}, true},
+		{"team invite", [3]string{"POST", "/team", member}, []string{"team", "invite", "member@example.com", "--name", "Grace"}, false},
+		{"team role", [3]string{"PUT", "/team/member@example.com", member}, []string{"team", "role", "member@example.com", "admin"}, false},
+		{"team remove", [3]string{"DELETE", "/team/member@example.com", ""}, []string{"team", "remove", "member@example.com", "--yes"}, true},
 		{"apikey create", [3]string{"POST", "/keys", testutil.LoadFixture("apikey_create.json")}, []string{"apikey", "create", "--name", "Deploy bot", "--scope", "monitor:read"}, false},
 		{"apikey update", [3]string{"PATCH", "/keys/" + apiKeyTestCustom, testutil.LoadFixture("apikey_get.json")}, []string{"apikey", "update", apiKeyTestCustom, "--name", "Renamed"}, false},
 		{"apikey delete", [3]string{"DELETE", "/keys/" + apiKeyTestCustom, ""}, []string{"apikey", "delete", apiKeyTestCustom, "--yes"}, true},
@@ -399,6 +405,175 @@ func TestAccountMutations_JSONStdoutIsParseable(t *testing.T) {
 			}
 			if !strings.Contains(stderr, "✓") {
 				t.Errorf("expected the status line on stderr, got:\n%s", stderr)
+			}
+		})
+	}
+}
+
+func TestValidateTeamMemberID(t *testing.T) {
+	for _, id := range []string{
+		"",
+		"42",
+		"0",
+		"-1",
+		"../keys",
+		"not-an-email",
+		"user@",
+		"@example.com",
+		" member@example.com",
+		"Jane <jane@example.com>",
+	} {
+		if err := validateTeamMemberID(id); err == nil {
+			t.Errorf("validateTeamMemberID(%q) accepted an invalid id", id)
+		}
+	}
+	for _, id := range []string{
+		"member@example.com",
+		"user+tag@example.com",
+		"dev!ops@example.com",
+		"dev?ops@example.com",
+		"o'brien@example.com",
+	} {
+		if err := validateTeamMemberID(id); err != nil {
+			t.Errorf("validateTeamMemberID(%q) = %v", id, err)
+		}
+	}
+}
+
+// TestTeamList_EmailIDContract locks the list shape from cronitor#467
+// (feat/cli-account-access): id is the member email. The server tests use
+// id "member@example.com". Decoding runs before the format branch, so both
+// table and json must accept that body.
+func TestTeamList_EmailIDContract(t *testing.T) {
+	fixture := testutil.LoadFixture("team_list.json")
+	var decoded struct {
+		Data []teamMember `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(fixture), &decoded); err != nil {
+		t.Fatalf("contract fixture does not decode: %v", err)
+	}
+	if len(decoded.Data) == 0 {
+		t.Fatal("contract fixture has no members")
+	}
+	sawServerExample := false
+	for _, m := range decoded.Data {
+		if m.ID == "" || !strings.Contains(m.ID, "@") {
+			t.Errorf("id %q is not an email", m.ID)
+		}
+		if m.ID != m.Email {
+			t.Errorf("id %q and email %q differ", m.ID, m.Email)
+		}
+		if m.ID == "member@example.com" {
+			sawServerExample = true
+		}
+	}
+	if !sawServerExample {
+		t.Fatal(`contract fixture is missing id "member@example.com"`)
+	}
+
+	t.Run("table", func(t *testing.T) {
+		mock := testutil.NewMockAPI()
+		defer mock.Close()
+		mock.On("GET", "/team", 200, fixture)
+		withAccountTest(t, mock)
+
+		output, code, err := executeWithExit("team", "list")
+		if err != nil || code != 0 {
+			t.Fatalf("exit %d err %v\n%s", code, err, output)
+		}
+		for _, m := range decoded.Data {
+			if !strings.Contains(output, m.ID) {
+				t.Errorf("table missing id %q:\n%s", m.ID, output)
+			}
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		mock := testutil.NewMockAPI()
+		defer mock.Close()
+		mock.On("GET", "/team", 200, fixture)
+		withAccountTest(t, mock)
+
+		output, code, err := executeWithExit("team", "list", "--format", "json")
+		if err != nil || code != 0 {
+			t.Fatalf("exit %d err %v\n%s", code, err, output)
+		}
+		if strings.TrimSpace(output) != strings.TrimSpace(FormatJSON([]byte(fixture))) {
+			t.Errorf("expected the raw response as JSON, got:\n%s", output)
+		}
+		if !strings.Contains(output, `"id": "member@example.com"`) {
+			t.Errorf("json output lost the email id:\n%s", output)
+		}
+	})
+}
+
+// djangoTeamEmail resolves path("team/<email>") the way Django does.
+// The WSGI server percent-decodes the request target with unquote, which
+// keeps '+', and the str converter captures one segment ([^/]+).
+// Query decoding (unquote_plus) would turn '+' into a space and miss.
+func djangoTeamEmail(requestURI string) (string, bool) {
+	rawPath, _, _ := strings.Cut(requestURI, "?")
+	decoded, err := url.PathUnescape(rawPath)
+	if err != nil {
+		return "", false
+	}
+	email, ok := strings.CutPrefix(decoded, "/team/")
+	if !ok || email == "" || strings.Contains(email, "/") {
+		return "", false
+	}
+	return email, true
+}
+
+func TestTeamMutation_EncodedEmailRoundTrip(t *testing.T) {
+	// '+' stays literal under PathEscape. '!', '?', apostrophe, and non-ASCII
+	// are percent-encoded and come back through Django's unquote.
+	emails := []string{
+		"user+tag@example.com",
+		"dev!ops@example.com",
+		"dev?ops@example.com",
+		"o'brien@example.com",
+		"üser@example.com",
+	}
+	for _, email := range emails {
+		t.Run(email, func(t *testing.T) {
+			member := `{"id":"` + email + `","name":"Ops","email":"` + email + `","role":"admin","state":"active","is_owner":false}`
+			cases := []struct {
+				method string
+				args   []string
+			}{
+				{"PUT", []string{"team", "role", email, "readonly"}},
+				{"DELETE", []string{"team", "remove", email, "--yes"}},
+			}
+			for _, tc := range cases {
+				t.Run(tc.method, func(t *testing.T) {
+					mock := testutil.NewMockAPI()
+					defer mock.Close()
+					status := 200
+					body := member
+					if tc.method == "DELETE" {
+						status = 204
+						body = ""
+					}
+					mock.On(tc.method, "/team/"+email, status, body)
+					withAccountTest(t, mock)
+
+					output, code, err := executeWithExit(tc.args...)
+					if err != nil || code != 0 {
+						t.Fatalf("exit %d err %v\n%s", code, err, output)
+					}
+					req := mock.LastRequest()
+					wantURI := "/team/" + url.PathEscape(email)
+					if req.RequestURI != wantURI {
+						t.Errorf("request target = %q, want PathEscape %q", req.RequestURI, wantURI)
+					}
+					if strings.Contains(email, "+") && strings.Contains(req.RequestURI, "%2B") {
+						t.Errorf("PathEscape must leave '+' literal, request target %q", req.RequestURI)
+					}
+					got, ok := djangoTeamEmail(req.RequestURI)
+					if !ok || got != email {
+						t.Errorf("Django resolved %q to %q (ok=%v)", req.RequestURI, got, ok)
+					}
+				})
 			}
 		})
 	}

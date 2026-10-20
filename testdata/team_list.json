@@ -1,7 +1,7 @@
 {
   "data": [
     {
-      "id": 1,
+      "id": "ada@example.com",
       "name": "Ada Lovelace",
       "email": "ada@example.com",
       "role": "admin",
@@ -9,17 +9,17 @@
       "is_owner": true
     },
     {
-      "id": 42,
+      "id": "member@example.com",
       "name": "Grace Hopper",
-      "email": "grace@example.com",
+      "email": "member@example.com",
       "role": "user",
       "state": "active",
       "is_owner": false
     },
     {
-      "id": 43,
+      "id": "alan+invite@example.com",
       "name": "Alan Turing",
-      "email": "alan@example.com",
+      "email": "alan+invite@example.com",
       "role": "readonly",
       "state": "pending",
       "is_owner": false

@@ -193,8 +193,8 @@ cronitor team list
 cronitor team list --format json
 cronitor team invite jane@example.com --name "Jane Doe"        # Role defaults to user
 cronitor team invite ops@example.com --name "Ops" --role readonly
-cronitor team role <id> admin                                  # admin, user, or readonly
-cronitor team remove <id>                                      # Asks first; --yes skips
+cronitor team role jane@example.com admin                        # admin, user, or readonly
+cronitor team remove jane@example.com                          # Asks first; --yes skips
 ```
 
 #### API Keys
@@ -211,7 +211,7 @@ cronitor apikey update <key> --scope monitor:read              # Replaces the sc
 cronitor apikey delete <key>                                   # Asks first; --yes skips
 ```
 
-Team and API key commands need a credential from `cronitor auth login --admin` and act with the logged-in user's current role. Any role can list the team; inviting, changing roles, and removing members need the admin role. You can only grant API key scopes your own role has. `apikey create` prints the full key once. Without `--yes`, `team remove` and `apikey delete` refuse to run when stdin is not a terminal.
+Team and API key commands need a credential from `cronitor auth login --admin` and act with the logged-in user's current role. Any role can list the team; inviting, changing roles, and removing members need the admin role. A team member's id is their email address, the same value `team list` prints in the ID column. You can only grant API key scopes your own role has. `apikey create` prints the full key once. Without `--yes`, `team remove` and `apikey delete` refuse to run when stdin is not a terminal.
 
 **Aliases:** `cronitor env` → `environment`, `cronitor notifications` → `notification`, `cronitor integrations` → `integration`, `cronitor teams` → `team`, `cronitor apikeys` / `cronitor keys` → `apikey`
 
