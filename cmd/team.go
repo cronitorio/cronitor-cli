@@ -93,26 +93,27 @@ var teamListCmd = &cobra.Command{
 Examples:
   cronitor team list
   cronitor team list --format json`,
-	Run: func(cmd *cobra.Command, args []string) {
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		client := lib.NewAPIClient(dev, log)
 
 		resp, err := client.GET("/team", nil)
 		if err != nil {
 			failAndExit(fmt.Sprintf("Failed to list team members: %s", err))
-			return
+			return nil
 		}
 
 		if !resp.IsSuccess() {
 			failAndExit(fmt.Sprintf("API Error (%d): %s", resp.StatusCode, resp.ParseError()))
-			return
+			return nil
 		}
 
 		var result struct {
 			Data []teamMember `json:"data"`
 		}
 		if err := json.Unmarshal(resp.Body, &result); err != nil {
-			failAndExit(fmt.Sprintf("Failed to parse response: %s", err))
-			return
+			return fmt.Errorf("Failed to parse response: %s", err)
 		}
 
 		format := teamFormat
@@ -122,7 +123,7 @@ Examples:
 
 		if format == "json" {
 			writeCLIOutput(teamOutput, FormatJSON(resp.Body))
-			return
+			return nil
 		}
 
 		table := &UITable{
@@ -138,6 +139,7 @@ Examples:
 		}
 
 		writeCLIOutput(teamOutput, table.Render())
+		return nil
 	},
 }
 
@@ -320,8 +322,12 @@ func teamMemberPath(email string) string {
 
 // validateTeamMemberID accepts the email the API returns as id. The value
 // is kept as given: it is not case-folded or rewritten. Numeric database
-// ids are not public identifiers.
+// ids are not public identifiers. A slash can never match the server route
+// re_path(r'^api/team/(?P<email>[^/]+)$'), so it is rejected here.
 func validateTeamMemberID(id string) error {
+	if strings.Contains(id, "/") {
+		return fmt.Errorf("Invalid team member id '%s'. Emails containing '/' can't be managed from the CLI", id)
+	}
 	addr, err := mail.ParseAddress(id)
 	if err != nil || addr.Address != id {
 		return fmt.Errorf("Invalid team member id '%s'. Use the email from 'cronitor team list'", id)

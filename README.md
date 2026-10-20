@@ -193,7 +193,7 @@ cronitor team list
 cronitor team list --format json
 cronitor team invite jane@example.com --name "Jane Doe"        # Role defaults to user
 cronitor team invite ops@example.com --name "Ops" --role readonly
-cronitor team role jane@example.com admin                        # admin, user, or readonly
+cronitor team role jane@example.com admin                      # admin, user, or readonly
 cronitor team remove jane@example.com                          # Asks first; --yes skips
 ```
 

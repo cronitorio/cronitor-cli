@@ -249,13 +249,15 @@ func TestTeamRole_PutsRole(t *testing.T) {
 
 func TestTeamRole_RejectsBadInputWithoutRequest(t *testing.T) {
 	cases := map[string][]string{
-		"invalid role": {"team", "role", "member@example.com", "owner"},
-		"numeric id":   {"team", "role", "42", "admin"},
-		"path id":      {"team", "role", "../keys", "admin"},
-		"empty id":     {"team", "role", "", "admin"},
-		"display name": {"team", "role", "Jane <jane@example.com>", "admin"},
-		"padded email": {"team", "role", " member@example.com", "admin"},
-		"missing at":   {"team", "role", "not-an-email", "admin"},
+		"invalid role":   {"team", "role", "member@example.com", "owner"},
+		"numeric id":     {"team", "role", "42", "admin"},
+		"path id":        {"team", "role", "../keys", "admin"},
+		"empty id":       {"team", "role", "", "admin"},
+		"display name":   {"team", "role", "Jane <jane@example.com>", "admin"},
+		"padded email":   {"team", "role", " member@example.com", "admin"},
+		"missing at":     {"team", "role", "not-an-email", "admin"},
+		"trailing slash": {"team", "role", "user@example.com/", "admin"},
+		"slash in local": {"team", "role", "a/b@example.com", "admin"},
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -269,6 +271,9 @@ func TestTeamRole_RejectsBadInputWithoutRequest(t *testing.T) {
 			}
 			if mock.RequestCount() != 0 {
 				t.Errorf("expected no request, got %d", mock.RequestCount())
+			}
+			if strings.Contains(name, "slash") && !strings.Contains(output, "Emails containing '/' can't be managed from the CLI") {
+				t.Errorf("expected the slash rejection, got:\n%s", output)
 			}
 		})
 	}
@@ -422,9 +427,17 @@ func TestValidateTeamMemberID(t *testing.T) {
 		"@example.com",
 		" member@example.com",
 		"Jane <jane@example.com>",
+		"user@example.com/",
+		"a/b@example.com",
 	} {
 		if err := validateTeamMemberID(id); err == nil {
 			t.Errorf("validateTeamMemberID(%q) accepted an invalid id", id)
+		}
+	}
+	for _, id := range []string{"user@example.com/", "a/b@example.com"} {
+		err := validateTeamMemberID(id)
+		if err == nil || !strings.Contains(err.Error(), "Emails containing '/' can't be managed from the CLI") {
+			t.Errorf("validateTeamMemberID(%q) = %v, want a slash rejection", id, err)
 		}
 	}
 	for _, id := range []string{
@@ -514,19 +527,26 @@ func TestTeamList_EmailIDContract(t *testing.T) {
 func TestTeamList_NumericIDRejected(t *testing.T) {
 	body := `{"data":[{"id":42,"name":"Ada","email":"ada@example.com","role":"admin","state":"active","is_owner":true}]}`
 	for _, format := range [][]string{nil, {"--format", "json"}} {
-		t.Run(strings.Join(format, " "), func(t *testing.T) {
+		name := "table"
+		if len(format) > 0 {
+			name = "json"
+		}
+		t.Run(name, func(t *testing.T) {
 			mock := testutil.NewMockAPI()
 			defer mock.Close()
 			mock.On("GET", "/team", 200, body)
 			withAccountTest(t, mock)
 
 			args := append([]string{"team", "list"}, format...)
-			output, code, _ := executeWithExit(args...)
-			if code == 0 {
-				t.Fatalf("numeric id must fail before formatting, got:\n%s", output)
+			stdout, _, _, err := executeAuth(args...)
+			if err == nil {
+				t.Fatal("expected a parse error")
 			}
-			if !strings.Contains(output, "cannot unmarshal number") {
-				t.Errorf("expected a string-id decode error, got:\n%s", output)
+			if strings.TrimSpace(stdout) != "" {
+				t.Errorf("expected no stdout, got:\n%s", stdout)
+			}
+			if !strings.Contains(err.Error(), "Failed to parse response") {
+				t.Errorf("error = %v, want the CLI parse marker", err)
 			}
 		})
 	}
@@ -665,10 +685,10 @@ func TestTeamContract_InviteRoleDeleteShapes(t *testing.T) {
 	})
 }
 
-// djangoTeamEmail resolves path("team/<email>") after one decode, matching
-// Django 4.2. urllib.parse.unquote keeps a literal '+', turns '%2B' into '+',
-// and turns '%40' into '@'. It does not decode twice. A slash in the decoded
-// segment, or a trailing slash, does not match (the server returns 404).
+// djangoTeamEmail models Django's one-pass decode; the server-side path cases are tested in cronitorio/cronitor#467 (route [^/]+]).
+// urllib.parse.unquote keeps a literal '+', turns '%2B' into '+', and turns
+// '%40' into '@'. It does not decode twice. A slash in the decoded segment,
+// or a trailing slash, does not match that route.
 func djangoTeamEmail(requestURI string) (string, bool) {
 	rawPath, _, _ := strings.Cut(requestURI, "?")
 	if rawPath == "" || strings.HasSuffix(rawPath, "/") {
