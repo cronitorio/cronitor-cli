@@ -52,13 +52,13 @@ Keep using that config path (`CRONITOR_CONFIG` or `--config`) for subsequent com
 cronitor auth login --admin
 ```
 
-`--admin` also gives the credential account access, so this machine can manage your team and API keys (`cronitor team`, `cronitor apikey`). On those commands the credential acts as you, with your current role. Don't use `--admin` on shared servers: anyone who can read the config file can act as you. `auth status` shows whether the credential has account access.
+`--admin` also gives the credential account access. Only `cronitor team` and `cronitor apikey` then act as you, with your current role. Read-only users cannot use `cronitor apikey`, even with `--admin`. Every other command keeps the scopes fixed when the key was created, so demoting someone does not remove monitor, status page, or site write access. Don't use `--admin` on shared servers: anyone who can read the config file can act as you. `auth status` shows whether the credential has account access.
 
 ```bash
 cronitor auth logout
 ```
 
-Logout revokes this installation's credential and removes it locally. **Scheduled jobs using that credential will stop authenticating.** Agents should not log out as routine task cleanup. The credential persists independently of the browser session. Removing a user from the team revokes the CLI credentials they created for that organization; changing their role does not, and a credential created with `--admin` always acts with the user's current role on team and API key commands. Replacing a credential with another login also does not revoke the previous key; remove unused keys in the dashboard.
+Logout revokes this installation's credential and removes it locally. **Scheduled jobs using that credential will stop authenticating.** Agents should not log out as routine task cleanup. The credential persists independently of the browser session. Removing a team member deletes only keys created with `cronitor auth login --admin`. Keys from a plain `cronitor auth login` are organization-owned and keep working. Replacing a credential with another login also does not revoke the previous key; remove unused keys in the dashboard.
 
 ### Cron Management
 | Command | Description |

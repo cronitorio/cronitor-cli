@@ -42,10 +42,14 @@ time, next to the authorization URL. After you open the link, finish signing in
 within about 5 minutes. Pass --timeout (for example 2h) to wait longer.
 Starting a new login replaces the previous URL.
 
-Pass --admin to give the credential account access. It lets this machine
-manage your team and API keys with your current role (cronitor team,
-cronitor apikey). Don't use --admin on shared servers: anyone who can read
-the config file can act as you on those account endpoints.`
+Pass --admin to give the credential account access. Only cronitor team and
+cronitor apikey follow your current role; read-only users cannot run
+cronitor apikey. Other commands keep the scopes from when the key was
+created, so demotion does not drop monitor, status page, or site write
+access. Removing a team member deletes only keys created with --admin; a
+plain login key is organization-owned and keeps working. Don't use --admin
+on shared servers: anyone who can read the config file can act as you on
+those account endpoints.`
 
 var authCmd = &cobra.Command{
 	Use:   "auth",
@@ -63,9 +67,10 @@ and are then discarded. They are never refreshed or written to disk.
   cronitor auth status
   cronitor auth logout
 
---admin also gives the credential account access, so this machine can manage
-the team and API keys with the logged-in user's role. Don't use it on shared
-servers.`,
+--admin also gives the credential account access. Only cronitor team and
+cronitor apikey follow the logged-in user's current role; other commands
+keep the scopes from when the key was created. Removing a team member
+deletes only keys created with --admin. Don't use it on shared servers.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		_ = cmd.Help()
 	},
@@ -132,7 +137,7 @@ func addAuthLoginFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&authYes, "yes", false, "Install or replace a machine credential without prompting")
 	cmd.Flags().BoolVar(&authNoBrowser, "no-browser", false, "Print the authorization URL and accept callback URL paste-back (remote/headless login)")
 	cmd.Flags().StringVar(&authTimeout, "timeout", "", "Maximum time for browser authorization and token exchange (default: 30m)")
-	cmd.Flags().BoolVar(&authAdmin, "admin", false, "Give the credential account access to manage the team and API keys with your role (not for shared servers)")
+	cmd.Flags().BoolVar(&authAdmin, "admin", false, "Account access for cronitor team and cronitor apikey, using your current role (not for shared servers)")
 }
 
 func resetAuthLoginFlags(cmd *cobra.Command) {
