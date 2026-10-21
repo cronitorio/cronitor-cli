@@ -45,11 +45,11 @@ Starting a new login replaces the previous URL.
 Pass --admin to give the credential account access. Only cronitor team and
 cronitor apikey follow your current role; read-only users cannot run
 cronitor apikey. Other commands keep the scopes from when the key was
-created, so demotion does not drop monitor, status page, or site write
-access. Removing a team member deletes only keys created with --admin; a
-plain login key is organization-owned and keeps working. Don't use --admin
-on shared servers: anyone who can read the config file can act as you on
-those account endpoints.`
+created, so demotion does not drop write access to monitors, status pages,
+sites and other resources. Removing a team member deletes only keys created
+with --admin; a plain login key is organization-owned and keeps working.
+Don't use --admin on shared servers: anyone who can read the config file
+can act as you on those account endpoints.`
 
 var authCmd = &cobra.Command{
 	Use:   "auth",

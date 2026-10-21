@@ -52,7 +52,7 @@ Keep using that config path (`CRONITOR_CONFIG` or `--config`) for subsequent com
 cronitor auth login --admin
 ```
 
-`--admin` also gives the credential account access. Only `cronitor team` and `cronitor apikey` then act as you, with your current role. Read-only users cannot use `cronitor apikey`, even with `--admin`. Every other command keeps the scopes fixed when the key was created, so demoting someone does not remove monitor, status page, or site write access. Don't use `--admin` on shared servers: anyone who can read the config file can act as you. `auth status` shows whether the credential has account access.
+`--admin` also gives the credential account access. Only `cronitor team` and `cronitor apikey` then act as you, with your current role. Read-only users cannot use `cronitor apikey`, even with `--admin`. Every other command keeps the scopes fixed when the key was created, so demoting someone does not remove write access to monitors, status pages, sites and other resources. After demoting someone, delete their keys and have them log in again. Don't use `--admin` on shared servers: anyone who can read the config file can act as you. `auth status` shows whether the credential has account access.
 
 ```bash
 cronitor auth logout
