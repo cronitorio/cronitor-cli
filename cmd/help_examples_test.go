@@ -50,16 +50,24 @@ func exampleLineProblems(source, line string) []string {
 			if name != "" && flag == nil {
 				problems = append(problems, fmt.Sprintf("%s: %q: %s has no --%s flag", source, quote, target.CommandPath(), name))
 			}
-			if !strings.Contains(f, "=") && flagTakesValue(flag) && i+1 < len(args) {
-				i++
+			if !strings.Contains(f, "=") && flagTakesValue(flag) {
+				if i+1 >= len(args) {
+					problems = append(problems, fmt.Sprintf("%s: %q: %s: --%s needs a value", source, quote, target.CommandPath(), name))
+				} else {
+					i++
+				}
 			}
 		case strings.HasPrefix(f, "-") && len(f) > 1:
 			missing, attached, last := shorthandCluster(target, f)
 			for _, s := range missing {
 				problems = append(problems, fmt.Sprintf("%s: %q: %s has no -%s flag", source, quote, target.CommandPath(), s))
 			}
-			if flagTakesValue(last) && !attached && i+1 < len(args) {
-				i++
+			if flagTakesValue(last) && !attached {
+				if i+1 >= len(args) {
+					problems = append(problems, fmt.Sprintf("%s: %q: %s: -%s needs a value", source, quote, target.CommandPath(), string(last.Shorthand)))
+				} else {
+					i++
+				}
 			}
 		}
 	}
@@ -100,6 +108,7 @@ func nonFlagArgs(cmd *cobra.Command, args []string) []string {
 // double-quoted text, including spaces and leading dashes, as one word.
 // Quotes are removed. A placeholder such as <key> is one word. A " #"
 // comment is dropped only outside quotes. An unclosed quote is an error.
+// A backslash is an error: these examples do not use shell escapes.
 func splitExampleWords(line string) ([]string, error) {
 	var words []string
 	var b strings.Builder
@@ -114,6 +123,9 @@ func splitExampleWords(line string) ([]string, error) {
 	}
 	for i := 0; i < len(line); i++ {
 		c := line[i]
+		if c == '\\' {
+			return nil, fmt.Errorf("backslash in example")
+		}
 		if quote != 0 {
 			if c == quote {
 				quote = 0
@@ -251,6 +263,25 @@ func TestSplitExampleWords(t *testing.T) {
 	}
 	if _, err := splitExampleWords(`cronitor issue create --data '{"name":`); err == nil || !strings.Contains(err.Error(), "unterminated quote") {
 		t.Fatalf("unterminated quote err = %v", err)
+	}
+	if _, err := splitExampleWords(`cronitor issue list \`); err == nil || !strings.Contains(err.Error(), "backslash") {
+		t.Fatalf("bare backslash err = %v", err)
+	}
+	if _, err := splitExampleWords(`cronitor issue create --data "a\nb"`); err == nil || !strings.Contains(err.Error(), "backslash") {
+		t.Fatalf("backslash inside double quotes err = %v", err)
+	}
+}
+
+func TestValueFlagRequiresValue(t *testing.T) {
+	problems := exampleLineProblems("test", "cronitor site update x -d")
+	found := false
+	for _, p := range problems {
+		if strings.Contains(p, "-d needs a value") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected missing -d value, got %#v", problems)
 	}
 }
 

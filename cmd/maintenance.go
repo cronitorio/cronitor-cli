@@ -257,7 +257,7 @@ var maintenanceUpdateCmd = &cobra.Command{
 	Short: "Update a maintenance window",
 	Long: `Update an existing maintenance window.
 
-Use --data to provide a JSON payload with the fields to update.
+Use --data to provide a JSON payload with the fields to set.
 Updates use PUT: send every required field (current values are in ` + "`cronitor maintenance get <key>`" + `). Fields you leave out keep their values.
 
 Examples:
