@@ -1,4 +1,4 @@
-# CronitorCLI
+# Cronitor CLI
 [![Tests](https://github.com/cronitorio/cronitor-cli/actions/workflows/tests.yml/badge.svg)](https://github.com/cronitorio/cronitor-cli/actions/workflows/tests.yml)
 
 **Command line tools for Cronitor.io**
