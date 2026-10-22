@@ -322,6 +322,8 @@ var issueUpdateCmd = &cobra.Command{
 	Short: "Update an issue",
 	Long: `Update an existing issue.
 
+Updates replace the whole record: send current values for required fields (see ` + "`cronitor issue get <key>`" + `).
+
 Examples:
   cronitor issue update my-issue --data '{"name":"Database connection issues","state":"investigating"}'
   cronitor issue update my-issue --data '{"name":"Database connection issues","severity":"outage"}'`,

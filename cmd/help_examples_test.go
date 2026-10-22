@@ -18,7 +18,7 @@ func exampleLineProblems(source, line string) []string {
 	if i := strings.Index(line, " #"); i >= 0 {
 		line = line[:i]
 	}
-	fields := strings.Fields(line)
+	fields := splitExampleWords(line)
 	if len(fields) < 2 || fields[0] != "cronitor" {
 		return nil
 	}
@@ -28,9 +28,14 @@ func exampleLineProblems(source, line string) []string {
 		return []string{fmt.Sprintf("%s: %q: %v", source, quote, err)}
 	}
 	var problems []string
+	positionals := nonFlagArgs(target, rest)
 	if len(target.Commands()) > 0 {
-		for _, arg := range nonFlagArgs(target, rest) {
+		for _, arg := range positionals {
 			problems = append(problems, fmt.Sprintf("%s: %q: %s has subcommands; %q is not one of them", source, quote, target.CommandPath(), arg))
+		}
+	} else if target.Args != nil {
+		if err := target.Args(target, positionals); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %q: %s: %v", source, quote, target.CommandPath(), err))
 		}
 	}
 	args := fields[1:]
@@ -98,6 +103,47 @@ func nonFlagArgs(cmd *cobra.Command, args []string) []string {
 	return out
 }
 
+// splitExampleWords splits a help example on whitespace, keeping single- or
+// double-quoted text, including spaces and leading dashes, as one word.
+// Quotes are removed. A placeholder such as <key> is one word.
+func splitExampleWords(line string) []string {
+	var words []string
+	var b strings.Builder
+	var quote byte
+	inWord := false
+	flush := func() {
+		if inWord {
+			words = append(words, b.String())
+			b.Reset()
+			inWord = false
+		}
+	}
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+				continue
+			}
+			b.WriteByte(c)
+			inWord = true
+			continue
+		}
+		switch c {
+		case ' ', '\t', '\n', '\r':
+			flush()
+		case '\'', '"':
+			quote = c
+			inWord = true
+		default:
+			b.WriteByte(c)
+			inWord = true
+		}
+	}
+	flush()
+	return words
+}
+
 func flagTakesValue(f *pflag.Flag) bool {
 	return f != nil && f.Value.Type() != "bool"
 }
@@ -136,6 +182,27 @@ func exampleFlagProblems(cmd *cobra.Command) []string {
 		problems = append(problems, exampleFlagProblems(child)...)
 	}
 	return problems
+}
+
+func TestSplitExampleWords(t *testing.T) {
+	got := splitExampleWords(`cronitor site update my-site --data '{"name":"My Website","sampling":-1}' "two words"`)
+	want := []string{
+		"cronitor", "site", "update", "my-site", "--data",
+		`{"name":"My Website","sampling":-1}`,
+		"two words",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("splitExampleWords = %#v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("word %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+	placeholders := splitExampleWords("cronitor issue update <key> --data '{}'")
+	if len(placeholders) != 6 || placeholders[3] != "<key>" {
+		t.Fatalf("placeholder split = %#v", placeholders)
+	}
 }
 
 func TestHelpExamplesUseRealFlags(t *testing.T) {

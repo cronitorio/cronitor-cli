@@ -174,7 +174,7 @@ var statuspageCreateCmd = &cobra.Command{
 
 Examples:
   cronitor statuspage create --data '{"name":"My Status Page","hosted_subdomain":"my-status"}'
-  cronitor statuspage create --data '{"name":"Internal Status","hosted_subdomain":"internal","access":"private"}'`,
+  cronitor statuspage create --data '{"name":"Internal Status","hosted_subdomain":"internal","access":"password","password":"s3cret"}'`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if statuspageData == "" {
 			Error("Create data required. Use --data '{...}'")
@@ -219,9 +219,11 @@ var statuspageUpdateCmd = &cobra.Command{
 	Short: "Update a status page",
 	Long: `Update an existing status page.
 
+Updates replace the whole record: send current values for required fields (see ` + "`cronitor statuspage get <key>`" + `).
+
 Examples:
   cronitor statuspage update my-page --data '{"name":"New Name","hosted_subdomain":"my-status"}'
-  cronitor statuspage update my-page --data '{"name":"Internal Status","hosted_subdomain":"internal","access":"private"}'`,
+  cronitor statuspage update my-page --data '{"name":"Internal Status","hosted_subdomain":"internal","access":"password","password":"s3cret"}'`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]

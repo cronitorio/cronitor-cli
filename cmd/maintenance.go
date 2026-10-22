@@ -258,6 +258,7 @@ var maintenanceUpdateCmd = &cobra.Command{
 	Long: `Update an existing maintenance window.
 
 Use --data to provide a JSON payload with the fields to update.
+Updates replace the whole record: send current values for required fields (see ` + "`cronitor maintenance get <key>`" + `).
 
 Examples:
   cronitor maintenance update my-window --data '{"name":"New Name","start":"2024-01-15T03:00:00Z","end":"2024-01-15T05:00:00Z"}'
