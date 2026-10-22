@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/cronitorio/cronitor-cli/lib"
 	"github.com/spf13/cobra"
@@ -20,18 +19,8 @@ var (
 	maintenanceStatuspage   string
 	maintenanceEnv          string
 	maintenanceWithMonitors bool
-	// Create flags
-	maintenanceName        string
-	maintenanceDesc        string
-	maintenanceStart       string
-	maintenanceEnd         string
-	maintenanceMonitors    string
-	maintenanceGroups      string
-	maintenanceStatuspages string
-	maintenanceAllMonitors bool
-	// Data flags
-	maintenanceData string
-	maintenanceFile string
+	maintenanceData         string
+	maintenanceFile         string
 )
 
 var maintenanceCmd = &cobra.Command{
@@ -271,8 +260,8 @@ var maintenanceUpdateCmd = &cobra.Command{
 Use --data to provide a JSON payload with the fields to update.
 
 Examples:
-  cronitor maintenance update my-window --data '{"name":"New Name"}'
-  cronitor maintenance update my-window --data '{"start":"2024-01-15T03:00:00Z","end":"2024-01-15T05:00:00Z"}'`,
+  cronitor maintenance update my-window --data '{"name":"New Name","start":"2024-01-15T03:00:00Z","end":"2024-01-15T05:00:00Z"}'
+  cronitor maintenance update my-window --data '{"name":"DB Migration","start":"2024-01-20T00:00:00Z","end":"2024-01-20T02:00:00Z"}'`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
@@ -371,18 +360,6 @@ func init() {
 
 	// Update flags
 	maintenanceUpdateCmd.Flags().StringVarP(&maintenanceData, "data", "d", "", "JSON payload")
-}
-
-func splitAndTrimMaint(s string) []string {
-	parts := strings.Split(s, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		trimmed := strings.TrimSpace(p)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-	return result
 }
 
 func getMaintenanceRequestBody() ([]byte, error) {

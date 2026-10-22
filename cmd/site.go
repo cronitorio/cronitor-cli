@@ -58,8 +58,8 @@ Examples:
   cronitor site list
   cronitor site get my-site
   cronitor site get my-site --with-snippet
-  cronitor site create "My Website"
-  cronitor site update my-site --data '{"sampling":50}'
+  cronitor site create --data '{"name":"My Website"}'
+  cronitor site update my-site --data '{"name":"My Website","sampling":50}'
   cronitor site delete my-site
 
   cronitor site error list --site my-site
@@ -258,8 +258,8 @@ var siteUpdateCmd = &cobra.Command{
 
 Examples:
   cronitor site update my-site --data '{"name":"New Name"}'
-  cronitor site update my-site --data '{"sampling":50}'
-  cronitor site update my-site --data '{"webvitals_enabled":false}'`,
+  cronitor site update my-site --data '{"name":"My Website","sampling":50}'
+  cronitor site update my-site --data '{"name":"My Website","webvitals_enabled":false}'`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]

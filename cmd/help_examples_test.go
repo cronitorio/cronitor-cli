@@ -8,10 +8,12 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // exampleLineProblems reports a "cronitor ..." example line that names a
-// command that does not exist or a --flag the named command does not have.
+// command that does not exist, a flag the named command does not have, or a
+// leftover argument on a command that still has subcommands.
 func exampleLineProblems(source, line string) []string {
 	if i := strings.Index(line, " #"); i >= 0 {
 		line = line[:i]
@@ -20,21 +22,104 @@ func exampleLineProblems(source, line string) []string {
 	if len(fields) < 2 || fields[0] != "cronitor" {
 		return nil
 	}
-	target, _, err := RootCmd.Find(fields[1:])
+	target, rest, err := RootCmd.Find(fields[1:])
+	quote := strings.TrimSpace(line)
 	if err != nil {
-		return []string{fmt.Sprintf("%s: %q: %v", source, strings.TrimSpace(line), err)}
+		return []string{fmt.Sprintf("%s: %q: %v", source, quote, err)}
 	}
 	var problems []string
-	for _, f := range fields[1:] {
-		if !strings.HasPrefix(f, "--") {
-			continue
+	if len(target.Commands()) > 0 {
+		for _, arg := range nonFlagArgs(target, rest) {
+			problems = append(problems, fmt.Sprintf("%s: %q: %s has subcommands; %q is not one of them", source, quote, target.CommandPath(), arg))
 		}
-		name := strings.SplitN(strings.TrimPrefix(f, "--"), "=", 2)[0]
-		if target.Flag(name) == nil {
-			problems = append(problems, fmt.Sprintf("%s: %q: %s has no --%s flag", source, strings.TrimSpace(line), target.CommandPath(), name))
+	}
+	args := fields[1:]
+	for i := 0; i < len(args); i++ {
+		f := args[i]
+		switch {
+		case f == "--":
+			return problems
+		case strings.HasPrefix(f, "--"):
+			name := strings.SplitN(strings.TrimPrefix(f, "--"), "=", 2)[0]
+			flag := target.Flag(name)
+			if name != "" && flag == nil {
+				problems = append(problems, fmt.Sprintf("%s: %q: %s has no --%s flag", source, quote, target.CommandPath(), name))
+			}
+			if !strings.Contains(f, "=") && flagTakesValue(flag) && i+1 < len(args) {
+				i++
+			}
+		case strings.HasPrefix(f, "-") && len(f) > 1:
+			raw := strings.TrimPrefix(f, "-")
+			name, _, hasEq := strings.Cut(raw, "=")
+			var last *pflag.Flag
+			for _, letter := range name {
+				s := string(letter)
+				last = commandShorthand(target, s)
+				if last == nil {
+					problems = append(problems, fmt.Sprintf("%s: %q: %s has no -%s flag", source, quote, target.CommandPath(), s))
+				}
+			}
+			if !hasEq && flagTakesValue(last) && i+1 < len(args) {
+				i++
+			}
 		}
 	}
 	return problems
+}
+
+// nonFlagArgs returns arguments left after Find that are not flags or flag
+// values. A command with subcommands should have none of these: the leftover
+// word is an unknown nested subcommand.
+func nonFlagArgs(cmd *cobra.Command, args []string) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			out = append(out, args[i+1:]...)
+			break
+		}
+		if strings.HasPrefix(a, "--") {
+			name := strings.SplitN(strings.TrimPrefix(a, "--"), "=", 2)[0]
+			if !strings.Contains(a, "=") && flagTakesValue(cmd.Flag(name)) && i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		if strings.HasPrefix(a, "-") && len(a) > 1 {
+			raw := strings.TrimPrefix(a, "-")
+			name, _, hasEq := strings.Cut(raw, "=")
+			if !hasEq && name != "" && flagTakesValue(commandShorthand(cmd, name[len(name)-1:])) && i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+func flagTakesValue(f *pflag.Flag) bool {
+	return f != nil && f.Value.Type() != "bool"
+}
+
+func commandShorthand(cmd *cobra.Command, letter string) *pflag.Flag {
+	if letter == "" || len(letter) != 1 {
+		return nil
+	}
+	if f := cmd.Flags().ShorthandLookup(letter); f != nil {
+		return f
+	}
+	if f := cmd.InheritedFlags().ShorthandLookup(letter); f != nil {
+		return f
+	}
+	for p := cmd; p != nil; p = p.Parent() {
+		if p.HasPersistentFlags() {
+			if f := p.PersistentFlags().ShorthandLookup(letter); f != nil {
+				return f
+			}
+		}
+	}
+	return nil
 }
 
 // exampleFlagProblems walks cmd and its subcommands and reports every
@@ -66,7 +151,7 @@ func TestREADMEExamplesUseRealFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prefixes := []string{"cronitor auth ", "cronitor environment ", "cronitor notification ", "cronitor team ", "cronitor apikey "}
+	prefixes := []string{"cronitor auth ", "cronitor environment ", "cronitor notification ", "cronitor team ", "cronitor apikey ", "cronitor issue ", "cronitor maintenance ", "cronitor site ", "cronitor statuspage "}
 	for _, line := range strings.Split(string(data), "\n") {
 		for _, prefix := range prefixes {
 			if strings.HasPrefix(line, prefix) {

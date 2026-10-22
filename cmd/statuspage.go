@@ -23,7 +23,7 @@ Examples:
   cronitor statuspage list
   cronitor statuspage list --with-status
   cronitor statuspage get my-page --with-components
-  cronitor statuspage create --data '{"name":"My Status Page","subdomain":"my-status"}'
+  cronitor statuspage create --data '{"name":"My Status Page","hosted_subdomain":"my-status"}'
   cronitor statuspage delete <key>
 
   cronitor statuspage component list --statuspage my-page
@@ -173,8 +173,8 @@ var statuspageCreateCmd = &cobra.Command{
 	Long: `Create a new status page.
 
 Examples:
-  cronitor statuspage create --data '{"name":"My Status Page","subdomain":"my-status"}'
-  cronitor statuspage create --data '{"name":"Internal Status","subdomain":"internal","access":"private"}'`,
+  cronitor statuspage create --data '{"name":"My Status Page","hosted_subdomain":"my-status"}'
+  cronitor statuspage create --data '{"name":"Internal Status","hosted_subdomain":"internal","access":"private"}'`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if statuspageData == "" {
 			Error("Create data required. Use --data '{...}'")
@@ -220,8 +220,8 @@ var statuspageUpdateCmd = &cobra.Command{
 	Long: `Update an existing status page.
 
 Examples:
-  cronitor statuspage update my-page --data '{"name":"New Name"}'
-  cronitor statuspage update my-page --data '{"access":"private"}'`,
+  cronitor statuspage update my-page --data '{"name":"New Name","hosted_subdomain":"my-status"}'
+  cronitor statuspage update my-page --data '{"name":"Internal Status","hosted_subdomain":"internal","access":"private"}'`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
