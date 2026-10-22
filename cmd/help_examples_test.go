@@ -15,10 +15,10 @@ import (
 // command that does not exist, a flag the named command does not have, or a
 // leftover argument on a command that still has subcommands.
 func exampleLineProblems(source, line string) []string {
-	if i := strings.Index(line, " #"); i >= 0 {
-		line = line[:i]
+	fields, err := splitExampleWords(line)
+	if err != nil {
+		return []string{fmt.Sprintf("%s: %q: %v", source, strings.TrimSpace(line), err)}
 	}
-	fields := splitExampleWords(line)
 	if len(fields) < 2 || fields[0] != "cronitor" {
 		return nil
 	}
@@ -54,17 +54,11 @@ func exampleLineProblems(source, line string) []string {
 				i++
 			}
 		case strings.HasPrefix(f, "-") && len(f) > 1:
-			raw := strings.TrimPrefix(f, "-")
-			name, _, hasEq := strings.Cut(raw, "=")
-			var last *pflag.Flag
-			for _, letter := range name {
-				s := string(letter)
-				last = commandShorthand(target, s)
-				if last == nil {
-					problems = append(problems, fmt.Sprintf("%s: %q: %s has no -%s flag", source, quote, target.CommandPath(), s))
-				}
+			missing, attached, last := shorthandCluster(target, f)
+			for _, s := range missing {
+				problems = append(problems, fmt.Sprintf("%s: %q: %s has no -%s flag", source, quote, target.CommandPath(), s))
 			}
-			if !hasEq && flagTakesValue(last) && i+1 < len(args) {
+			if flagTakesValue(last) && !attached && i+1 < len(args) {
 				i++
 			}
 		}
@@ -91,9 +85,8 @@ func nonFlagArgs(cmd *cobra.Command, args []string) []string {
 			continue
 		}
 		if strings.HasPrefix(a, "-") && len(a) > 1 {
-			raw := strings.TrimPrefix(a, "-")
-			name, _, hasEq := strings.Cut(raw, "=")
-			if !hasEq && name != "" && flagTakesValue(commandShorthand(cmd, name[len(name)-1:])) && i+1 < len(args) {
+			_, attached, last := shorthandCluster(cmd, a)
+			if flagTakesValue(last) && !attached && i+1 < len(args) {
 				i++
 			}
 			continue
@@ -105,8 +98,9 @@ func nonFlagArgs(cmd *cobra.Command, args []string) []string {
 
 // splitExampleWords splits a help example on whitespace, keeping single- or
 // double-quoted text, including spaces and leading dashes, as one word.
-// Quotes are removed. A placeholder such as <key> is one word.
-func splitExampleWords(line string) []string {
+// Quotes are removed. A placeholder such as <key> is one word. A " #"
+// comment is dropped only outside quotes. An unclosed quote is an error.
+func splitExampleWords(line string) ([]string, error) {
 	var words []string
 	var b strings.Builder
 	var quote byte
@@ -129,6 +123,10 @@ func splitExampleWords(line string) []string {
 			inWord = true
 			continue
 		}
+		if c == ' ' && i+1 < len(line) && line[i+1] == '#' {
+			flush()
+			return words, nil
+		}
 		switch c {
 		case ' ', '\t', '\n', '\r':
 			flush()
@@ -141,7 +139,34 @@ func splitExampleWords(line string) []string {
 		}
 	}
 	flush()
-	return words
+	if quote != 0 {
+		return nil, fmt.Errorf("unterminated quote")
+	}
+	return words, nil
+}
+
+// shorthandCluster checks each letter of a short-flag cluster. Once a letter
+// takes a value, the rest of the token is that value (as in -d'{}' or -d={})
+// and is not checked as more flags. attached is true when the value is in
+// this token rather than the next word.
+func shorthandCluster(cmd *cobra.Command, token string) (missing []string, attached bool, last *pflag.Flag) {
+	raw := strings.TrimPrefix(token, "-")
+	name, _, hasEq := strings.Cut(raw, "=")
+	attached = hasEq
+	for idx, letter := range name {
+		s := string(letter)
+		last = commandShorthand(cmd, s)
+		if last == nil {
+			missing = append(missing, s)
+		}
+		if flagTakesValue(last) {
+			if idx < len(name)-1 {
+				attached = true
+			}
+			break
+		}
+	}
+	return missing, attached, last
 }
 
 func flagTakesValue(f *pflag.Flag) bool {
@@ -185,7 +210,10 @@ func exampleFlagProblems(cmd *cobra.Command) []string {
 }
 
 func TestSplitExampleWords(t *testing.T) {
-	got := splitExampleWords(`cronitor site update my-site --data '{"name":"My Website","sampling":-1}' "two words"`)
+	got, err := splitExampleWords(`cronitor site update my-site --data '{"name":"My Website","sampling":-1}' "two words"`)
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []string{
 		"cronitor", "site", "update", "my-site", "--data",
 		`{"name":"My Website","sampling":-1}`,
@@ -199,9 +227,46 @@ func TestSplitExampleWords(t *testing.T) {
 			t.Errorf("word %d = %q, want %q", i, got[i], want[i])
 		}
 	}
-	placeholders := splitExampleWords("cronitor issue update <key> --data '{}'")
+	placeholders, err := splitExampleWords("cronitor issue update <key> --data '{}'")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(placeholders) != 6 || placeholders[3] != "<key>" {
 		t.Fatalf("placeholder split = %#v", placeholders)
+	}
+
+	commented, err := splitExampleWords("cronitor issue list --state unresolved # not a flag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commented) != 5 || commented[4] != "unresolved" {
+		t.Fatalf("comment outside quotes = %#v", commented)
+	}
+	quotedHash, err := splitExampleWords(`cronitor issue create --data '{"name":"a # b"}'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(quotedHash) != 5 || !strings.Contains(quotedHash[4], "a # b") {
+		t.Fatalf("hash inside quotes = %#v", quotedHash)
+	}
+	if _, err := splitExampleWords(`cronitor issue create --data '{"name":`); err == nil || !strings.Contains(err.Error(), "unterminated quote") {
+		t.Fatalf("unterminated quote err = %v", err)
+	}
+}
+
+func TestAttachedShorthandStopsAtValue(t *testing.T) {
+	problems := exampleLineProblems("test", `cronitor issue create -d'{"name":"n"}'`)
+	for _, p := range problems {
+		if strings.Contains(p, "has no -") {
+			t.Errorf("attached shorthand value was scanned as flags: %s", p)
+		}
+	}
+	token, err := splitExampleWords(`-d'{}'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(token) != 1 || token[0] != "-d{}" {
+		t.Fatalf("attached shorthand token = %#v", token)
 	}
 }
 

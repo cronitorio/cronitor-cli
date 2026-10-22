@@ -322,7 +322,7 @@ var issueUpdateCmd = &cobra.Command{
 	Short: "Update an issue",
 	Long: `Update an existing issue.
 
-Updates replace the whole record: send current values for required fields (see ` + "`cronitor issue get <key>`" + `).
+Updates use PUT: send every required field (current values are in ` + "`cronitor issue get <key>`" + `). Fields you leave out keep their values.
 
 Examples:
   cronitor issue update my-issue --data '{"name":"Database connection issues","state":"investigating"}'

@@ -256,7 +256,7 @@ var siteUpdateCmd = &cobra.Command{
 	Short: "Update a RUM site",
 	Long: `Update settings for a RUM site.
 
-Updates replace the whole record: send current values for required fields (see ` + "`cronitor site get <key>`" + `).
+Updates use PUT: send every required field (current values are in ` + "`cronitor site get <key>`" + `). Fields you leave out keep their values.
 
 Examples:
   cronitor site update my-site --data '{"name":"New Name"}'
