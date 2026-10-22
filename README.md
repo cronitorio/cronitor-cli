@@ -101,8 +101,8 @@ cronitor monitor unpause <key>
 cronitor statuspage list
 cronitor statuspage list --with-status                   # Include current status
 cronitor statuspage get <key> --with-components          # Include components
-cronitor statuspage create -d '{"name":"My Status Page","subdomain":"my-status"}'
-cronitor statuspage update <key> -d '{"name":"Updated"}'
+cronitor statuspage create -d '{"name":"My Status Page","hosted_subdomain":"my-status"}'
+cronitor statuspage update <key> -d '{"name":"Updated","hosted_subdomain":"my-status"}'
 cronitor statuspage delete <key>
 
 # Components (nested under statuspage)
@@ -121,7 +121,7 @@ cronitor issue list --monitor my-job --time 24h          # By monitor, time rang
 cronitor issue list --search "database"                  # Search issues
 cronitor issue get <key>
 cronitor issue create -d '{"name":"DB issues","severity":"outage"}'
-cronitor issue update <key> -d '{"state":"investigating"}'
+cronitor issue update <key> -d '{"name":"DB issues","state":"investigating"}'
 cronitor issue resolve <key>                             # Shorthand for resolving
 cronitor issue delete <key>
 cronitor issue bulk --action delete --issues KEY1,KEY2   # Bulk actions

@@ -23,11 +23,11 @@ Examples:
   cronitor statuspage list
   cronitor statuspage list --with-status
   cronitor statuspage get my-page --with-components
-  cronitor statuspage create "My Status Page" --subdomain my-status
+  cronitor statuspage create --data '{"name":"My Status Page","hosted_subdomain":"my-status"}'
   cronitor statuspage delete <key>
 
   cronitor statuspage component list --statuspage my-page
-  cronitor statuspage component create --statuspage my-page --monitor api-health
+  cronitor statuspage component create --data '{"statuspage":"my-page","monitor":"api-health"}'
   cronitor statuspage component update <key> --data '{"name":"New Name"}'
   cronitor statuspage component delete <component-key>
 
@@ -173,8 +173,8 @@ var statuspageCreateCmd = &cobra.Command{
 	Long: `Create a new status page.
 
 Examples:
-  cronitor statuspage create --data '{"name":"My Status Page","subdomain":"my-status"}'
-  cronitor statuspage create --data '{"name":"Internal Status","subdomain":"internal","access":"private"}'`,
+  cronitor statuspage create --data '{"name":"My Status Page","hosted_subdomain":"my-status"}'
+  cronitor statuspage create --data '{"name":"Internal Status","hosted_subdomain":"internal","access":"password","password":"change-me-please"}'`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if statuspageData == "" {
 			Error("Create data required. Use --data '{...}'")
@@ -219,9 +219,11 @@ var statuspageUpdateCmd = &cobra.Command{
 	Short: "Update a status page",
 	Long: `Update an existing status page.
 
+Updates use PUT: send every required field (current values are in ` + "`cronitor statuspage get <key>`" + `). Fields you leave out keep their values.
+
 Examples:
-  cronitor statuspage update my-page --data '{"name":"New Name"}'
-  cronitor statuspage update my-page --data '{"access":"private"}'`,
+  cronitor statuspage update my-page --data '{"name":"New Name","hosted_subdomain":"my-status"}'
+  cronitor statuspage update my-page --data '{"name":"Internal Status","hosted_subdomain":"internal","access":"password","password":"change-me-please"}'`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
@@ -323,7 +325,7 @@ Components represent individual services/monitors displayed on a status page.
 
 Examples:
   cronitor statuspage component list --statuspage my-page
-  cronitor statuspage component create --statuspage my-page --monitor api-health
+  cronitor statuspage component create --data '{"statuspage":"my-page","monitor":"api-health"}'
   cronitor statuspage component update <key> --data '{"name":"New Name"}'
   cronitor statuspage component delete <component-key>`,
 }
