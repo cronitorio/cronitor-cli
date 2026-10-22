@@ -28,12 +28,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
 
       - name: Install web dependencies
         shell: bash
         run: |
           cd web
-          npm install
+          npm ci
 
       - name: Test dependency fixes
         shell: bash
@@ -94,11 +96,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
 
       - name: Install web dependencies
         run: |
           cd web
-          npm install
+          npm ci
 
       - name: Test dependency fixes
         run: cd web && npm run test:dependencies

@@ -40,11 +40,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
 
       - name: Install web dependencies
         run: |
           cd web
-          npm install
+          npm ci
 
       - name: Ensure static directory exists
         run: |
