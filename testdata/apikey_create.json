@@ -1,0 +1,10 @@
+{
+  "key": "new00123456789abcdefghijklmnNEWK",
+  "name": "Deploy bot",
+  "kind": "custom",
+  "scopes": ["monitor:read", "monitor:write"],
+  "immutable": false,
+  "last_used": null,
+  "created": "2026-10-11T00:00:00Z",
+  "updated": "2026-10-11T00:00:00Z"
+}

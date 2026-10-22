@@ -23,9 +23,9 @@ and control which environments trigger alerts.
 Examples:
   cronitor environment list
   cronitor environment get production
-  cronitor environment create staging --name "Staging" --no-alerts
-  cronitor environment create production --name "Production" --with-alerts
-  cronitor environment update staging --name "QA Environment"
+  cronitor environment create --data '{"key":"staging","name":"Staging","with_alerts":false}'
+  cronitor environment create --data '{"key":"production","name":"Production","with_alerts":true}'
+  cronitor environment update staging --data '{"name":"QA Environment"}'
   cronitor environment delete old-env
 
 For full API documentation:
@@ -43,10 +43,10 @@ For full API documentation:
 }
 
 var (
-	environmentPage     int
-	environmentFormat   string
-	environmentOutput   string
-	environmentData     string
+	environmentPage   int
+	environmentFormat string
+	environmentOutput string
+	environmentData   string
 )
 
 func init() {

@@ -22,6 +22,12 @@ var (
 	readSecretFn  = readSecretFromTerminal
 	readLineFn    = readLineFromTerminal
 	nowFn         = time.Now
+
+	stdinIsTerminalFn = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+
+	// persistApplyModeFn is the owner-only mode/ACL helper used by
+	// writeOwnerOnlyFile. Tests replace it to simulate a chmod failure.
+	persistApplyModeFn = persistApplyMode
 )
 
 var integrationSecretValues []string
@@ -399,8 +405,79 @@ func resolveIntegrationByLabel(client *lib.APIClient, label, service string) (in
 }
 
 func writeCLIOutput(outputPath, content string) {
+	writeOutputWith(outputPath, content, func(path string, data []byte) error {
+		return os.WriteFile(path, data, 0644)
+	})
+}
+
+// writeSecretOutput is writeCLIOutput for content that holds secrets, such as
+// API keys. The file is owner-only (0600, or an owner-only ACL on Windows),
+// and a file that already exists is narrowed to that before it is written.
+func writeSecretOutput(outputPath, content string) {
+	writeOutputWith(outputPath, content, writeOwnerOnlyFile)
+}
+
+func writeOwnerOnlyFile(path string, data []byte) error {
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to write secrets through symlink %s", path)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("refusing to write secrets to non-regular file %s", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	// Open without O_TRUNC so a later persistApplyMode failure does not
+	// empty an existing file. secretFileOpenFlags adds O_NOFOLLOW on Unix
+	// to close the race between Lstat and open; Windows keeps the Lstat
+	// check above.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|secretFileOpenFlags(), configModeOwnerOnly)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	// Refuse devices, FIFOs, and anything else that is not a regular file
+	// (or a newly created one) before chmod, so --output /dev/null cannot
+	// change the device mode.
+	opened, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !opened.Mode().IsRegular() {
+		return fmt.Errorf("refusing to write secrets to non-regular file %s", path)
+	}
+	// Restrict before the first secret byte: 0600 on Unix, owner-only ACL
+	// on Windows, and drop an inherited POSIX ACL a 0600 mode would not
+	// remove on its own.
+	if err := persistApplyModeFn(f, path, configModeOwnerOnly); err != nil {
+		return err
+	}
+	if err := persistClearACL(path); err != nil {
+		return err
+	}
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+func validateOutputFormat(format string) error {
+	switch format {
+	case "", "json", "table":
+		return nil
+	default:
+		return fmt.Errorf("Invalid --format '%s'. Use one of: json, table", format)
+	}
+}
+
+func writeOutputWith(outputPath, content string, write func(path string, data []byte) error) {
 	if outputPath != "" {
-		if err := os.WriteFile(outputPath, []byte(content+"\n"), 0644); err != nil {
+		if err := write(outputPath, []byte(content+"\n")); err != nil {
 			Error(fmt.Sprintf("Failed to write to %s: %s", outputPath, err))
 			exitFn(1)
 			return

@@ -49,10 +49,16 @@ Keep using that config path (`CRONITOR_CONFIG` or `--config`) for subsequent com
 `auth status` shows the credential's organization and permissions without exposing the key. Full-access users receive SDK Integration credentials; read-only users receive telemetry-only credentials and cannot manage account resources. Reuse working credentials rather than logging in again for every task.
 
 ```bash
+cronitor auth login --admin
+```
+
+`--admin` also gives the credential account access. Only `cronitor team` and `cronitor apikey` then act as you, with your current role. Read-only users cannot use `cronitor apikey`, even with `--admin`. Every other command keeps the scopes fixed when the key was created, so demoting someone does not remove write access to monitors, status pages, sites and other resources. After demoting someone, delete their keys and have them log in again. Don't use `--admin` on shared servers: anyone who can read the config file can act as you. `auth status` shows whether the credential has account access.
+
+```bash
 cronitor auth logout
 ```
 
-Logout revokes this installation's credential and removes it locally. **Scheduled jobs using that credential will stop authenticating.** Agents should not log out as routine task cleanup. The credential persists independently of the browser session; removing a user or changing their role does not automatically revoke it. Replacing a credential with another login also does not revoke the previous key; remove unused keys in the dashboard.
+Logout revokes this installation's credential and removes it locally. **Scheduled jobs using that credential will stop authenticating.** Agents should not log out as routine task cleanup. The credential persists independently of the browser session. Removing a team member deletes only keys created with `cronitor auth login --admin`. Keys from a plain `cronitor auth login` are organization-owned and keep working. Replacing a credential with another login also does not revoke the previous key; remove unused keys in the dashboard.
 
 ### Cron Management
 | Command | Description |
@@ -95,8 +101,8 @@ cronitor monitor unpause <key>
 cronitor statuspage list
 cronitor statuspage list --with-status                   # Include current status
 cronitor statuspage get <key> --with-components          # Include components
-cronitor statuspage create -d '{"name":"My Status Page","subdomain":"my-status"}'
-cronitor statuspage update <key> -d '{"name":"Updated"}'
+cronitor statuspage create -d '{"name":"My Status Page","hosted_subdomain":"my-status"}'
+cronitor statuspage update <key> -d '{"name":"Updated","hosted_subdomain":"my-status"}'
 cronitor statuspage delete <key>
 
 # Components (nested under statuspage)
@@ -115,7 +121,7 @@ cronitor issue list --monitor my-job --time 24h          # By monitor, time rang
 cronitor issue list --search "database"                  # Search issues
 cronitor issue get <key>
 cronitor issue create -d '{"name":"DB issues","severity":"outage"}'
-cronitor issue update <key> -d '{"state":"investigating"}'
+cronitor issue update <key> -d '{"name":"DB issues","state":"investigating"}'
 cronitor issue resolve <key>                             # Shorthand for resolving
 cronitor issue delete <key>
 cronitor issue bulk --action delete --issues KEY1,KEY2   # Bulk actions
@@ -180,17 +186,44 @@ cronitor environment update <key> -d '{"name":"Updated"}'
 cronitor environment delete <key>
 ```
 
-**Aliases:** `cronitor env` → `environment`, `cronitor notifications` → `notification`, `cronitor integrations` → `integration`
+#### Team
+
+```bash
+cronitor team list
+cronitor team list --format json
+cronitor team invite jane@example.com --name "Jane Doe"        # Role defaults to user
+cronitor team invite ops@example.com --name "Ops" --role readonly
+cronitor team role jane@example.com admin                      # admin, user, or readonly
+cronitor team remove jane@example.com                          # Asks first; --yes skips
+```
+
+#### API Keys
+
+```bash
+cronitor apikey list                                           # Table masks each key
+cronitor apikey list --search deploy --page 2
+cronitor apikey list --format json                             # Prints full keys
+cronitor apikey get <key>
+cronitor apikey create --name "Deploy bot" --scope monitor:read --scope monitor:write
+cronitor apikey create --name "Telemetry" --kind telemetry
+cronitor apikey update <key> --name "Renamed"
+cronitor apikey update <key> --scope monitor:read              # Replaces the scopes
+cronitor apikey delete <key>                                   # Asks first; --yes skips
+```
+
+Team and API key commands need a credential from `cronitor auth login --admin` and act with the logged-in user's current role. Any role can list the team; inviting, changing roles, and removing members need the admin role. A team member's id is their email address, the same value `team list` prints in the ID column. You can only grant API key scopes your own role has. `apikey create` prints the full key once. Without `--yes`, `team remove` and `apikey delete` refuse to run when stdin is not a terminal.
+
+**Aliases:** `cronitor env` → `environment`, `cronitor notifications` → `notification`, `cronitor integrations` → `integration`, `cronitor teams` → `team`, `cronitor apikeys` / `cronitor keys` → `apikey`
 
 ### Common Flags
 
 | Flag | Description |
 |------|-------------|
-| `--format json\|table\|yaml` | Output format (default: `table` for list, `json` for get) |
+| `--format json\|table` | Output format (default: `table` for list, `json` for get). `monitor` also accepts `yaml` |
 | `-o, --output <file>` | Write output to a file |
 | `--page <n>` | Page number for paginated results |
 | `-d, --data <json>` | JSON data for create/update |
-| `-f, --file <path>` | Read JSON or YAML from a file |
+| `-f, --file <path>` | Read JSON from a file (`monitor create`/`update` and `integration create`; `monitor create` also reads YAML) |
 | `-k, --api-key <key>` | Cronitor API key (appears in shell history and process lists; prefer `CRONITOR_API_KEY`) |
 
 ## Crontab Guru Dashboard

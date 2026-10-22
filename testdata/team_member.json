@@ -1,0 +1,8 @@
+{
+  "id": "jane@example.com",
+  "name": "Jane Doe",
+  "email": "jane@example.com",
+  "role": "user",
+  "state": "pending",
+  "is_owner": false
+}
