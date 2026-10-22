@@ -23,11 +23,11 @@ Examples:
   cronitor statuspage list
   cronitor statuspage list --with-status
   cronitor statuspage get my-page --with-components
-  cronitor statuspage create "My Status Page" --subdomain my-status
+  cronitor statuspage create --data '{"name":"My Status Page","subdomain":"my-status"}'
   cronitor statuspage delete <key>
 
   cronitor statuspage component list --statuspage my-page
-  cronitor statuspage component create --statuspage my-page --monitor api-health
+  cronitor statuspage component create --data '{"statuspage":"my-page","monitor":"api-health"}'
   cronitor statuspage component update <key> --data '{"name":"New Name"}'
   cronitor statuspage component delete <component-key>
 
@@ -323,7 +323,7 @@ Components represent individual services/monitors displayed on a status page.
 
 Examples:
   cronitor statuspage component list --statuspage my-page
-  cronitor statuspage component create --statuspage my-page --monitor api-health
+  cronitor statuspage component create --data '{"statuspage":"my-page","monitor":"api-health"}'
   cronitor statuspage component update <key> --data '{"name":"New Name"}'
   cronitor statuspage component delete <component-key>`,
 }

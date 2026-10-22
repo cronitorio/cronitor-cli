@@ -54,7 +54,7 @@ func exampleFlagProblems(cmd *cobra.Command) []string {
 }
 
 func TestHelpExamplesUseRealFlags(t *testing.T) {
-	for _, cmd := range []*cobra.Command{authCmd, environmentCmd, notificationCmd, teamCmd, apiKeyCmd} {
+	for _, cmd := range []*cobra.Command{authCmd, environmentCmd, notificationCmd, teamCmd, apiKeyCmd, issueCmd, maintenanceCmd, siteCmd, statuspageCmd} {
 		for _, problem := range exampleFlagProblems(cmd) {
 			t.Error(problem)
 		}

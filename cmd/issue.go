@@ -25,8 +25,8 @@ Examples:
   cronitor issue list --state unresolved
   cronitor issue list --severity outage --time 24h
   cronitor issue get <key>
-  cronitor issue create "Database connection issues" --severity outage
-  cronitor issue update <key> --state investigating
+  cronitor issue create --data '{"name":"Database connection issues","severity":"outage"}'
+  cronitor issue update <key> --data '{"state":"investigating"}'
   cronitor issue resolve <key>
   cronitor issue delete <key>
 

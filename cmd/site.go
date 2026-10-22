@@ -59,10 +59,10 @@ Examples:
   cronitor site get my-site
   cronitor site get my-site --with-snippet
   cronitor site create "My Website"
-  cronitor site update my-site --sampling 50
+  cronitor site update my-site --data '{"sampling":50}'
   cronitor site delete my-site
 
-  cronitor site errors --site my-site
+  cronitor site error list --site my-site
   cronitor site query --site my-site --type aggregation --metric session_count
   cronitor site query --site my-site --type breakdown --metric web_vital_lcp_p50 --group-by country_code
   cronitor site query --site my-site --type timeseries --metric session_count --bucket hour
