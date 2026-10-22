@@ -2,7 +2,8 @@ version: '3'
 
 services:
   linux:
-    build: .
+    image: golang:1.26.2-bookworm
+    working_dir: /cronitor
     restart: always
     command: sleep 1000
     cap_add:
