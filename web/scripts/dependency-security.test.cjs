@@ -39,6 +39,27 @@ test('SVGO is patched and still optimizes SVGs', () => {
   }
 });
 
+test('underscore is patched and still flattens and compares values', () => {
+  const copies = packages('underscore');
+  assert.ok(copies.length > 0);
+  for (const [location, metadata] of copies) {
+    assert.ok(atLeast(metadata.version, [1, 13, 8]), `${location}: ${metadata.version}`);
+    const _ = require(path.join(root, location));
+    assert.deepEqual(_.flatten([1, [2, [3]]]), [1, 2, [3]]);
+    assert.equal(_.isEqual({ a: 1 }, { a: 1 }), true);
+  }
+});
+
+test('serialize-javascript is patched and still serializes objects', () => {
+  const copies = packages('serialize-javascript');
+  assert.ok(copies.length > 0);
+  for (const [location, metadata] of copies) {
+    assert.ok(atLeast(metadata.version, [7, 1, 3]), `${location}: ${metadata.version}`);
+    const serialize = require(path.join(root, location));
+    assert.match(serialize({ ok: true, when: /cron/i }), /ok/);
+  }
+});
+
 test('Puppeteer no longer brings in extract-zip', async () => {
   assert.equal(packages('extract-zip').length, 0);
   const { default: puppeteer } = await import('puppeteer');
