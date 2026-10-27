@@ -45,7 +45,8 @@ test('underscore is patched and still flattens and compares values', () => {
   for (const [location, metadata] of copies) {
     assert.ok(atLeast(metadata.version, [1, 13, 8]), `${location}: ${metadata.version}`);
     const _ = require(path.join(root, location));
-    assert.deepEqual(_.flatten([1, [2, [3]]]), [1, 2, [3]]);
+    assert.deepEqual(_.flatten([1, [2, [3]]]), [1, 2, 3]);
+    assert.deepEqual(_.flatten([1, [2, [3]]], true), [1, 2, [3]]);
     assert.equal(_.isEqual({ a: 1 }, { a: 1 }), true);
   }
 });
