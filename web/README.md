@@ -16,5 +16,6 @@ If browser downloads are unnecessary for a build-only environment, install with
 
 The version-scoped js-yaml overrides preserve the separate v3 and v4 APIs used
 by the build tools. The dependency tests guard their patched versions, the SVGO
-override, and the absence of extract-zip. These checks cover those dependencies,
-not every advisory in the wider Create React App dependency tree.
+override, the underscore and serialize-javascript overrides, and the absence of
+extract-zip. These checks cover those dependencies, not every advisory in the
+wider Create React App dependency tree.
