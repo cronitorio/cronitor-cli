@@ -39,7 +39,7 @@ test('SVGO is patched and still optimizes SVGs', () => {
   }
 });
 
-test('underscore is patched and still flattens and compares values', () => {
+test('underscore is patched and still flattens, compares, and uniq-s values', () => {
   const copies = packages('underscore');
   assert.ok(copies.length > 0);
   for (const [location, metadata] of copies) {
@@ -48,16 +48,25 @@ test('underscore is patched and still flattens and compares values', () => {
     assert.deepEqual(_.flatten([1, [2, [3]]]), [1, 2, 3]);
     assert.deepEqual(_.flatten([1, [2, [3]]], true), [1, 2, [3]]);
     assert.equal(_.isEqual({ a: 1 }, { a: 1 }), true);
+    assert.deepEqual(_.uniq([1, 2, 1, 3, 2]), [1, 2, 3]);
   }
 });
 
-test('serialize-javascript is patched and still serializes objects', () => {
+test('serialize-javascript is patched and still round-trips objects', () => {
   const copies = packages('serialize-javascript');
   assert.ok(copies.length > 0);
   for (const [location, metadata] of copies) {
     assert.ok(atLeast(metadata.version, [7, 1, 3]), `${location}: ${metadata.version}`);
     const serialize = require(path.join(root, location));
-    assert.match(serialize({ ok: true, when: /cron/i }), /ok/);
+    const restored = eval('(' + serialize({
+      ok: true,
+      re: /cron/i,
+      fn() { return 1; },
+    }) + ')');
+    assert.equal(restored.ok, true);
+    assert.equal(restored.re.source, 'cron');
+    assert.equal(restored.re.flags, 'i');
+    assert.equal(restored.fn(), 1);
   }
 });
 
