@@ -235,7 +235,8 @@ var errorsEventsCmd = &cobra.Command{
 	Use:   "events <group> [event_id]",
 	Short: "List a group's events, or show one event",
 	Long: `Without an event id, list the events in an error group, newest first. When
-there are more, the footer prints a cursor to pass to --before.
+there are more, the footer prints a cursor to pass to --before. --env
+filters by environment key.
 
 With an event id, show that event with its stack trace, breadcrumb count and
 tags.
