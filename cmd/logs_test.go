@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cronitorio/cronitor-cli/internal/testutil"
+	"github.com/cronitorio/cronitor-cli/lib"
 )
 
 const (
@@ -180,8 +181,16 @@ func TestLogsSearch_Follow(t *testing.T) {
 		{"stamp": "2026-10-29T03:00:13.000000Z", "level": "info", "body": "C", "monitor": {"key": "nightly-job"}, "series": "run-123"},
 		{"stamp": "2026-10-29T03:00:12.250000Z", "level": "warn", "body": "B", "monitor": {"key": "nightly-job"}, "series": "run-123"}
 	], "has_more": false, "next": null}`
+	// The second poll re-reads the last minute: E is stamped before D but
+	// arrived after D was printed, as when an SDK sends a batch late. F is
+	// new. A, B, C and D were printed already.
 	poll2 := `{"data": [
-		{"stamp": "2026-10-29T03:00:15.000000Z", "level": "error", "body": "D", "monitor": {"key": "nightly-job"}, "series": "run-123"}
+		{"stamp": "2026-10-29T03:00:16.000000Z", "level": "info", "body": "F", "monitor": {"key": "nightly-job"}, "series": "run-123"},
+		{"stamp": "2026-10-29T03:00:15.000000Z", "level": "error", "body": "D", "monitor": {"key": "nightly-job"}, "series": "run-123"},
+		{"stamp": "2026-10-29T03:00:14.000000Z", "level": "info", "body": "E", "monitor": {"key": "nightly-job"}, "series": "run-123"},
+		{"stamp": "2026-10-29T03:00:13.000000Z", "level": "info", "body": "C", "monitor": {"key": "nightly-job"}, "series": "run-123"},
+		{"stamp": "2026-10-29T03:00:12.250000Z", "level": "warn", "body": "B", "monitor": {"key": "nightly-job"}, "series": "run-123"},
+		{"stamp": "2026-10-29T03:00:10.000000Z", "level": "info", "body": "A", "monitor": {"key": "nightly-job"}, "series": "run-123"}
 	], "has_more": false, "next": null}`
 	mock.OnSequence("GET", "/logs", 200, initial, poll1page1, poll1page2, poll2)
 	withLogsTest(t, mock)
@@ -204,6 +213,8 @@ func TestLogsSearch_Follow(t *testing.T) {
 		"2026-10-29T03:00:12Z  WARN   nightly-job  run-123  B",
 		"2026-10-29T03:00:13Z  INFO   nightly-job  run-123  C",
 		"2026-10-29T03:00:15Z  ERROR  nightly-job  run-123  D",
+		"2026-10-29T03:00:14Z  INFO   nightly-job  run-123  E",
+		"2026-10-29T03:00:16Z  INFO   nightly-job  run-123  F",
 	}, "\n") + "\n"
 	if stdout != want {
 		t.Errorf("follow output:\n%s\nwant:\n%s", stdout, want)
@@ -213,10 +224,111 @@ func TestLogsSearch_Follow(t *testing.T) {
 	if len(reqs) != 4 {
 		t.Fatalf("requests = %d, want 4", len(reqs))
 	}
+	// Each poll starts a minute before the newest record printed.
 	assertQuery(t, reqs[0], map[string]string{"monitor": "nightly-job"})
-	assertQuery(t, reqs[1], map[string]string{"monitor": "nightly-job", "start": "2026-10-29T03:00:12.250000Z"})
-	assertQuery(t, reqs[2], map[string]string{"monitor": "nightly-job", "start": "2026-10-29T03:00:12.250000Z", "before": "2026-10-29T03:00:15.000000Z"})
-	assertQuery(t, reqs[3], map[string]string{"monitor": "nightly-job", "start": "2026-10-29T03:00:15.000000Z"})
+	assertQuery(t, reqs[1], map[string]string{"monitor": "nightly-job", "start": "2026-10-29T02:59:12.250000Z"})
+	assertQuery(t, reqs[2], map[string]string{"monitor": "nightly-job", "start": "2026-10-29T02:59:12.250000Z", "before": "2026-10-29T03:00:15.000000Z"})
+	assertQuery(t, reqs[3], map[string]string{"monitor": "nightly-job", "start": "2026-10-29T02:59:15.000000Z"})
+}
+
+func TestLogsSearch_FollowStartsNoEarlierThanFirstPageOrStart(t *testing.T) {
+	record := func(stamp, body string) string {
+		return `{"stamp": "` + stamp + `", "level": "info", "body": "` + body + `", "monitor": {"key": "nightly-job"}}`
+	}
+	cases := []struct {
+		name      string
+		args      []string
+		initial   string
+		wantStart string
+	}{
+		{
+			// A first page with more behind it ends at its oldest record:
+			// what came before it is history, not late arrivals.
+			name:      "first page had more",
+			args:      []string{"logs", "search", "--follow"},
+			initial:   `{"data": [` + record("2026-10-29T03:05:12.000000Z", "B") + `, ` + record("2026-10-29T03:05:10.000000Z", "A") + `], "has_more": true, "next": "2026-10-29T03:05:10.000000Z"}`,
+			wantStart: "2026-10-29T03:05:10.000000Z",
+		},
+		{
+			name:      "since",
+			args:      []string{"logs", "search", "--follow", "--since", "30s"},
+			initial:   `{"data": [` + record("2026-10-29T03:05:12.000000Z", "B") + `, ` + record("2026-10-29T03:05:10.000000Z", "A") + `], "has_more": false, "next": null}`,
+			wantStart: "2026-10-29T03:05:00.000000Z",
+		},
+		{
+			// A --start the CLI cannot parse is passed through; the first
+			// record printed, which the API returned for it, is the floor.
+			name:      "start the CLI cannot parse",
+			args:      []string{"logs", "search", "--follow", "--start", "2026-10-29T03:05"},
+			initial:   `{"data": [` + record("2026-10-29T03:05:12.000000Z", "B") + `, ` + record("2026-10-29T03:05:10.000000Z", "A") + `], "has_more": false, "next": null}`,
+			wantStart: "2026-10-29T03:05:10.000000Z",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := testutil.NewMockAPI()
+			defer mock.Close()
+			// The mock ignores start=, so the poll also returns a record
+			// from before it, which must not print.
+			poll := `{"data": [` + record("2026-10-29T03:05:13.000000Z", "C") + `, ` +
+				record("2026-10-29T03:05:12.000000Z", "B") + `, ` +
+				record("2026-10-29T03:05:10.000000Z", "A") + `, ` +
+				record("2026-10-29T03:04:59.000000Z", "old") + `], "has_more": false, "next": null}`
+			mock.OnSequence("GET", "/logs", 200, tc.initial, poll)
+			withLogsTest(t, mock)
+			waits := 0
+			logsFollowWait = func(ctx context.Context, d time.Duration) bool {
+				waits++
+				return waits <= 1
+			}
+
+			stdout, code, err := executeWithExit(tc.args...)
+			if err != nil || code != 0 {
+				t.Fatalf("exit %d err %v\n%s", code, err, stdout)
+			}
+			want := strings.Join([]string{
+				"2026-10-29T03:05:10Z  INFO   nightly-job  -  A",
+				"2026-10-29T03:05:12Z  INFO   nightly-job  -  B",
+				"2026-10-29T03:05:13Z  INFO   nightly-job  -  C",
+			}, "\n") + "\n"
+			if stdout != want {
+				t.Errorf("follow output:\n%s\nwant:\n%s", stdout, want)
+			}
+			reqs := mock.AllRequests()
+			if len(reqs) != 2 {
+				t.Fatalf("requests = %d, want 2", len(reqs))
+			}
+			if got := reqs[1].QueryParams.Get("start"); got != tc.wantStart {
+				t.Errorf("poll start = %q, want %q", got, tc.wantStart)
+			}
+		})
+	}
+}
+
+func TestLogFollowerForgetsRecordsOutsideTheWindow(t *testing.T) {
+	rec := func(stamp, body string) logRecord {
+		return logRecord{LogEntry: lib.LogEntry{Stamp: stamp, Body: body, Series: "run-1", Monitor: &lib.ResourceRef{Key: "job"}}}
+	}
+	f := newLogFollower("")
+	testutil.CaptureStdoutStderr(func() {
+		f.print([]logRecord{rec("2026-10-29T03:00:00.000000Z", "old"), rec("2026-10-29T03:00:30.000000Z", "mid")}, false, false)
+		if got := f.nextStart(); got != "2026-10-29T02:59:30.000000Z" {
+			t.Errorf("start = %q", got)
+		}
+		if len(f.seen) != 2 {
+			t.Errorf("both records are inside the window, seen = %v", f.seen)
+		}
+		f.print([]logRecord{rec("2026-10-29T03:01:10.000000Z", "new")}, false, false)
+		if got := f.nextStart(); got != "2026-10-29T03:00:10.000000Z" {
+			t.Errorf("start = %q", got)
+		}
+	})
+	if len(f.seen) != 2 {
+		t.Errorf("the record before the window should be forgotten, seen = %v", f.seen)
+	}
+	if _, ok := f.seen[logKey{stamp: "2026-10-29T03:00:30.000000Z", body: "mid", series: "run-1", monitor: "job"}]; !ok {
+		t.Errorf("records inside the window are kept, seen = %v", f.seen)
+	}
 }
 
 func TestLogsSearch_FollowJSONLines(t *testing.T) {
@@ -241,12 +353,13 @@ func TestLogsSearch_FollowJSONLines(t *testing.T) {
 	if stdout != want {
 		t.Errorf("JSON lines = %q, want %q", stdout, want)
 	}
-	// With no record yet, following starts from now.
+	// With no record yet, following starts from now, a minute back for
+	// records that arrive late.
 	reqs := mock.AllRequests()
 	if len(reqs) != 2 {
 		t.Fatalf("requests = %d, want 2", len(reqs))
 	}
-	assertQuery(t, reqs[1], map[string]string{"start": fmt.Sprint(readAPITestNow.Unix())})
+	assertQuery(t, reqs[1], map[string]string{"start": "2026-10-29T03:04:30.000000Z"})
 }
 
 func TestLogsSearch_FollowKeepsPollingAfterServerErrors(t *testing.T) {

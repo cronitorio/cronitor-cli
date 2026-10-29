@@ -116,6 +116,8 @@ whole tokens; repeat it or pass several words and every token must match.
 --env filters by environment key.
 
 --follow keeps polling every 2 seconds for newer records until Ctrl-C.
+Each poll reads back a minute before the newest record printed, so records
+that arrive late (SDKs send in batches) still print, after newer ones.
 With --json it prints each record as one JSON object per line.
 
 Examples:
@@ -176,19 +178,24 @@ Examples:
 			return
 		}
 
-		f := &logFollower{seen: map[string]bool{}}
-		f.startAt(q.Start)
-		f.print(reverseLogRecords(page.records), jsonOut, logsAttributes)
-		if f.lastStamp == "" {
+		f := newLogFollower(q.Start)
+		records := reverseLogRecords(page.records)
+		if page.HasMore && len(records) > 0 {
+			// Older records were left out of the first page; polls must
+			// not print them as if they had just arrived.
+			f.raiseFloor(records[0].Stamp)
+		}
+		f.print(records, jsonOut, logsAttributes)
+		if f.newest.IsZero() && f.rawStart == "" {
 			// Nothing yet: follow from now.
-			f.startAt(strconv.FormatInt(nowFn().Unix(), 10))
+			f.newest = nowFn()
 		}
 
 		ctx, stop := logsFollowContext()
 		defer stop()
 		for logsFollowWait(ctx, logsFollowInterval) {
 			pq := q
-			pq.Start = f.lastStamp
+			pq.Start = f.nextStart()
 			pq.Before = ""
 			var batch []logRecord
 			for pages := 0; ; pages++ {
@@ -211,7 +218,7 @@ Examples:
 					break
 				}
 				if pages+1 >= logsFollowMaxPages {
-					fmt.Fprintln(os.Stderr, warningStyle.Render(fmt.Sprintf("%s More than %d pages of new records since the last poll; older ones were skipped", iconWarning, logsFollowMaxPages)))
+					fmt.Fprintln(os.Stderr, warningStyle.Render(fmt.Sprintf("%s More than %d pages of records since %s; older ones were skipped", iconWarning, logsFollowMaxPages, pq.Start)))
 					break
 				}
 				pq.Before = string(p.Next)
@@ -359,46 +366,100 @@ func formatLogAttributes(attrs map[string]interface{}) string {
 	return strings.Join(parts, " ")
 }
 
-// logFollower prints records newer than the last one it printed. Polls ask
-// for start=<last stamp>, so records at that stamp come back again; they
-// are recognized by their JSON and skipped.
+// logFollowLag is how far before the newest record printed each --follow
+// poll starts. Stamps are set by the sender, and SDKs send records in
+// batches (cronitor-python every 5 seconds), so a record can arrive after a
+// newer one was printed. Reading this window again, and skipping records
+// already printed, shows those late records.
+const logFollowLag = 60 * time.Second
+
+// logKey identifies a record across --follow polls, which return most
+// records more than once.
+type logKey struct {
+	stamp, body, series, monitor, service string
+}
+
+// logFollower prints the records of each --follow poll that it has not
+// printed before.
 type logFollower struct {
-	lastStamp string    // sent as start= on the next poll
-	last      time.Time // lastStamp parsed; zero when unknown
-	seen      map[string]bool
+	newest   time.Time            // newest stamp printed, or where following started
+	floor    time.Time            // polls never start before this: --since/--start, or the oldest record of a first page that had more
+	rawStart string               // a --start this could not parse; sent as start= until a record prints
+	cutoff   time.Time            // start of the current poll; records before it are not printed
+	seen     map[logKey]time.Time // records printed at or after cutoff, by stamp
 }
 
-// startAt sets the start= value of the next poll: unix seconds or an ISO
-// time. Empty leaves the follower unbounded.
-func (f *logFollower) startAt(start string) {
+// newLogFollower follows from start (unix seconds or an ISO time); empty
+// leaves the first read unbounded.
+func newLogFollower(start string) *logFollower {
+	f := &logFollower{seen: map[logKey]time.Time{}}
 	if start == "" {
-		return
+		return f
 	}
-	f.lastStamp = start
+	t, ok := parseAPITime(start)
 	if secs, err := strconv.ParseInt(start, 10, 64); err == nil {
-		f.last = time.Unix(secs, 0)
-	} else if t, ok := parseAPITime(start); ok {
-		f.last = t
+		t, ok = time.Unix(secs, 0), true
+	}
+	if !ok {
+		f.rawStart = start
+		return f
+	}
+	f.newest, f.floor, f.cutoff = t, t, t
+	return f
+}
+
+// raiseFloor keeps polls from starting before stamp.
+func (f *logFollower) raiseFloor(stamp string) {
+	if t, ok := parseAPITime(stamp); ok && t.After(f.floor) {
+		f.floor = t
 	}
 }
 
-// print writes records, oldest first, that were not printed before.
+// nextStart returns start= for the next poll, logFollowLag before the
+// newest record printed but not before the floor, and forgets records
+// older than that: the poll cannot return them.
+func (f *logFollower) nextStart() string {
+	if f.newest.IsZero() {
+		return f.rawStart
+	}
+	start := f.newest.Add(-logFollowLag)
+	if start.Before(f.floor) {
+		start = f.floor
+	}
+	f.cutoff = start
+	for k, t := range f.seen {
+		if t.Before(start) {
+			delete(f.seen, k)
+		}
+	}
+	return lib.FormatIngestTime(start)
+}
+
+// print writes, in the order given (oldest first), the records it has not
+// printed before.
 func (f *logFollower) print(records []logRecord, jsonOut, withAttributes bool) {
 	for _, r := range records {
-		key := string(r.raw)
 		t, ok := parseAPITime(r.Stamp)
-		if ok && !f.last.IsZero() && t.Before(f.last) {
+		if ok && t.Before(f.cutoff) {
 			continue
 		}
-		if f.seen[key] && (!ok || t.Equal(f.last)) {
+		key := logKey{stamp: r.Stamp, body: r.Body, series: r.Series, monitor: refKey(r.Monitor), service: refKey(r.Service)}
+		if _, printed := f.seen[key]; printed {
 			continue
 		}
-		if ok && (f.last.IsZero() || t.After(f.last)) {
-			f.last = t
-			f.lastStamp = r.Stamp
-			f.seen = map[string]bool{}
+		if !ok {
+			t = f.newest // no stamp to age it by: remember it for one window
+		} else {
+			if f.rawStart != "" && f.floor.IsZero() {
+				// The API applied a start this could not parse; the
+				// oldest record it returned stands in for it.
+				f.floor = t
+			}
+			if t.After(f.newest) {
+				f.newest = t
+			}
 		}
-		f.seen[key] = true
+		f.seen[key] = t
 		if jsonOut {
 			fmt.Println(string(r.raw))
 		} else {
