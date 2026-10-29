@@ -84,12 +84,12 @@ Both use the ping API key (`CRONITOR_PING_API_KEY`, falling back to `CRONITOR_AP
 
 Read them back with [`cronitor errors` and `cronitor logs`](#errors).
 
-Applications can report their own errors and logs instead. Cronitor accepts the Sentry envelope format, so any Sentry SDK works once its DSN is `https://{telemetry_api_key}@cronitor.link/{api_key_id}`, where `{api_key_id}` is the numeric id of that telemetry key. Tag events with `cronitor.monitor` to attach them to a monitor:
+Applications can report their own errors and logs instead. Cronitor accepts the Sentry envelope format, so any Sentry SDK works once its DSN is the `dsn` of a service monitor (`cronitor monitor create --data '{"type":"service","key":"billing-api","name":"Billing API"}'`, then `cronitor monitor get billing-api`). The path of the DSN is that monitor's numeric id. Tag events with `cronitor.monitor` to attach them to a job monitor:
 
 ```python
 import sentry_sdk
 
-sentry_sdk.init(dsn="https://<telemetry key>@cronitor.link/<key id>")
+sentry_sdk.init(dsn="<the dsn of your service monitor>")
 sentry_sdk.set_tag("cronitor.monitor", "nightly-job")
 ```
 

@@ -573,3 +573,28 @@ func TestExecArgsAcceptCaptureFlagsInAnyOrder(t *testing.T) {
 		t.Errorf("a flag after the key must stay in the command: ship=%v command %q", shipLogs, commandParts)
 	}
 }
+
+func TestLogShipperTimestampsStrictlyIncrease(t *testing.T) {
+	// The read API pages with stamp < before, so lines written in one call must not share a timestamp.
+	var mu sync.Mutex
+	var got []lib.LogRecord
+	s := newLogShipper(func(batch []lib.LogRecord) error {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, batch...)
+		return nil
+	}, nil)
+	s.Write([]byte("one\ntwo\nthree\n"))
+	s.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 3 {
+		t.Fatalf("want 3 records, got %d", len(got))
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i].Timestamp <= got[i-1].Timestamp {
+			t.Errorf("record %d timestamp %f is not after record %d timestamp %f", i, got[i].Timestamp, i-1, got[i-1].Timestamp)
+		}
+	}
+}

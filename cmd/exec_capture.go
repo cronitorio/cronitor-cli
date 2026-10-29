@@ -162,6 +162,7 @@ type logShipper struct {
 	partial   []byte
 	pending   []lib.LogRecord
 	lineNo    int
+	lastStamp time.Time // every record gets a later timestamp than the one before, so cursor paging never skips a line
 	attrs     map[string]lib.LogAttribute
 	closed    bool
 	dropped   int
@@ -235,6 +236,10 @@ func (s *logShipper) addLineLocked(line string, now time.Time) {
 	if strings.TrimSpace(line) == "" {
 		return
 	}
+	if !now.After(s.lastStamp) {
+		now = s.lastStamp.Add(time.Microsecond)
+	}
+	s.lastStamp = now
 	attrs := make(map[string]lib.LogAttribute, len(s.attrs)+1)
 	for k, v := range s.attrs {
 		attrs[k] = v
