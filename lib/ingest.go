@@ -238,7 +238,9 @@ var logSeverityNumbers = map[string]int{
 }
 
 var (
-	errorLinePattern = regexp.MustCompile(`(?i)\b(error|exception|traceback|fatal|panic)\b`)
+	// Prose words at word boundaries, plus CamelCase exception class names such as
+	// JSONDecodeError or NullPointerException, which have no boundary before "Error".
+	errorLinePattern = regexp.MustCompile(`(?i:\b(?:error|exception|traceback|fatal|panic)\b)|\w+(?:Error|Exception)\b`)
 	warnLinePattern  = regexp.MustCompile(`(?i)\bwarn(ing)?\b`)
 )
 

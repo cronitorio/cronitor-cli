@@ -135,19 +135,23 @@ func TestIngestEventWithoutFramesOmitsStacktrace(t *testing.T) {
 
 func TestIngestLogLevelForLine(t *testing.T) {
 	cases := map[string]string{
-		"starting job":                         "info",
-		"ERROR: could not connect":             "error",
-		"Traceback (most recent call last):":   "error",
-		"panic: runtime error":                 "error",
-		"Fatal: disk full":                     "error",
-		"raised an Exception here":             "error",
-		"WARNING: low disk":                    "warn",
-		"warn: deprecated flag":                "warn",
-		"errors=0 warnings=0":                  "info", // word boundaries: "errors" and "warnings" are not matches
-		"no terror here":                       "info",
-		"warning and error on the same line":   "error",
-		"forewarned is forearmed":              "info",
-		"[2026-10-29 10:00:00] app.WARN retry": "warn",
+		"starting job":                                  "info",
+		"ERROR: could not connect":                      "error",
+		"Traceback (most recent call last):":            "error",
+		"panic: runtime error":                          "error",
+		"Fatal: disk full":                              "error",
+		"raised an Exception here":                      "error",
+		"WARNING: low disk":                             "warn",
+		"warn: deprecated flag":                         "warn",
+		"errors=0 warnings=0":                           "info", // word boundaries: "errors" and "warnings" are not matches
+		"no terror here":                                "info",
+		"warning and error on the same line":            "error",
+		"forewarned is forearmed":                       "info",
+		"[2026-10-29 10:00:00] app.WARN retry":          "warn",
+		"json.decoder.JSONDecodeError: Expecting value": "error", // CamelCase exception names
+		"java.lang.NullPointerException":                "error",
+		"ValueError":                                    "error",
+		"errorhandler registered":                       "info", // lowercase compound, not an exception name
 	}
 	for line, want := range cases {
 		if got := lib.LogLevelForLine(line); got != want {
