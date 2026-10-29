@@ -82,6 +82,8 @@ cronitor exec --capture-errors --ship-logs d3x0c1 python3 /path/to/job.py
 
 Both use the ping API key (`CRONITOR_PING_API_KEY`, falling back to `CRONITOR_API_KEY`) and send to `/api/envelope` on the telemetry host (`CRONITOR_PING_API_HOST`, default `cronitor.link`). Without a key they send nothing. With `--no-stdout`, no output is sent: no log lines are shipped and the exception event leaves out the output. A failed send never changes the command's exit code, and after the command exits the CLI waits at most about 10 seconds for these requests.
 
+Read them back with [`cronitor errors` and `cronitor logs`](#errors).
+
 Applications can report their own errors and logs instead. Cronitor accepts the Sentry envelope format, so any Sentry SDK works once its DSN is `https://{telemetry_api_key}@cronitor.link/{api_key_id}`, where `{api_key_id}` is the numeric id of that telemetry key. Tag events with `cronitor.monitor` to attach them to a monitor:
 
 ```python
@@ -148,6 +150,32 @@ cronitor issue resolve <key>                             # Shorthand for resolvi
 cronitor issue delete <key>
 cronitor issue bulk --action delete --issues KEY1,KEY2   # Bulk actions
 ```
+
+#### Errors
+
+Error groups and events sent by `cronitor exec --capture-errors`, cronitor-python, or any Sentry SDK that sends to a Cronitor DSN.
+
+```bash
+cronitor errors list --monitor nightly-job --since 24h   # Groups seen in the last day
+cronitor errors list --service billing-api --level fatal --level error --order-by -count
+cronitor errors get <group>                              # Summary, 24h sparkline, latest stack trace
+cronitor errors events <group> --limit 20                # A group's events, newest first
+cronitor errors events <group> <event_id>                # One event with its stack trace
+```
+
+`<group>` is the full 40-character group id. The list table shows its first 12 characters; `cronitor errors list --json` prints full ids. `--monitor` filters by job monitor and `--service` by service monitor.
+
+#### Logs
+
+Log records sent by `cronitor exec --ship-logs`, cronitor-python, or any Sentry SDK.
+
+```bash
+cronitor logs search --monitor nightly-job --since 1h    # One record per line, oldest first
+cronitor logs search --level warn -q timeout --attributes
+cronitor logs search --series run-123 --follow           # Keep polling for new records; Ctrl-C stops
+```
+
+`--level` is a minimum level and `-q` matches whole tokens (repeat it to require several). The `next:` cursor for `--before` goes to stderr, so stdout can be piped. Errors and logs commands need an API key with the `monitor:read` scope, print the API response with `--json`, and take `--start`/`--end` as unix seconds or ISO 8601 or `--since` as a duration such as `30m`, `24h` or `7d`.
 
 #### Notifications
 
@@ -235,13 +263,14 @@ cronitor apikey delete <key>                                   # Asks first; --y
 
 Team and API key commands need a credential from `cronitor auth login --admin` and act with the logged-in user's current role. Any role can list the team; inviting, changing roles, and removing members need the admin role. A team member's id is their email address, the same value `team list` prints in the ID column. You can only grant API key scopes your own role has. `apikey create` prints the full key once. Without `--yes`, `team remove` and `apikey delete` refuse to run when stdin is not a terminal.
 
-**Aliases:** `cronitor env` → `environment`, `cronitor notifications` → `notification`, `cronitor integrations` → `integration`, `cronitor teams` → `team`, `cronitor apikeys` / `cronitor keys` → `apikey`
+**Aliases:** `cronitor env` → `environment`, `cronitor notifications` → `notification`, `cronitor integrations` → `integration`, `cronitor teams` → `team`, `cronitor apikeys` / `cronitor keys` → `apikey`, `cronitor error` → `errors`, `cronitor log` → `logs`, `cronitor logs list` → `logs search`
 
 ### Common Flags
 
 | Flag | Description |
 |------|-------------|
 | `--format json\|table` | Output format (default: `table` for list, `json` for get). `monitor` also accepts `yaml` |
+| `--json` | Print the API response as JSON (`errors`, `logs`) |
 | `-o, --output <file>` | Write output to a file |
 | `--page <n>` | Page number for paginated results |
 | `-d, --data <json>` | JSON data for create/update |

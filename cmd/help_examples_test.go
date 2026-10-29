@@ -314,7 +314,7 @@ func TestREADMEExamplesUseRealFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prefixes := []string{"cronitor auth ", "cronitor environment ", "cronitor notification ", "cronitor team ", "cronitor apikey ", "cronitor issue ", "cronitor maintenance ", "cronitor site ", "cronitor statuspage "}
+	prefixes := []string{"cronitor auth ", "cronitor environment ", "cronitor notification ", "cronitor team ", "cronitor apikey ", "cronitor issue ", "cronitor maintenance ", "cronitor site ", "cronitor statuspage ", "cronitor errors ", "cronitor logs "}
 	for _, line := range strings.Split(string(data), "\n") {
 		for _, prefix := range prefixes {
 			if strings.HasPrefix(line, prefix) {
