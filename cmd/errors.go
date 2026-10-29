@@ -184,7 +184,7 @@ func renderErrorGroupTable(page lib.ErrorGroupPage, now time.Time) string {
 	}
 	output := table.Render()
 	if page.TotalCount > 0 {
-		output += mutedStyle.Render(fmt.Sprintf("\nShowing page %d of %d • %d error groups total",
+		output += "\n" + mutedStyle.Render(fmt.Sprintf("Showing page %d of %d • %d error groups total",
 			page.Page, page.PageCount, page.TotalCount))
 	}
 	return output

@@ -391,7 +391,7 @@ func renderErrorEventTable(page lib.ErrorEventPage) string {
 	}
 	output := table.Render()
 	if page.HasMore && page.Next != "" {
-		output += mutedStyle.Render(fmt.Sprintf("\nnext: %s  (pass it to --before for older events)", page.Next))
+		output += "\n" + mutedStyle.Render(fmt.Sprintf("next: %s  (pass it to --before for older events)", page.Next))
 	}
 	return output
 }

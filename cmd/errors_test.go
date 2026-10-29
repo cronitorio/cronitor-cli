@@ -135,6 +135,9 @@ func TestErrorsList_TableAndQuery(t *testing.T) {
 	if strings.Contains(output, testGroupID) {
 		t.Errorf("table should show only the first 12 characters of the group id:\n%s", output)
 	}
+	if strings.Contains(output, "\n   ") {
+		t.Errorf("the footer should not add a line of padding:\n%q", output)
+	}
 	if strings.Contains(output, "upstream export") {
 		t.Errorf("long title should be truncated:\n%s", output)
 	}
