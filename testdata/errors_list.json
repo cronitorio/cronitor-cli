@@ -1,0 +1,41 @@
+{
+  "page": 1,
+  "page_count": 3,
+  "page_size": 2,
+  "total_count": 5,
+  "data": [
+    {
+      "group": "a95936e78b4b51bf4abdbb64d45624ca804c2f4a",
+      "title": "JSONDecodeError: Expecting value: line 1 column 1 (char 0) while reading the upstream export",
+      "culprit": "jobs.nightly in fetch_rows",
+      "exception_type": "JSONDecodeError",
+      "level": "error",
+      "levels": ["error"],
+      "environment": "production",
+      "count": 42,
+      "first_seen": "2026-10-27T03:00:12.123456Z",
+      "last_seen": "2026-10-29T03:02:00.654321Z",
+      "monitors": [
+        {"key": "nightly-job", "name": "Nightly job"},
+        {"key": "hourly-sync", "name": "Hourly sync"}
+      ],
+      "services": [],
+      "last_event_id": "cd3dc8b6cffb41e4163dcbd857ca87da"
+    },
+    {
+      "group": "c83435e089f9a622426baf8445c2b1205865172a",
+      "title": "ExitStatus: Killed",
+      "culprit": "",
+      "exception_type": "ExitStatus",
+      "level": "fatal",
+      "levels": ["fatal", "error"],
+      "environment": "production",
+      "count": 3,
+      "first_seen": "2026-10-20T11:00:00.000000Z",
+      "last_seen": "2026-10-28T23:05:00.000000Z",
+      "monitors": [],
+      "services": [{"key": "billing-api", "name": "Billing API"}],
+      "last_event_id": "68a9e49bbc88c02083a062a78ab3bf30"
+    }
+  ]
+}

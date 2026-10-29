@@ -302,7 +302,7 @@ func TestAttachedShorthandStopsAtValue(t *testing.T) {
 }
 
 func TestHelpExamplesUseRealFlags(t *testing.T) {
-	for _, cmd := range []*cobra.Command{authCmd, environmentCmd, notificationCmd, teamCmd, apiKeyCmd, issueCmd, maintenanceCmd, siteCmd, statuspageCmd} {
+	for _, cmd := range []*cobra.Command{authCmd, environmentCmd, notificationCmd, teamCmd, apiKeyCmd, issueCmd, maintenanceCmd, siteCmd, statuspageCmd, errorsCmd} {
 		for _, problem := range exampleFlagProblems(cmd) {
 			t.Error(problem)
 		}
