@@ -29,7 +29,10 @@ Needs an API key with the monitor:read scope.
 Examples:
   cronitor errors list
   cronitor errors list --monitor nightly-job --since 24h
-  cronitor errors list --level fatal --level error --order-by -count`,
+  cronitor errors list --level fatal --level error --order-by -count
+  cronitor errors get <group>
+  cronitor errors events <group>
+  cronitor errors events <group> <event_id>`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},
@@ -50,6 +53,9 @@ var (
 	errorsOrderBy  string
 	errorsPage     int
 	errorsPageSize int
+	errorsSeries   string
+	errorsBefore   string
+	errorsLimit    int
 )
 
 func resetErrorsFlags() {
@@ -66,6 +72,9 @@ func resetErrorsFlags() {
 	errorsOrderBy = ""
 	errorsPage = 1
 	errorsPageSize = 0
+	errorsSeries = ""
+	errorsBefore = ""
+	errorsLimit = 0
 }
 
 func init() {
@@ -179,6 +188,149 @@ func renderErrorGroupTable(page lib.ErrorGroupPage, now time.Time) string {
 			page.Page, page.PageCount, page.TotalCount))
 	}
 	return output
+}
+
+// --- GET ---
+var errorsGetCmd = &cobra.Command{
+	Use:   "get <group>",
+	Short: "Show an error group and its latest event",
+	Long: `Show an error group: a summary, its hourly counts for the last 24 hours, and
+the latest event with its stack trace, oldest frame first. Library frames
+are marked [lib].
+
+<group> is the full 40-character hex id; 'cronitor errors list --json'
+prints it.
+
+Examples:
+  cronitor errors get <group>
+  cronitor errors get <group> --json`,
+	Args: cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		group := errorGroupArg(args[0])
+		client := lib.NewAPIClient(dev, log)
+		resp, err := client.GET(lib.ErrorGroupPath(group), nil)
+		if err != nil {
+			failAndExit(fmt.Sprintf("Failed to get error group: %s", err))
+			return
+		}
+		if !resp.IsSuccess() {
+			failReadAPI(resp)
+			return
+		}
+		if readJSONOutput(errorsJSON, errorsFormat) {
+			fmt.Println(FormatJSON(resp.Body))
+			return
+		}
+		var detail lib.ErrorGroupDetail
+		if err := json.Unmarshal(resp.Body, &detail); err != nil {
+			failAndExit(fmt.Sprintf("Failed to parse response: %s", err))
+			return
+		}
+		fmt.Print(renderErrorGroupDetail(detail, nowFn()))
+	},
+}
+
+// --- EVENTS ---
+var errorsEventsCmd = &cobra.Command{
+	Use:   "events <group> [event_id]",
+	Short: "List a group's events, or show one event",
+	Long: `Without an event id, list the events in an error group, newest first. When
+there are more, the footer prints a cursor to pass to --before.
+
+With an event id, show that event with its stack trace, breadcrumb count and
+tags.
+
+Examples:
+  cronitor errors events <group>
+  cronitor errors events <group> --monitor nightly-job --limit 20
+  cronitor errors events <group> --before 2026-10-28T23:10:05.000001Z
+  cronitor errors events <group> <event_id>
+  cronitor errors events <group> <event_id> --json`,
+	Args: cobra.RangeArgs(1, 2),
+	Run: func(cmd *cobra.Command, args []string) {
+		group := errorGroupArg(args[0])
+		client := lib.NewAPIClient(dev, log)
+
+		if len(args) == 2 {
+			eventID, err := lib.NormalizeErrorEventID(args[1])
+			if err != nil {
+				failAndExit(err.Error())
+				return
+			}
+			resp, err := client.GET(lib.ErrorEventPath(group, eventID), nil)
+			if err != nil {
+				failAndExit(fmt.Sprintf("Failed to get error event: %s", err))
+				return
+			}
+			if !resp.IsSuccess() {
+				failReadAPI(resp)
+				return
+			}
+			if readJSONOutput(errorsJSON, errorsFormat) {
+				fmt.Println(FormatJSON(resp.Body))
+				return
+			}
+			var ev lib.ErrorEvent
+			if err := json.Unmarshal(resp.Body, &ev); err != nil {
+				failAndExit(fmt.Sprintf("Failed to parse response: %s", err))
+				return
+			}
+			fmt.Print(renderErrorEventDetail(ev, nowFn()))
+			return
+		}
+
+		q := lib.ErrorEventQuery{
+			Env:     errorsEnv,
+			Monitor: errorsMonitor,
+			Service: errorsService,
+			Series:  errorsSeries,
+			Before:  errorsBefore,
+			Limit:   errorsLimit,
+		}
+		resp, err := client.GET(lib.ErrorEventsPath(group), q.Params())
+		if err != nil {
+			failAndExit(fmt.Sprintf("Failed to list error events: %s", err))
+			return
+		}
+		if !resp.IsSuccess() {
+			failReadAPI(resp)
+			return
+		}
+		if readJSONOutput(errorsJSON, errorsFormat) {
+			fmt.Println(FormatJSON(resp.Body))
+			return
+		}
+		var page lib.ErrorEventPage
+		if err := json.Unmarshal(resp.Body, &page); err != nil {
+			failAndExit(fmt.Sprintf("Failed to parse response: %s", err))
+			return
+		}
+		fmt.Println(renderErrorEventTable(page))
+	},
+}
+
+func init() {
+	errorsCmd.AddCommand(errorsGetCmd)
+	errorsCmd.AddCommand(errorsEventsCmd)
+
+	f := errorsEventsCmd.Flags()
+	f.StringVar(&errorsEnv, "env", "", "Filter by environment key")
+	f.StringVar(&errorsMonitor, "monitor", "", "Filter by job monitor key or code")
+	f.StringVar(&errorsService, "service", "", "Filter by service monitor key or code")
+	f.StringVar(&errorsSeries, "series", "", "Filter by run series")
+	f.StringVar(&errorsBefore, "before", "", "Cursor: events before this time (unix seconds or ISO 8601, or a printed next: value)")
+	f.IntVar(&errorsLimit, "limit", 0, "Events to return (default 50, max 200)")
+}
+
+// errorGroupArg validates a group id argument and exits when it is not a
+// full id.
+func errorGroupArg(arg string) string {
+	group, err := lib.NormalizeErrorGroupID(arg)
+	if err != nil {
+		failAndExit(err.Error() + ". Tables show the first 12 characters; 'cronitor errors list --json' prints full ids")
+		return ""
+	}
+	return group
 }
 
 // --- shared by the errors and logs commands ---
