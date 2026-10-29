@@ -84,7 +84,9 @@ func readOutputTail(tempFile *os.File, max int64) string {
 
 // buildFailureEvent turns a failed run into an exception event: the last
 // Python or Node traceback in the output when there is one, otherwise
-// ExitStatus with the last non-empty output line.
+// ExitStatus with the last non-empty output line. The command tag has the
+// configured keys and remembered secrets redacted, and is left out with
+// --no-stdout.
 func buildFailureEvent(output, command, series string, exitCode int, runErr error, endTime float64) *lib.Event {
 	var ev *lib.Event
 	if parsed, ok := lib.ParseTraceback(output); ok {
@@ -109,8 +111,11 @@ func buildFailureEvent(output, command, series string, exitCode int, runErr erro
 		"cronitor.monitor": monitorCode,
 		"cronitor.series":  series,
 		"exit_code":        strconv.Itoa(exitCode),
-		"command":          lib.TruncateChars(command, maxTagValue),
 		"host":             lib.TruncateChars(host, maxTagValue),
+	}
+	if !noStdoutPassthru {
+		// Redact before truncating so a secret at the cut is not left half there.
+		ev.Tags["command"] = lib.TruncateChars(redactSecrets(command), maxTagValue)
 	}
 	if tail := outputTail(output); tail != "" {
 		ev.Extra = map[string]interface{}{"output_tail": tail}

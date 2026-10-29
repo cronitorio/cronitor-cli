@@ -326,6 +326,39 @@ func TestCaptureErrorsNoStdoutSendsNoOutput(t *testing.T) {
 	if len(ev.Extra) != 0 {
 		t.Errorf("with --no-stdout there must be no output_tail, got %v", ev.Extra)
 	}
+	if command, ok := ev.Tags["command"]; ok {
+		t.Errorf("with --no-stdout there must be no command tag, got %q", command)
+	}
+}
+
+// TestFailureEventCommandTag runs on every platform: it builds the event
+// directly instead of running a command.
+func TestFailureEventCommandTag(t *testing.T) {
+	withCaptureTest(t)
+	const apiKey = "fullapikey0123456789"
+	viper.Set(varApiKey, apiKey)
+
+	ev := buildFailureEvent("", "curl -fsS https://cronitor.link/p/"+captureTestKey+"/nightly-job?state=complete", "run-1", 1, nil, 1761706800)
+	if got, want := ev.Tags["command"], "curl -fsS https://cronitor.link/p/[REDACTED]/nightly-job?state=complete"; got != want {
+		t.Errorf("command tag %q, want %q", got, want)
+	}
+
+	// Redacting first means a key that crosses the cut at 200 characters
+	// is not left half there.
+	long := strings.Repeat("x", 190) + " " + apiKey
+	ev = buildFailureEvent("", long, "run-1", 1, nil, 1761706800)
+	if got, want := ev.Tags["command"], strings.Repeat("x", 190)+" [REDACTED"; got != want {
+		t.Errorf("command tag %q, want %q", got, want)
+	}
+
+	noStdoutPassthru = true
+	ev = buildFailureEvent("", "mysql -pSECRET -e 'select 1'", "run-1", 1, nil, 1761706800)
+	if command, ok := ev.Tags["command"]; ok {
+		t.Errorf("with --no-stdout there must be no command tag, got %q", command)
+	}
+	if ev.Tags["exit_code"] != "1" || ev.Tags["host"] != "worker-7" {
+		t.Errorf("the other tags stay: %v", ev.Tags)
+	}
 }
 
 func TestCaptureErrorsWithoutKeySendsNothing(t *testing.T) {
