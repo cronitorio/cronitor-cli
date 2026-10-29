@@ -178,6 +178,12 @@ func TestIngestLogEnvelopeMarshal(t *testing.T) {
 	if _, err := time.Parse(time.RFC3339, header["sent_at"].(string)); err != nil {
 		t.Errorf("sent_at %v", header["sent_at"])
 	}
+	if sdk, _ := header["sdk"].(map[string]interface{}); sdk["name"] != "cronitor-cli" || sdk["version"] != "33.11" {
+		t.Errorf("sdk %v", header["sdk"])
+	}
+	if id, ok := header["event_id"]; ok {
+		t.Errorf("a log envelope has no event, so no event_id; got %v", id)
+	}
 	if len(items) != 1 {
 		t.Fatalf("want 1 log item, got %d", len(items))
 	}

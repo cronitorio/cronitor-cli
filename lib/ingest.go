@@ -278,7 +278,8 @@ func NewLogRecord(body, level string, ts time.Time, sdkVersion string, attrs map
 	}
 }
 
-// NewLogEnvelope wraps log records in an envelope with one log item.
+// NewLogEnvelope wraps log records in an envelope with one log item. The
+// header has no event_id: there is no event in it.
 func NewLogEnvelope(records []LogRecord, sdkVersion string) (*Envelope, error) {
 	payload, err := json.Marshal(struct {
 		Items []LogRecord `json:"items"`
@@ -288,9 +289,8 @@ func NewLogEnvelope(records []LogRecord, sdkVersion string) (*Envelope, error) {
 	}
 	return &Envelope{
 		Header: EnvelopeHeader{
-			EventID: NewEventID(),
-			SentAt:  FormatIngestTime(time.Now()),
-			SDK:     SDKInfo{Name: IngestSDKName, Version: sdkVersion},
+			SentAt: FormatIngestTime(time.Now()),
+			SDK:    SDKInfo{Name: IngestSDKName, Version: sdkVersion},
 		},
 		Items: []Item{{
 			Type:        "log",
