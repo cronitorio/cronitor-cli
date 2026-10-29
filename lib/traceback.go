@@ -52,6 +52,15 @@ func ParseTraceback(output string) (*ParsedError, bool) {
 
 // parsePythonTraceback returns the last complete traceback block and the
 // index of its exception line.
+//
+// The last one is taken because the uncaught exception that ended the
+// process is printed as the interpreter exits, after any traceback the
+// program logged and survived. It need not be the end of the output:
+// stdout to a pipe or file is block-buffered and flushes at exit, after the
+// traceback went to unbuffered stderr, so the search runs back from the end
+// rather than looking only at the tail. The same buffering means a
+// traceback the program printed to stdout itself can land after the fatal
+// one and be taken instead; there is no telling them apart from the text.
 func parsePythonTraceback(lines []string) (*ParsedError, int) {
 	for h := len(lines) - 1; h >= 0; h-- {
 		if !pyHeaderPattern.MatchString(lines[h]) {
@@ -175,13 +184,25 @@ func parseNodeBlock(lines []string, start, end int) (*ParsedError, bool) {
 		} else {
 			continue // e.g. "at Array.forEach (<anonymous>)"
 		}
+		if !isNodeFramePath(frame.Filename) {
+			continue // e.g. "at 2026-10-29 10:30:45" in a log line
+		}
 		frame.InApp = isNodeAppFile(frame.Filename)
 		frames = append(frames, frame)
 	}
 	if len(frames) == 0 {
-		return nil, false
+		return nil, false // a header needs at least one real frame
 	}
 	return &ParsedError{Type: excType, Value: value, Platform: "node", Frames: frames}, true
+}
+
+// isNodeFramePath reports whether a frame's file looks like what Node
+// prints: a path, a node: or file: URL, or <anonymous>.
+func isNodeFramePath(filename string) bool {
+	return strings.ContainsAny(filename, `/\`) ||
+		strings.HasPrefix(filename, "node:") ||
+		strings.HasPrefix(filename, "file:") ||
+		strings.HasPrefix(filename, "<anonymous>")
 }
 
 func isNodeAppFile(filename string) bool {

@@ -256,6 +256,34 @@ func TestTracebackParse(t *testing.T) {
 				{Filename: "/app/job.py", Function: "main", Lineno: 1, ContextLine: `raise KeyError("x")`, InApp: true},
 			}},
 		},
+		{
+			name: "node with windows paths",
+			output: "C:\\app\\job.js:3\n\nTypeError: x is not a function\n" +
+				"    at main (C:\\app\\job.js:3:9)\n" +
+				"    at Object.<anonymous> (C:\\app\\job.js:7:1)\n",
+			want: &lib.ParsedError{Type: "TypeError", Value: "x is not a function", Platform: "node", Frames: []lib.Frame{
+				{Filename: `C:\app\job.js`, Function: "Object.<anonymous>", Lineno: 7, Colno: 1, InApp: true},
+				{Filename: `C:\app\job.js`, Function: "main", Lineno: 3, Colno: 9, InApp: true},
+			}},
+		},
+		{
+			name:   "node frame in anonymous code",
+			output: "ReferenceError: y is not defined\n    at <anonymous>:1:5\n",
+			want: &lib.ParsedError{Type: "ReferenceError", Value: "y is not defined", Platform: "node", Frames: []lib.Frame{
+				{Filename: "<anonymous>", Lineno: 1, Colno: 5, InApp: true},
+			}},
+		},
+		{
+			// "at <time>" is not a frame: frame files look like paths.
+			name:   "status line followed by a timestamp",
+			output: "Status: retrying\n  at 2026-10-29 10:30:45\n",
+			want:   nil,
+		},
+		{
+			name:   "message followed by an indented at line with a file name but no path",
+			output: "Error: upload stalled\n    at report.csv:12:3\n",
+			want:   nil,
+		},
 		{name: "plain shell failure", output: "rsync: connection refused\nrsync error: some files could not be transferred\n", want: nil},
 		{name: "java stack trace is not recognized", output: javaTrace, want: nil},
 		{name: "truncated python traceback without exception line", output: pyTruncated, want: nil},
