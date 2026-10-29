@@ -1,9 +1,7 @@
 package lib_test
 
 import (
-	"bufio"
 	"bytes"
-	"compress/gzip"
 	"encoding/json"
 	"io"
 	"net"
@@ -19,49 +17,16 @@ import (
 	"github.com/cronitorio/cronitor-cli/lib"
 )
 
-// parsedItem is one envelope item decoded by the reference parser below,
-// which is written from the envelope spec independently of lib.Envelope.
-type parsedItem struct {
-	Header  map[string]interface{}
-	Payload []byte
-}
-
-func parseEnvelope(t *testing.T, data []byte) (map[string]interface{}, []parsedItem) {
+func parseEnvelope(t *testing.T, data []byte) (map[string]interface{}, []testutil.EnvelopeItem) {
 	t.Helper()
-	r := bufio.NewReader(bytes.NewReader(data))
-	line, err := r.ReadBytes('\n')
+	header, items, err := testutil.DecodeEnvelope(data)
 	if err != nil {
-		t.Fatalf("envelope header line: %v", err)
+		t.Fatalf("decode envelope: %v", err)
 	}
-	var header map[string]interface{}
-	if err := json.Unmarshal(line, &header); err != nil {
-		t.Fatalf("envelope header %q: %v", line, err)
-	}
-	var items []parsedItem
-	for {
-		line, err := r.ReadBytes('\n')
-		if err == io.EOF && len(line) == 0 {
-			break
+	for _, item := range items {
+		if length, ok := item.Header["length"].(float64); !ok || int(length) != len(item.Payload) {
+			t.Fatalf("item header must carry the payload length: %v", item.Header)
 		}
-		if err != nil && err != io.EOF {
-			t.Fatal(err)
-		}
-		var ih map[string]interface{}
-		if err := json.Unmarshal(line, &ih); err != nil {
-			t.Fatalf("item header %q: %v", line, err)
-		}
-		length, ok := ih["length"].(float64)
-		if !ok {
-			t.Fatalf("item header has no length: %v", ih)
-		}
-		payload := make([]byte, int(length))
-		if _, err := io.ReadFull(r, payload); err != nil {
-			t.Fatalf("item payload: %v", err)
-		}
-		if b, err := r.ReadByte(); err == nil && b != '\n' {
-			t.Fatalf("payload not followed by newline: %q", b)
-		}
-		items = append(items, parsedItem{Header: ih, Payload: payload})
 	}
 	return header, items
 }
@@ -260,13 +225,9 @@ func TestIngestLogEnvelopeMarshal(t *testing.T) {
 
 func gunzip(t *testing.T, body string) []byte {
 	t.Helper()
-	zr, err := gzip.NewReader(strings.NewReader(body))
+	out, err := testutil.Gunzip(body)
 	if err != nil {
 		t.Fatalf("body is not gzip: %v", err)
-	}
-	out, err := io.ReadAll(zr)
-	if err != nil {
-		t.Fatal(err)
 	}
 	return out
 }

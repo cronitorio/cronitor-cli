@@ -119,6 +119,13 @@ func (m *MockAPI) LastRequest() RecordedRequest {
 	return m.Requests[len(m.Requests)-1]
 }
 
+// AllRequests returns a copy of every recorded request, in arrival order.
+func (m *MockAPI) AllRequests() []RecordedRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]RecordedRequest(nil), m.Requests...)
+}
+
 // RequestCount returns the number of recorded requests.
 func (m *MockAPI) RequestCount() int {
 	m.mu.Lock()
