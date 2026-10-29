@@ -385,6 +385,8 @@ The Cronitor CLI includes a built-in [Model Context Protocol (MCP)](https://mode
 
 **Quick start:** Run `cronitor dash` on your server, then configure your MCP client to spawn `cronitor dash --mcp-instance default`.
 
+It also has read-only `search_errors`, `get_error_group`, `get_error_event` and `search_logs` tools, which call the Cronitor API with your `CRONITOR_API_KEY` (scope `monitor:read`).
+
 For setup instructions, available tools, and configuration options, see the [MCP Integration Guide](docs/MCP_INTEGRATION.md).
 
 ## Uninstall CronitorCLI
