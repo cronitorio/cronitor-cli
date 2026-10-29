@@ -27,6 +27,7 @@ type MockAPI struct {
 	mu            sync.Mutex
 	Requests      []RecordedRequest
 	routes        map[string]mockResponse
+	sequences     map[string][]mockResponse
 	defaultStatus int
 	defaultBody   string
 }
@@ -41,6 +42,7 @@ type mockResponse struct {
 func NewMockAPI() *MockAPI {
 	m := &MockAPI{
 		routes:        make(map[string]mockResponse),
+		sequences:     make(map[string][]mockResponse),
 		defaultStatus: 200,
 		defaultBody:   `{}`,
 	}
@@ -62,6 +64,12 @@ func NewMockAPI() *MockAPI {
 
 		// Find matching route
 		key := r.Method + " " + r.URL.Path
+		if resp, ok := m.nextInSequence(key); ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(resp.status)
+			w.Write([]byte(resp.body))
+			return
+		}
 		if resp, ok := m.routes[key]; ok {
 			for k, v := range resp.headers {
 				w.Header().Set(k, v)
@@ -96,6 +104,33 @@ func NewMockAPI() *MockAPI {
 // On registers a response for a specific method + path.
 func (m *MockAPI) On(method, path string, status int, body string) {
 	m.routes[method+" "+path] = mockResponse{status: status, body: body}
+}
+
+// OnSequence registers responses for a method + path that are returned in
+// order, one per request. The last one repeats once the others are used.
+// A sequence takes precedence over a response registered with On.
+func (m *MockAPI) OnSequence(method, path string, status int, bodies ...string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	seq := make([]mockResponse, len(bodies))
+	for i, b := range bodies {
+		seq[i] = mockResponse{status: status, body: b}
+	}
+	m.sequences[method+" "+path] = seq
+}
+
+func (m *MockAPI) nextInSequence(key string) (mockResponse, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	seq := m.sequences[key]
+	if len(seq) == 0 {
+		return mockResponse{}, false
+	}
+	resp := seq[0]
+	if len(seq) > 1 {
+		m.sequences[key] = seq[1:]
+	}
+	return resp, true
 }
 
 // OnWithHeaders registers a response with custom headers.

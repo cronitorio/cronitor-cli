@@ -26,10 +26,12 @@ func withReadAPITest(t *testing.T, mock *testutil.MockAPI) {
 	oldNow := nowFn
 	nowFn = func() time.Time { return readAPITestNow }
 	resetErrorsFlags()
+	resetLogsFlags()
 	t.Cleanup(func() {
 		cleanup()
 		nowFn = oldNow
 		resetErrorsFlags()
+		resetLogsFlags()
 		RootCmd.SetArgs([]string{"--help"})
 	})
 }
@@ -221,7 +223,7 @@ func TestErrorsLogsRequireAPIKey(t *testing.T) {
 	withReadAPITest(t, mock)
 	viper.Set("CRONITOR_API_KEY", "")
 
-	for _, args := range [][]string{{"errors", "list"}, {"errors", "get", testGroupID}, {"errors", "events", testGroupID}} {
+	for _, args := range [][]string{{"errors", "list"}, {"errors", "get", testGroupID}, {"errors", "events", testGroupID}, {"logs", "search"}} {
 		_, _, err := executeWithExit(args...)
 		if err == nil || !strings.Contains(err.Error(), "API key required") {
 			t.Errorf("%v: err = %v, want the API key error", args, err)

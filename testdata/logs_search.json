@@ -1,0 +1,63 @@
+{
+  "data": [
+    {
+      "stamp": "2026-10-29T03:00:14.500000Z",
+      "level": "error",
+      "severity_number": 17,
+      "body": "Traceback (most recent call last):",
+      "template": "",
+      "logger": "",
+      "server_name": "worker-1",
+      "release": "",
+      "environment": "production",
+      "monitor": {"key": "nightly-job", "name": "Nightly job"},
+      "service": null,
+      "series": "run-123",
+      "trace_id": "",
+      "span_id": "",
+      "attributes": {"cronitor.monitor": "nightly-job", "cronitor.series": "run-123", "line": 3},
+      "sdk": {"name": "cronitor-cli", "version": "33.11"},
+      "client": "cronitor-cli/33.11"
+    },
+    {
+      "stamp": "2026-10-29T03:00:12.250000Z",
+      "level": "warn",
+      "severity_number": 13,
+      "body": "retrying export\nattempt 2",
+      "template": "",
+      "logger": "",
+      "server_name": "worker-1",
+      "release": "",
+      "environment": "production",
+      "monitor": {"key": "nightly-job", "name": "Nightly job"},
+      "service": null,
+      "series": "run-123",
+      "trace_id": "",
+      "span_id": "",
+      "attributes": {"line": 2, "cronitor.monitor": "nightly-job", "note": "two words"},
+      "sdk": {"name": "cronitor-cli", "version": "33.11"},
+      "client": "cronitor-cli/33.11"
+    },
+    {
+      "stamp": "2026-10-29T03:00:10.000000Z",
+      "level": "info",
+      "severity_number": 9,
+      "body": "starting",
+      "template": "starting",
+      "logger": "billing",
+      "server_name": "api-1",
+      "release": "2026.10.28",
+      "environment": "production",
+      "monitor": null,
+      "service": {"key": "billing-api", "name": "Billing API"},
+      "series": "",
+      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "span_id": "00f067aa0ba902b7",
+      "attributes": {"line": {"value": 1, "type": "integer"}},
+      "sdk": {"name": "sentry.python", "version": "2.18.0"},
+      "client": ""
+    }
+  ],
+  "has_more": true,
+  "next": "2026-10-29T03:00:10.000000Z"
+}
