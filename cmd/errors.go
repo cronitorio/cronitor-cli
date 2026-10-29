@@ -138,7 +138,7 @@ Examples:
 		}
 
 		var page lib.ErrorGroupPage
-		if err := json.Unmarshal(resp.Body, &page); err != nil {
+		if err := decodeForDisplay(resp.Body, &page); err != nil {
 			failAndExit(fmt.Sprintf("Failed to parse response: %s", err))
 			return
 		}
@@ -222,7 +222,7 @@ Examples:
 			return
 		}
 		var detail lib.ErrorGroupDetail
-		if err := json.Unmarshal(resp.Body, &detail); err != nil {
+		if err := decodeForDisplay(resp.Body, &detail); err != nil {
 			failAndExit(fmt.Sprintf("Failed to parse response: %s", err))
 			return
 		}
@@ -272,7 +272,7 @@ Examples:
 				return
 			}
 			var ev lib.ErrorEvent
-			if err := json.Unmarshal(resp.Body, &ev); err != nil {
+			if err := decodeForDisplay(resp.Body, &ev); err != nil {
 				failAndExit(fmt.Sprintf("Failed to parse response: %s", err))
 				return
 			}
@@ -302,7 +302,7 @@ Examples:
 			return
 		}
 		var page lib.ErrorEventPage
-		if err := json.Unmarshal(resp.Body, &page); err != nil {
+		if err := decodeForDisplay(resp.Body, &page); err != nil {
 			failAndExit(fmt.Sprintf("Failed to parse response: %s", err))
 			return
 		}
@@ -364,6 +364,13 @@ func readAPIStart(since, start string) (string, error) {
 		return "", fmt.Errorf("invalid --since: %s", err)
 	}
 	return s, nil
+}
+
+// decodeForDisplay decodes a read API response to print, with terminal
+// controls stripped from every string in it, the event payload included:
+// anyone with the telemetry key can write events.
+func decodeForDisplay(body []byte, v interface{}) error {
+	return json.Unmarshal(lib.StripControlJSON(body), v)
 }
 
 func failReadAPI(resp *lib.APIResponse) {

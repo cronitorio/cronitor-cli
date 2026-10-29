@@ -385,3 +385,31 @@ func TestLogsSearch_FollowKeepsPollingAfterServerErrors(t *testing.T) {
 		t.Errorf("requests %d, stderr %q", mock.RequestCount(), stderr)
 	}
 }
+
+func TestLogsSearch_StripsTerminalControls(t *testing.T) {
+	h := hostileText
+	mock := testutil.NewMockAPI()
+	defer mock.Close()
+	mock.On("GET", "/logs", 200, `{"data": [{"stamp": "2026-10-29T03:00:10.000000Z", "level": "info`+h+`",
+		"body": "ok `+h+`done\r\nnext\ttab\rcr", "monitor": {"key": "job`+h+`"}, "series": "run`+h+`",
+		"attributes": {"k`+h+`": "v`+h+`", "q": "two words`+h+`", "n": {"nested": "x\u009b2Jy"}}}],
+		"has_more": true, "next": "2026-10-29T03:00:10.000000Z`+h+`"}`)
+	withLogsTest(t, mock)
+
+	stdout, stderr, code, err := executeWithExitStderr("logs", "search", "--attributes")
+	if err != nil || code != 0 {
+		t.Fatalf("exit %d err %v\n%s", code, err, stdout)
+	}
+	assertNoTerminalControls(t, stdout)
+	assertNoTerminalControls(t, stderr)
+	// Line breaks in the body still print as \n and \r, as do the
+	// sender's own: the CR that ends hostileText shows up as \r.
+	want := "2026-10-29T03:00:10Z  INFO   job  run  ok \\rdone\\nnext\ttab\\rcr" +
+		`  k=v n={"nested":"xy"} q="two words"` + "\n"
+	if stdout != want {
+		t.Errorf("stdout:\n%q\nwant:\n%q", stdout, want)
+	}
+	if !strings.Contains(stderr, "next: 2026-10-29T03:00:10.000000Z  (") {
+		t.Errorf("stderr %q", stderr)
+	}
+}

@@ -173,7 +173,7 @@ Examples:
 				fmt.Println(formatLogLine(page.records[i], logsAttributes))
 			}
 			if page.HasMore && page.Next != "" {
-				fmt.Fprintln(os.Stderr, mutedStyle.Render(fmt.Sprintf("next: %s  (pass it to --before for older records)", page.Next)))
+				fmt.Fprintln(os.Stderr, mutedStyle.Render(fmt.Sprintf("next: %s  (pass it to --before for older records)", lib.StripControl(string(page.Next)))))
 			}
 			return
 		}
@@ -319,14 +319,19 @@ func reverseLogRecords(records []logRecord) []logRecord {
 
 var logBodyEscaper = strings.NewReplacer("\r\n", `\n`, "\n", `\n`, "\r", `\r`)
 
-// formatLogLine renders "STAMP  LEVEL  MONITOR  SERIES  BODY".
+// formatLogLine renders "STAMP  LEVEL  MONITOR  SERIES  BODY". Anyone with
+// the telemetry key can write records, so terminal controls are stripped
+// from every field; line breaks in the body print as \n and \r.
 func formatLogLine(r logRecord, withAttributes bool) string {
 	source := refKey(r.Monitor)
 	if source == "" {
 		source = refKey(r.Service)
 	}
-	level := styleLevel(r.Level, fmt.Sprintf("%-5s", strings.ToUpper(r.Level)))
-	line := fmt.Sprintf("%s  %s  %s  %s  %s", displayStamp(r.Stamp), level, dashIfEmpty(source), dashIfEmpty(r.Series), logBodyEscaper.Replace(r.Body))
+	clean := lib.StripControl
+	levelName := clean(r.Level)
+	level := styleLevel(levelName, fmt.Sprintf("%-5s", strings.ToUpper(levelName)))
+	line := fmt.Sprintf("%s  %s  %s  %s  %s", clean(displayStamp(r.Stamp)), level, dashIfEmpty(clean(source)),
+		dashIfEmpty(clean(r.Series)), clean(logBodyEscaper.Replace(r.Body)))
 	if withAttributes && len(r.Attributes) > 0 {
 		line += "  " + mutedStyle.Render(formatLogAttributes(r.Attributes))
 	}
@@ -335,7 +340,8 @@ func formatLogLine(r logRecord, withAttributes bool) string {
 
 // formatLogAttributes renders attributes as key=value, sorted by key.
 // Typed attributes ({"value": v, "type": t}) print their value. Strings
-// that are empty or hold spaces, quotes or = are quoted.
+// that are empty or hold spaces, quotes or = are quoted. Terminal controls
+// are stripped; line breaks in quoted strings print as \n.
 func formatLogAttributes(attrs map[string]interface{}) string {
 	keys := make([]string, 0, len(attrs))
 	for k := range attrs {
@@ -353,15 +359,16 @@ func formatLogAttributes(attrs map[string]interface{}) string {
 		var s string
 		switch val := v.(type) {
 		case string:
-			s = val
+			s = lib.StripControlMultiline(val)
 			if s == "" || strings.ContainsAny(s, " \t\n\"=") {
 				s = strconv.Quote(s)
 			}
 		default:
+			// JSON escapes C0 controls but not C1.
 			b, _ := json.Marshal(val)
-			s = string(b)
+			s = lib.StripControl(string(b))
 		}
-		parts = append(parts, k+"="+s)
+		parts = append(parts, lib.StripControl(k)+"="+s)
 	}
 	return strings.Join(parts, " ")
 }

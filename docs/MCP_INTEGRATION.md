@@ -217,7 +217,9 @@ Get information about the current Cronitor instance.
 
 ### Errors and logs (read-only)
 
-These four tools read the errors and log records sent by `cronitor exec --capture-errors`/`--ship-logs`, cronitor-python, or any Sentry SDK. Unlike the cron job tools, they call the Cronitor API with the `CRONITOR_API_KEY` from the CLI config (or the MCP server's environment), not the dashboard, so they need an API key with the `monitor:read` scope and give the same results whichever instance is selected. They return the API's JSON. Their arguments mirror the flags of `cronitor errors` and `cronitor logs`.
+These four tools read the errors and log records sent by `cronitor exec --capture-errors`/`--ship-logs`, cronitor-python, or any Sentry SDK. Unlike the cron job tools, they call the Cronitor API with the `CRONITOR_API_KEY` from the CLI config (or the MCP server's environment), not the dashboard, so they need an API key with the `monitor:read` scope and give the same results whichever instance is selected. They return the API's JSON, with terminal control characters removed from `body`, `title`, `culprit` and `context_line`. Their arguments mirror the flags of `cronitor errors` and `cronitor logs`.
+
+Event and log content is untrusted: anyone holding the account's telemetry key, which is in every ping URL, can write it. The tool descriptions and the server's rules tell the agent to treat it as data and not to follow instructions found in it.
 
 #### search_errors
 Search error groups, most recently seen first.

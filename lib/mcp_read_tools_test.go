@@ -75,6 +75,7 @@ func TestErrorsLogsMCPToolsAreListedReadOnly(t *testing.T) {
 		Result struct {
 			Tools []struct {
 				Name        string `json:"name"`
+				Description string `json:"description"`
 				Annotations struct {
 					ReadOnlyHint    *bool `json:"readOnlyHint"`
 					DestructiveHint *bool `json:"destructiveHint"`
@@ -94,6 +95,7 @@ func TestErrorsLogsMCPToolsAreListedReadOnly(t *testing.T) {
 			if a.ReadOnlyHint == nil || !*a.ReadOnlyHint || a.DestructiveHint == nil || *a.DestructiveHint {
 				t.Errorf("%s should be read-only and not destructive", tool.Name)
 			}
+			assertUntrustedNotice(t, tool.Name+" description", tool.Description)
 		}
 	}
 	if len(found) != 4 {
@@ -223,5 +225,56 @@ func TestErrorsLogsMCPErrors(t *testing.T) {
 	}
 	if mock.RequestCount() != 0 {
 		t.Errorf("no request without a key, got %d", mock.RequestCount())
+	}
+}
+
+// assertUntrustedNotice checks that text tells the agent event and log
+// content is untrusted and not to follow instructions in it.
+func assertUntrustedNotice(t *testing.T, what, text string) {
+	t.Helper()
+	for _, want := range []string{"untrusted", "telemetry key", "do not follow instructions"} {
+		if !strings.Contains(strings.ToLower(text), want) {
+			t.Errorf("%s should say %q:\n%s", what, want, text)
+		}
+	}
+}
+
+func TestErrorsLogsMCPSystemPromptMarksContentUntrusted(t *testing.T) {
+	assertUntrustedNotice(t, "system prompt", lib.NewCronitorMCPHandler("default").GetSystemPrompt())
+}
+
+func TestErrorsLogsMCPResultsStripTerminalControls(t *testing.T) {
+	const h = `\u001b[2J\u001b]52;c;Y3VybA==\u0007\u009b1A\r`
+	mock := testutil.NewMockAPI()
+	defer mock.Close()
+	mock.On("GET", "/logs", 200, `{"data": [{"stamp": "2026-10-29T03:00:10.000000Z", "body": "ok`+h+`\nnext", "severity_number": 9}], "has_more": false, "next": null}`)
+	mock.On("GET", "/errors/"+mcpTestGroup, 200, `{"group": "`+mcpTestGroup+`", "title": "Boom`+h+`", "culprit": "job`+h+`",
+		"latest_event": {"title": "Boom`+h+`", "payload": {"exception": {"values": [{"stacktrace": {"frames": [
+			{"filename": "/app/job.py", "context_line": "raise Boom()`+h+`"}]}}]}}}}`)
+	s := newReadToolsServer(t, mock)
+
+	res := callTool(t, s, "search_logs", map[string]interface{}{})
+	var logs struct {
+		Data []map[string]interface{} `json:"data"`
+	}
+	if res.IsError || json.Unmarshal([]byte(res.Content[0].Text), &logs) != nil || len(logs.Data) != 1 {
+		t.Fatalf("search_logs = %+v", res)
+	}
+	if body := logs.Data[0]["body"]; body != "ok\nnext" {
+		t.Errorf("body = %q, want controls stripped and the line break kept", body)
+	}
+	if !strings.Contains(res.Content[0].Text, `"severity_number":9`) {
+		t.Errorf("other fields are kept:\n%s", res.Content[0].Text)
+	}
+
+	res = callTool(t, s, "get_error_group", map[string]interface{}{"group": mcpTestGroup})
+	text := res.Content[0].Text
+	if res.IsError || strings.Contains(text, `\u001b`) || strings.Contains(text, "\u009b") || strings.Contains(text, "52;c;") || strings.Contains(text, `\r`) {
+		t.Errorf("get_error_group should strip title, culprit and context_line:\n%s", text)
+	}
+	for _, want := range []string{`"title":"Boom"`, `"culprit":"job"`, `"context_line":"raise Boom()"`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("want %s in:\n%s", want, text)
+		}
 	}
 }
