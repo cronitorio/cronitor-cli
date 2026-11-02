@@ -5,9 +5,11 @@
 # `cronitor discover` names each monitor after the machine it runs on:
 #   Linux:   "[<hostname>] <command>"
 #   Windows: "<hostname>/<scheduled task name>"
-# Every CI run gets a fresh runner hostname, so every run creates a fresh
-# set of monitors. This script finds monitors whose name starts with the
-# given hostname and deletes them.
+# Hosted runner images reuse hostnames across runs, so the workflow renames
+# the Linux runner per run before the tests. This script finds monitors whose
+# name starts with the given hostname and deletes them by code: codes are
+# unique per monitor, while keys can be duplicated if two runs upsert the same
+# key concurrently, and the bulk delete rejects an ambiguous key.
 #
 # Usage: cleanup-ci-monitors.sh [hostname]
 #   hostname       Defaults to the current machine hostname.
@@ -36,7 +38,7 @@ total_deleted=0
 for _ in $(seq 1 $MAX_ROUNDS); do
   keys=$("$CRONITOR_BIN" monitor list --search "$TARGET_HOST" --format json --page-size 100 "${api_key_args[@]}" \
     | jq -r --arg p "$name_prefix" \
-        '.monitors[] | select(.name | (startswith("[" + $p + "] ") or startswith($p + "/"))) | .key' \
+        '.monitors[] | select(.name | (startswith("[" + $p + "] ") or startswith($p + "/"))) | (.code // .key)' \
     | tr -d '\r')
 
   if [ -z "$keys" ]; then
@@ -44,7 +46,10 @@ for _ in $(seq 1 $MAX_ROUNDS); do
   fi
 
   # shellcheck disable=SC2086
-  "$CRONITOR_BIN" monitor delete "${api_key_args[@]}" $keys
+  if ! "$CRONITOR_BIN" monitor delete "${api_key_args[@]}" $keys; then
+    echo "::warning::Could not delete CI monitors for host $TARGET_HOST; leaving them in place"
+    exit 0
+  fi
   total_deleted=$((total_deleted + $(echo "$keys" | wc -l)))
 done
 
