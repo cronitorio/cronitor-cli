@@ -21,7 +21,7 @@ import (
 // '=', and '%' reach the browser unchanged.
 func browserCommand(goos, url string) (string, []string, error) {
 	switch goos {
-	case "linux":
+	case "linux", "freebsd", "openbsd", "netbsd":
 		return "xdg-open", []string{url}, nil
 	case "windows":
 		return "rundll32", []string{"url.dll,FileProtocolHandler", url}, nil
