@@ -130,7 +130,7 @@ jobs:
         run: |
           echo "::add-mask::$CRONITOR_API_KEY"
           export BATS_PATH="$(which bats)"
-          sudo -E -n -- $BATS_PATH *.bats
+          sudo --preserve-env=WINDOWS,CRONITOR_API_KEY -n -- $BATS_PATH *.bats
 
       - name: Delete monitors created by this run
         if: always()
