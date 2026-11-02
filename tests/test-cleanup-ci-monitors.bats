@@ -24,6 +24,7 @@ if [ "$1 $2" = "monitor list" ]; then
   f="$STUB_LIST_RESPONSES/$n.json"
   if [ -f "$f" ]; then cat "$f"; else echo '{"monitors": [], "page_info": {"page": 1, "pageSize": 100, "totalMonitorCount": 0}}'; fi
 fi
+if [ "$1 $2" = "monitor delete" ]; then exit "${STUB_DELETE_EXIT:-0}"; fi
 exit 0
 STUB
   chmod +x "$STUB_DIR/cronitor"
@@ -93,4 +94,31 @@ WRAP
   [ "$status" -eq 0 ]
   grep -qE "^monitor delete( -k [^ ]+)? aaa111 bbb222$" "$STUB_CALLS"
   ! grep -q $'\r' "$STUB_CALLS"
+}
+
+@test "Cleanup deletes by monitor code when the API returns one" {
+  cat > "$STUB_LIST_RESPONSES/1.json" <<'JSON'
+{"monitors": [
+  {"key": "dupkey", "code": "AbC123", "name": "[runnervmtest1] true", "type": "job"},
+  {"key": "dupkey", "code": "XyZ789", "name": "[runnervmtest1] true", "type": "job"}
+], "page_info": {"page": 1, "pageSize": 100, "totalMonitorCount": 2}}
+JSON
+
+  run ./cleanup-ci-monitors.sh runnervmtest1
+  [ "$status" -eq 0 ]
+  grep -qE "^monitor delete( -k [^ ]+)? AbC123 XyZ789$" "$STUB_CALLS"
+  ! grep -q "dupkey" "$STUB_CALLS"
+}
+
+@test "Cleanup warns and exits 0 when the delete call fails" {
+  cat > "$STUB_LIST_RESPONSES/1.json" <<'JSON'
+{"monitors": [
+  {"key": "aaa111", "name": "[runnervmtest1] true", "type": "job"}
+], "page_info": {"page": 1, "pageSize": 100, "totalMonitorCount": 1}}
+JSON
+
+  STUB_DELETE_EXIT=1 run ./cleanup-ci-monitors.sh runnervmtest1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::Could not delete CI monitors for host runnervmtest1"* ]]
+  [ "$(grep -c '^monitor delete' "$STUB_CALLS")" -eq 1 ]
 }

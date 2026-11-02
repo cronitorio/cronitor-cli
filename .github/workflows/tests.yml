@@ -122,6 +122,15 @@ jobs:
       - name: Run Go tests
         run: go test ./...
 
+      # ubuntu-26.04 runners all report the same hostname, and discover derives
+      # monitor keys from it. Give each run its own so concurrent runs never
+      # share keys or delete each other's monitors.
+      - name: Use a per-run hostname
+        run: |
+          h="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "127.0.0.1 $h" | sudo tee -a /etc/hosts > /dev/null
+          sudo hostname "$h"
+
       - name: Run tests
         working-directory: tests
         env:
