@@ -9,9 +9,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v7
         with:
           go-version-file: '${{ github.workspace }}/go.mod'
 
@@ -85,9 +85,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v7
         with:
           go-version-file: '${{ github.workspace }}/go.mod'
 
@@ -147,3 +147,39 @@ jobs:
         env:
           CRONITOR_API_KEY: "${{ secrets.CRONITOR_API_KEY }}"
         run: ./cleanup-ci-monitors.sh
+
+  # Stable Go compile and unit tests only. BATS uses the live API.
+  go-stable:
+    name: Run stable Go tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 'stable'
+          check-latest: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: |
+          cd web
+          npm ci
+
+      - name: Build web assets
+        run: |
+          cd web
+          npm run build
+
+      - name: Build binary
+        run: go build -o cronitor main.go
+
+      - name: Run Go tests
+        run: go test ./...
