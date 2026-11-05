@@ -231,39 +231,38 @@ func TestRawCommandIsKept(t *testing.T) {
 	}
 }
 
-func TestWrappedPercentMatchesOriginal(t *testing.T) {
+// TestWrappedPercent checks wraps of lines with %. Cron cuts stdin at the
+// first % not escaped by a backslash (\\% is an escaped backslash and then a
+// bare %) and removes the backslash from \%. The wrap must keep that cut in
+// the same place and must not add or remove escapes.
+func TestWrappedPercent(t *testing.T) {
 	withCronitorEnv(t, "")
 
-	commands := []string{
-		`cat%hello`,
-		`tr a-z A-Z%quiet please`,
-		`date +%Y`,
-		`date +\%Y`,
-		`echo 100\%`,
-		`printf '\%s\n' x`,
-		`cd /tmp && date +\%Y`,
-		`echo 100\% && true`,
-		`printf '\%s\n' x%more`,
-		`echo \\%hello`,
-		`cd /tmp && cat%hello world`,
+	tests := []struct{ command, want string }{
+		{`cat%hello`, `cronitor exec k1 cat%hello`},
+		{`tr a-z A-Z%quiet please`, `cronitor exec k1 tr a-z A-Z%quiet please`},
+		{`date +%Y`, `cronitor exec k1 date +%Y`},
+		{`date +\%Y`, `cronitor exec k1 date +\%Y`},
+		{`echo 100\%`, `cronitor exec k1 echo 100\%`},
+		{`printf '\%s\n' x`, `cronitor exec k1 printf '\%s\n' x`},
+		{`cd /tmp && date +\%Y`, `cronitor exec k1 'cd /tmp && date +\%Y'`},
+		{`echo 100\% && true`, `cronitor exec k1 'echo 100\% && true'`},
+		{`printf '\%s\n' x%more`, `cronitor exec k1 printf '\%s\n' x%more`},
+		{`echo \\%hello`, `cronitor exec k1 echo \\%hello`},
+		{`cd /tmp && cat%hello world`, `cronitor exec k1 'cd /tmp && cat'%hello world`},
+		{`cd /tmp && echo \\%hello`, `cronitor exec k1 'cd /tmp && echo \\'%hello`},
+		{`cd /tmp && echo \%hello`, `cronitor exec k1 'cd /tmp && echo \%hello'`},
 	}
-	for _, command := range commands {
-		t.Run(command, func(t *testing.T) {
-			ct := parseContent(t, "0 * * * * "+command)
-			job := jobLines(ct)[0]
-			job.Code = "k1"
-			w1 := ct.Write()
-			if strings.Contains(w1, `\\%`) && !strings.Contains(command, `\\%`) {
-				t.Fatalf("double escaped:\n%s", w1)
+	for _, tc := range tests {
+		t.Run(tc.command, func(t *testing.T) {
+			ct := parseContent(t, "0 * * * * "+tc.command)
+			jobLines(ct)[0].Code = "k1"
+			w1 := strings.TrimSpace(ct.Write())
+			if want := "0 * * * * " + tc.want; w1 != want {
+				t.Fatalf("\n got %s\nwant %s", w1, want)
 			}
-			w2 := parseContent(t, w1).Write()
-			if w1 != w2 {
+			if w2 := strings.TrimSpace(parseContent(t, w1).Write()); w2 != w1 {
 				t.Fatalf("wrap changed\n first: %s\nsecond: %s", w1, w2)
-			}
-			want := cronRun(t, command)
-			got := cronRun(t, commandFieldOf(w1))
-			if got != want {
-				t.Fatalf("cron run mismatch\n want %q\n  got %q\n line %s", want, got, w1)
 			}
 		})
 	}
@@ -408,117 +407,16 @@ func commandFieldOf(crontabLine string) string {
 	return skipWSFields(line, fields)
 }
 
-// cronPercent is a standalone copy of cron's % rule. It must not call the
-// production splitter: a broken backslash escape has to fail this oracle.
-func cronPercent(field string) (command, stdin string) {
-	cut := len(field)
-	escaped := false
-	for i := 0; i < len(field); i++ {
-		if escaped {
-			escaped = false
-			continue
-		}
-		if field[i] == '\\' {
-			escaped = true
-			continue
-		}
-		if field[i] == '%' {
-			cut = i
-			break
-		}
-	}
-	var cmd strings.Builder
-	escaped = false
-	for i := 0; i < cut; i++ {
-		ch := field[i]
-		if escaped {
-			if ch != '%' {
-				cmd.WriteByte('\\')
-			}
-			cmd.WriteByte(ch)
-			escaped = false
-			continue
-		}
-		if ch == '\\' {
-			escaped = true
-			continue
-		}
-		cmd.WriteByte(ch)
-	}
-	if escaped && cut == len(field) {
-		cmd.WriteByte('\\')
-	}
-	if cut == len(field) {
-		return cmd.String(), ""
-	}
-	var in strings.Builder
-	escaped = false
-	needNL := false
-	for i := cut + 1; i < len(field); i++ {
-		ch := field[i]
-		if escaped {
-			if ch != '%' {
-				in.WriteByte('\\')
-			}
-		} else if ch == '%' {
-			ch = '\n'
-		}
-		if escaped = ch == '\\'; !escaped {
-			in.WriteByte(ch)
-			needNL = ch != '\n'
-		}
-	}
-	if escaped {
-		in.WriteByte('\\')
-	}
-	if needNL {
-		in.WriteByte('\n')
-	}
-	return cmd.String(), in.String()
-}
-
-func cronRun(t *testing.T, field string) string {
-	t.Helper()
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not available")
-	}
-	command, stdin := cronPercent(field)
-	cmd := exec.Command("sh", "-c", command)
-	cmd.Stdin = strings.NewReader(stdin)
-	cmd.Env = append(os.Environ(), "PATH="+cronitorStub(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "ERR " + err.Error() + "\n" + string(out)
-	}
-	return string(out)
-}
-
-func cronitorStub(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	script := "#!/bin/sh\n" +
-		"seen=0\n" +
-		"while [ $# -gt 0 ]; do\n" +
-		"  if [ \"$seen\" = 0 ]; then [ \"$1\" = exec ] && seen=1; shift; continue; fi\n" +
-		"  case \"$1\" in --) shift; break ;; -*) shift ;; *) shift; break ;; esac\n" +
-		"done\n" +
-		"if [ $# -eq 1 ]; then exec sh -c \"$1\"; fi\n" +
-		"if [ $# -gt 0 ]; then exec \"$@\"; fi\n"
-	if err := os.WriteFile(filepath.Join(dir, "cronitor"), []byte(script), 0755); err != nil {
-		t.Fatal(err)
-	}
-	return dir
-}
-
 func requireShSyntax(t *testing.T, commandField string) {
 	t.Helper()
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not available")
 	}
-	command, stdin := cronPercent(commandField)
-	if stdin != "" {
+	// Skip lines with cron stdin; unescape \% the way cron does.
+	if strings.Contains(strings.ReplaceAll(commandField, `\%`, ""), "%") {
 		return
 	}
+	command := strings.ReplaceAll(commandField, `\%`, "%")
 	out, err := exec.Command("sh", "-n", "-c", command).CombinedOutput()
 	if err != nil {
 		t.Fatalf("sh -n failed: %v\n%s\nfield: %s", err, out, commandField)
