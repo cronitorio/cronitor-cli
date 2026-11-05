@@ -1,0 +1,38 @@
+{
+  "page": 1,
+  "page_count": 2,
+  "page_size": 3,
+  "total_count": 4,
+  "data": [
+    {
+      "key": "cust0123456789abcdefghijklmnWXYZ",
+      "name": "Deploy bot",
+      "kind": "custom",
+      "scopes": ["monitor:read", "monitor:write"],
+      "immutable": false,
+      "last_used": "2026-10-01T12:00:00Z",
+      "created": "2026-01-01T00:00:00Z",
+      "updated": "2026-01-02T00:00:00Z"
+    },
+    {
+      "key": "sdk00123456789abcdefghijklmnSDKK",
+      "name": "SDK Integration",
+      "kind": "sdk",
+      "scopes": ["monitor:read", "monitor:write", "monitor:telemetry"],
+      "immutable": true,
+      "last_used": "2026-10-10T08:30:00Z",
+      "created": "2025-06-01T00:00:00Z",
+      "updated": "2025-06-01T00:00:00Z"
+    },
+    {
+      "key": "tele0123456789abcdefghijklmnTELE",
+      "name": "Telemetry",
+      "kind": "telemetry",
+      "scopes": ["monitor:telemetry"],
+      "immutable": true,
+      "last_used": null,
+      "created": "2025-06-01T00:00:00Z",
+      "updated": "2025-06-01T00:00:00Z"
+    }
+  ]
+}

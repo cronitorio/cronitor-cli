@@ -108,8 +108,12 @@ func (f *authFake) handler(w http.ResponseWriter, r *http.Request) {
 		if status == 0 {
 			status = 201
 		}
+		var req struct {
+			AccountAccess bool `json:"account_access"`
+		}
+		_ = json.Unmarshal(body, &req)
 		w.WriteHeader(status)
-		fmt.Fprintf(w, `{"key":%q,"name":%q,"kind":"machine","scopes":["monitors:read","telemetry:write"],"organization":"Acme"}`, authTestMachineKey, authTestCredName)
+		fmt.Fprintf(w, `{"key":%q,"name":%q,"kind":"machine","scopes":["monitors:read","telemetry:write"],"organization":"Acme","account_access":%t}`, authTestMachineKey, authTestCredName, req.AccountAccess)
 	case method == "GET" && path == "/api/cli/machine-credentials/current":
 		if !strings.HasPrefix(authz, "Basic ") {
 			w.WriteHeader(401)
@@ -349,7 +353,7 @@ func TestSignupCommandSharesAuthLoginRunE(t *testing.T) {
 	if len(aliasArgs) != 0 {
 		t.Fatalf("auth signup leftover args: %v", aliasArgs)
 	}
-	for _, name := range []string{"yes", "no-browser", "timeout"} {
+	for _, name := range []string{"yes", "no-browser", "timeout", "admin"} {
 		if signupCmd.Flags().Lookup(name) == nil {
 			t.Errorf("signup missing login flag --%s", name)
 		}
@@ -567,6 +571,117 @@ func TestAuthStatus_ShowsMetadataNeverKey(t *testing.T) {
 	assertNoSecrets(t, stdout, stderr)
 	if !strings.Contains(stdout, "cli-testhost") || !strings.Contains(stdout, "Acme") {
 		t.Errorf("status: %s", stdout)
+	}
+}
+
+func TestAuthLogin_AdminRequestsAccountAccess(t *testing.T) {
+	fake := newAuthFake()
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	stdout, stderr, code, err := executeAuth("auth", "login", "--yes", "--admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 {
+		t.Fatalf("exit %d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	assertNoSecrets(t, stdout, stderr)
+	if !strings.Contains(stdout, "Account access: yes") {
+		t.Errorf("expected account access in login output:\n%s", stdout)
+	}
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	var sawCreate bool
+	for _, req := range fake.requests {
+		if req.Method == "POST" && req.Path == "/api/cli/machine-credentials" {
+			sawCreate = true
+			var payload map[string]interface{}
+			if json.Unmarshal([]byte(req.Body), &payload) != nil || payload["hostname"] != "testhost" || payload["account_access"] != true || len(payload) != 2 {
+				t.Errorf("create body: %s", req.Body)
+			}
+		}
+	}
+	if !sawCreate {
+		t.Fatal("did not POST machine-credentials")
+	}
+}
+
+func TestAuthLogin_AdminNotGrantedWarns(t *testing.T) {
+	fake := newAuthFake()
+	_, cleanup := withAuthTest(t, fake)
+	defer cleanup()
+
+	// An older server ignores account_access and answers without it.
+	old := lib.BaseURLOverride
+	legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/api/cli/machine-credentials" {
+			w.WriteHeader(201)
+			fmt.Fprintf(w, `{"key":%q,"name":%q,"kind":"machine","scopes":[],"organization":"Acme"}`, authTestMachineKey, authTestCredName)
+			return
+		}
+		fake.handler(w, r)
+	}))
+	defer legacy.Close()
+	lib.BaseURLOverride = legacy.URL + "/api"
+	defer func() { lib.BaseURLOverride = old }()
+
+	stdout, stderr, code, err := executeAuth("auth", "login", "--yes", "--admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 {
+		t.Fatalf("exit %d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "Account access: no") || !strings.Contains(stdout, "did not grant account access") {
+		t.Errorf("expected a warning that account access was not granted:\n%s", stdout)
+	}
+}
+
+func TestAuthStatus_ShowsAccountAccess(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"granted", `{"name":"cli-testhost","kind":"machine","organization":"Acme","account_access":true}`, "Account access: yes"},
+		{"denied", `{"name":"cli-testhost","kind":"machine","organization":"Acme","account_access":false}`, "Account access: no"},
+		{"older server omits field", `{"name":"cli-testhost","kind":"machine","organization":"Acme"}`, "Account access: no"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newAuthFake()
+			_, cleanup := withAuthTest(t, fake)
+			defer cleanup()
+
+			if _, _, code, err := executeAuth("auth", "login", "--yes"); err != nil || code != 0 {
+				t.Fatalf("login failed")
+			}
+			fake.currentBody = tc.body
+
+			stdout, stderr, code, err := executeAuth("auth", "status")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code != 0 {
+				t.Fatalf("exit %d %s %s", code, stdout, stderr)
+			}
+			if !strings.Contains(stdout, tc.want) {
+				t.Errorf("expected %q in status:\n%s", tc.want, stdout)
+			}
+		})
+	}
+}
+
+func TestAuthHelpExplainsAdmin(t *testing.T) {
+	for _, cmd := range []*cobra.Command{authCmd, authLoginCmd, signupCmd} {
+		if !strings.Contains(cmd.Long, "--admin") {
+			t.Errorf("%s Long help should explain --admin:\n%s", cmd.Name(), cmd.Long)
+		}
+	}
+	if !strings.Contains(authLoginCmd.Long, "shared") {
+		t.Errorf("auth login help should warn against --admin on shared servers:\n%s", authLoginCmd.Long)
 	}
 }
 

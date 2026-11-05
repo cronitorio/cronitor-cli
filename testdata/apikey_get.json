@@ -1,0 +1,10 @@
+{
+  "key": "cust0123456789abcdefghijklmnWXYZ",
+  "name": "Deploy bot",
+  "kind": "custom",
+  "scopes": ["monitor:read", "monitor:write"],
+  "immutable": false,
+  "last_used": "2026-10-01T12:00:00Z",
+  "created": "2026-01-01T00:00:00Z",
+  "updated": "2026-01-02T00:00:00Z"
+}

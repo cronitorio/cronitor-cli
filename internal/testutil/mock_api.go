@@ -15,6 +15,7 @@ import (
 type RecordedRequest struct {
 	Method      string
 	Path        string
+	RequestURI  string // unmodified request target, before the server decodes %xx
 	QueryParams url.Values
 	Headers     http.Header
 	Body        string
@@ -52,6 +53,7 @@ func NewMockAPI() *MockAPI {
 		m.Requests = append(m.Requests, RecordedRequest{
 			Method:      r.Method,
 			Path:        r.URL.Path,
+			RequestURI:  r.RequestURI,
 			QueryParams: r.URL.Query(),
 			Headers:     r.Header.Clone(),
 			Body:        string(bodyBytes),
