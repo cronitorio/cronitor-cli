@@ -115,7 +115,6 @@ var processingMultipleCrontabs = false
 var userAbortedSync = false // Set to true when user presses Ctrl+D to abort sync entirely
 var syncFile string         // Path to YAML/JSON file for bulk monitor import
 var execStyle bool          // --exec-style: write cronitor exec lines
-var convertToShim bool      // --convert-to-shim: convert existing exec lines
 
 // To deprecate this feature we are hijacking this flag that will trigger removal of auto-discover lines from existing user's crontabs.
 var noAutoDiscover = true
@@ -165,7 +164,7 @@ Example where you perform a dry-run without any crontab modifications:
       > Steps line by line, creates or updates monitors
       > Checks permissions to ensure integration can be applied later
 
-On Unix, new jobs use a SHELL shim (MONITORIO=<key>). --exec-style writes cronitor exec. --convert-to-shim converts flag-free exec lines. Windows stays exec.
+On Unix, new jobs use a SHELL shim (MONITORIO=<key>). --exec-style writes cronitor exec. Windows stays exec.
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
 
@@ -186,10 +185,7 @@ On Unix, new jobs use a SHELL shim (MONITORIO=<key>). --exec-style writes cronit
 		if len(viper.GetString(varApiKey)) < 10 {
 			fatal(discoverMissingAPIKeyGuidance(), 1)
 		}
-		if err := validateShellShimFlags(); err != nil {
-			fatal(err.Error(), 1)
-		}
-		if runtime.GOOS == "windows" && (execStyle || convertToShim) {
+		if runtime.GOOS == "windows" && execStyle {
 			printWarningText("The shell shim is Unix-only. Sync keeps cronitor exec lines.", false)
 		}
 
@@ -369,13 +365,6 @@ func importMonitorsFromFile(filePath string) {
 	printSuccessText("View your dashboard: https://cronitor.io/app/dashboard", false)
 }
 
-func validateShellShimFlags() error {
-	if execStyle && convertToShim {
-		return errors.New("--exec-style and --convert-to-shim cannot be used together")
-	}
-	return nil
-}
-
 func configureShellShim(crontab *lib.Crontab) error {
 	if runtime.GOOS == "windows" {
 		crontab.WriteMode = lib.WriteModeLegacy
@@ -384,8 +373,6 @@ func configureShellShim(crontab *lib.Crontab) error {
 	switch {
 	case execStyle:
 		crontab.WriteMode = lib.WriteModeExec
-	case convertToShim:
-		crontab.WriteMode = lib.WriteModeConvertToShim
 	default:
 		crontab.WriteMode = lib.WriteModeShim
 	}
@@ -972,7 +959,6 @@ func init() {
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")
 	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Do not use an interactive shell. Write updated crontab to stdout.")
-	discoverCmd.Flags().BoolVar(&convertToShim, "convert-to-shim", false, "Convert existing cronitor exec lines to MONITORIO=<key> shell-shim lines. Lines with flags the marker cannot express are skipped. Idempotent.")
 	discoverCmd.Flags().BoolVar(&execStyle, "exec-style", false, "Write new lines as cronitor exec and revert MONITORIO lines. When no MONITORIO lines remain, restore the prior SHELL.")
 	discoverCmd.Flags().StringVar(&syncFile, "file", "", "Path to YAML or JSON file containing monitor definitions for bulk import")
 

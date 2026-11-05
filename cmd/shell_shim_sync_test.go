@@ -28,13 +28,11 @@ func runSync(t *testing.T, serverURL, path string, extra ...string) string {
 	userAbortedSync = false
 	dryRun = false
 	execStyle = false
-	convertToShim = false
 	noStdoutPassthru = false
 	_ = discoverCmd.Flags().Set("exec-style", "false")
-	_ = discoverCmd.Flags().Set("convert-to-shim", "false")
 	_ = discoverCmd.Flags().Set("dry-run", "false")
 	_ = discoverCmd.Flags().Set("no-stdout", "false")
-	for _, name := range []string{"exec-style", "convert-to-shim", "dry-run", "no-stdout"} {
+	for _, name := range []string{"exec-style", "dry-run", "no-stdout"} {
 		if f := discoverCmd.Flags().Lookup(name); f != nil {
 			f.Changed = false
 		}
@@ -126,7 +124,7 @@ func withSyncFixture(t *testing.T) (serverURL, shimPath string) {
 	oldOverride := lib.ShimShellPathOverride
 	oldBase := lib.BaseURLOverride
 	oldAuto, oldSilent := isAutoDiscover, isSilent
-	oldExec, oldConvert := execStyle, convertToShim
+	oldExec := execStyle
 	oldDry := dryRun
 	oldMonitors := existingMonitors
 	oldKey := viper.GetString(varApiKey)
@@ -138,7 +136,6 @@ func withSyncFixture(t *testing.T) (serverURL, shimPath string) {
 		isAutoDiscover = oldAuto
 		isSilent = oldSilent
 		execStyle = oldExec
-		convertToShim = oldConvert
 		dryRun = oldDry
 		existingMonitors = oldMonitors
 		cfgFile = oldCfg
@@ -155,7 +152,6 @@ func withSyncFixture(t *testing.T) (serverURL, shimPath string) {
 			_ = f.Value.Set("false")
 			f.Changed = false
 		}
-		_ = discoverCmd.Flags().Set("convert-to-shim", "false")
 		_ = discoverCmd.Flags().Set("exec-style", "false")
 		_ = discoverCmd.Flags().Set("auto", "false")
 		_ = discoverCmd.Flags().Set("silent", "false")
@@ -295,62 +291,6 @@ func TestSyncKeepsExistingExecLineByteForByte(t *testing.T) {
 	runSync(t, serverURL, path)
 	if second := readCron(t, path); second != first {
 		t.Fatalf("mixed crontab not stable\n--- first\n%s\n--- second\n%s", first, second)
-	}
-}
-
-func TestSyncConvertSkipsInexpressibleFlags(t *testing.T) {
-	serverURL, _ := withSyncFixture(t)
-	// Sync rewrites the saved prefix. --no-stdout moves to after exec.
-	keptIn := "0 1 * * * /opt/cronitor --env staging --no-stdout exec k1 /bin/echo already"
-	kept := "0 1 * * * /opt/cronitor --env staging exec --no-stdout k1 /bin/echo already"
-	kept2 := "0 3 * * * cronitor exec --no-stdout k3 /bin/true"
-	path := writeCron(t, strings.Join([]string{
-		keptIn,
-		"0 2 * * * cronitor exec k2 /bin/true",
-		kept2,
-		`0 4 * * * cronitor exec k4 echo "hello  world"`,
-	}, "\n"))
-
-	stderr := runSync(t, serverURL, path, "--convert-to-shim")
-	if !strings.Contains(stderr, "skipped") || !strings.Contains(stderr, "--env") || !strings.Contains(stderr, "--no-stdout") {
-		t.Fatalf("expected a skip notice:\n%s", stderr)
-	}
-	if !strings.Contains(stderr, "monitor k1") || strings.Contains(stderr, "line ") {
-		t.Fatalf("skip notice is not keyed by monitor code:\n%s", stderr)
-	}
-	first := readCron(t, path)
-	if !strings.Contains(first, kept+"\n") || !strings.Contains(first, kept2+"\n") {
-		t.Fatalf("flagged lines lost flags or left --no-stdout before exec:\n%s", first)
-	}
-	if strings.Contains(first, "--no-stdout exec") {
-		t.Fatalf("--no-stdout stayed before exec:\n%s", first)
-	}
-	if !strings.Contains(first, "MONITORIO=k2 /bin/true") {
-		t.Fatalf("plain exec line was not converted:\n%s", first)
-	}
-	if !strings.Contains(first, `MONITORIO=k4 echo "hello  world"`) {
-		t.Fatalf("command bytes were rebuilt:\n%s", first)
-	}
-	if strings.Contains(first, "MONITORIO=k1") || strings.Contains(first, "MONITORIO=k3") {
-		t.Fatalf("flagged line was converted:\n%s", first)
-	}
-	if again := runSync(t, serverURL, path, "--convert-to-shim"); again != stderr {
-		t.Fatalf("skip notices changed across runs\n--- first\n%s\n--- second\n%s", stderr, again)
-	}
-
-	runSync(t, serverURL, path, "--exec-style")
-	reverted := readCron(t, path)
-	if !strings.Contains(reverted, kept+"\n") {
-		t.Fatalf("exec-style round trip dropped flags:\n%s", reverted)
-	}
-	if !strings.Contains(reverted, kept2+"\n") {
-		t.Fatalf("exec-style round trip dropped --no-stdout:\n%s", reverted)
-	}
-	if strings.Contains(reverted, "MONITORIO=") {
-		t.Fatalf("exec-style left a marker:\n%s", reverted)
-	}
-	if !strings.Contains(reverted, `echo "hello  world"`) {
-		t.Fatalf("reverted command lost bytes:\n%s", reverted)
 	}
 }
 
@@ -522,7 +462,7 @@ func TestSyncDryRunDoesNotInstallWrapper(t *testing.T) {
 	}
 }
 
-func TestSyncConvertCompoundRoundTrip(t *testing.T) {
+func TestSyncExecStyleQuotesCompoundShimLine(t *testing.T) {
 	serverURL, shimPath := withSyncFixture(t)
 	app := t.TempDir()
 	marker := filepath.Join(app, "ran")
@@ -532,23 +472,7 @@ func TestSyncConvertCompoundRoundTrip(t *testing.T) {
 	}
 	command := "cd " + app + " && ./run.sh " + marker
 	original := "SHELL=/bin/sh\n0 1 * * * cronitor exec k1 " + shellquote.Join(command) + "\n"
-	path := writeCron(t, original)
-
-	runSync(t, serverURL, path, "--convert-to-shim")
-	shimmed := readCron(t, path)
-	want := "CRONITOR_REAL_SHELL=/bin/sh\nSHELL=" + shimPath + "\n0 1 * * * MONITORIO=k1 " + command + "\n"
-	if shimmed != want {
-		t.Fatalf("convert did not unquote the compound command\nwant:\n%s\ngot:\n%s", want, shimmed)
-	}
-	runLine := exec.Command(shimPath, "-c", "MONITORIO=k1 "+command)
-	runLine.Env = append(os.Environ(), "CRONITOR_REAL_SHELL=/bin/sh", "CRONITOR_API_KEY=")
-	if out, err := runLine.CombinedOutput(); err != nil {
-		t.Fatalf("shim line failed: %v\n%s", err, out)
-	}
-	if got := readCron(t, marker); got != "ran" {
-		t.Fatalf("shim line ran as %q", got)
-	}
-	os.Remove(marker)
+	path := writeCron(t, "CRONITOR_REAL_SHELL=/bin/sh\nSHELL="+shimPath+"\n0 1 * * * MONITORIO=k1 "+command+"\n")
 
 	runSync(t, serverURL, path, "--exec-style")
 	if got := readCron(t, path); got != original {
@@ -640,36 +564,6 @@ func TestSyncShellAfterShimIsLeftAlone(t *testing.T) {
 	}
 }
 
-func TestSyncConvertRedactsAPIKey(t *testing.T) {
-	serverURL, _ := withSyncFixture(t)
-	const secret = "supersecretvalue"
-	const secretEq = "othersupersecret"
-	const secretShort = "thirdsecret"
-	const secretAttached = "attachedsecret"
-	path := writeCron(t, strings.Join([]string{
-		"0 9 * * * cronitor --api-key " + secret + " exec k9 /bin/true",
-		"0 8 * * * cronitor --api-key=" + secretEq + " exec k8 /bin/true",
-		"0 7 * * * cronitor -k " + secretShort + " exec k7 /bin/true",
-		"0 6 * * * cronitor -k" + "attachedsecret" + " exec k6 /bin/true",
-	}, "\n"))
-	stderr := runSync(t, serverURL, path, "--convert-to-shim")
-	for _, leak := range []string{secret, secretEq, secretShort, secretAttached} {
-		if strings.Contains(stderr, leak) {
-			t.Fatalf("convert-skip notice leaked %q:\n%s", leak, stderr)
-		}
-	}
-	if !strings.Contains(stderr, "--api-key") || !strings.Contains(stderr, "-k") || !strings.Contains(stderr, "-k<redacted>") || !strings.Contains(stderr, "<redacted>") {
-		t.Fatalf("notice dropped the flag name:\n%s", stderr)
-	}
-	if !strings.Contains(stderr, "monitor k9") {
-		t.Fatalf("notice is not keyed by monitor code:\n%s", stderr)
-	}
-	got := readCron(t, path)
-	if strings.Contains(got, "MONITORIO=k9") || strings.Contains(got, "MONITORIO=k8") || strings.Contains(got, "MONITORIO=k7") {
-		t.Fatalf("keyed line was converted:\n%s", got)
-	}
-}
-
 func TestSyncNewLinesKeepVerbatimCommand(t *testing.T) {
 	serverURL, _ := withSyncFixture(t)
 	commands := []string{
@@ -726,21 +620,5 @@ func TestInvokedExecutableKeepsSymlink(t *testing.T) {
 	}, os.Getwd)
 	if got != link {
 		t.Fatalf("LookPath symlink resolved to %q, want %q", got, link)
-	}
-}
-
-func TestValidateShellShimFlags(t *testing.T) {
-	oldExec, oldConvert := execStyle, convertToShim
-	t.Cleanup(func() {
-		execStyle = oldExec
-		convertToShim = oldConvert
-	})
-	execStyle, convertToShim = true, true
-	if err := validateShellShimFlags(); err == nil {
-		t.Fatal("expected mutually exclusive flags to error")
-	}
-	execStyle, convertToShim = false, true
-	if err := validateShellShimFlags(); err != nil {
-		t.Fatal(err)
 	}
 }

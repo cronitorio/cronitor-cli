@@ -236,12 +236,11 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 		}
 
 		line.rawCommand = rawCommand
-		if code, unwrapped, prefix, noStdout, flags, ok := unwrapCronitorExec(rawCommand); ok {
+		if code, unwrapped, prefix, noStdout, ok := unwrapCronitorExec(rawCommand); ok {
 			line.Code = code
 			line.CommandToRun = unwrapped
 			line.wrapPrefix = prefix
 			line.Integration = IntegrationExec
-			line.execFlags = flags
 			if strings.HasPrefix(rawCommand, prefix) {
 				line.rawTail = strings.TrimLeft(rawCommand[len(prefix):], " \t")
 			}
@@ -460,7 +459,6 @@ type Line struct {
 	rawCommand     string // exact command field from the file
 	rawTail        string // shim: bytes after the key, including the separator; otherwise the job text
 	Integration    string `json:"-"`
-	execFlags      []string
 }
 
 func (l Line) IsMonitorable() bool {

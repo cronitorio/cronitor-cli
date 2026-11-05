@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/kballard/go-shellquote"
 	"github.com/spf13/viper"
 )
 
@@ -25,7 +24,6 @@ const (
 	WriteModeLegacy WriteMode = iota
 	WriteModeShim
 	WriteModeExec
-	WriteModeConvertToShim
 )
 
 const (
@@ -88,29 +86,13 @@ func shimTail(line Line) string {
 		return line.rawTail
 	}
 	cmd := line.CommandToRun
-	if line.Integration == IntegrationExec {
-		if unquoted := unquotedExecCommand(line.rawTail, line.CommandToRun); unquoted != "" {
-			cmd = unquoted
-		}
-	} else if raw := strings.TrimLeft(line.rawTail, " \t\v\f\r\n"); raw != "" {
+	if raw := strings.TrimLeft(line.rawTail, " \t\v\f\r\n"); raw != "" {
 		cmd = raw
 	}
 	if cmd == "" {
 		return ""
 	}
 	return " " + cmd
-}
-
-func unquotedExecCommand(rawTail, command string) string {
-	raw := strings.TrimSpace(rawTail)
-	words, err := shellquote.Split(raw)
-	if err == nil && len(words) == 1 && words[0] == command {
-		return command
-	}
-	if raw != "" {
-		return raw
-	}
-	return command
 }
 
 func shimExecCommand(line Line) string {
@@ -155,11 +137,6 @@ func (l Line) renderIntegration(c Crontab) string {
 	switch c.WriteMode {
 	case WriteModeExec:
 		return IntegrationExec
-	case WriteModeConvertToShim:
-		if l.Integration == IntegrationExec && len(l.execFlags) > 0 {
-			return IntegrationExec
-		}
-		return IntegrationShim
 	case WriteModeShim:
 		if l.Integration == IntegrationExec {
 			return IntegrationExec
@@ -221,16 +198,6 @@ func (c Crontab) ShimNotices() (stop bool, notices []string) {
 			stop = true
 		}
 	}
-	if c.WriteMode == WriteModeConvertToShim {
-		for _, line := range c.Lines {
-			if line.Integration != IntegrationExec || line.GetCode() == "" || len(line.execFlags) == 0 {
-				continue
-			}
-			notices = append(notices, fmt.Sprintf(
-				"notice: monitor %s: skipped --convert-to-shim; flags cannot be expressed as MONITORIO=<key> (%s); left as exec",
-				line.GetCode(), redactExecFlags(line.execFlags)))
-		}
-	}
 	if c.RewriteShimToExec {
 		for _, line := range c.Lines {
 			if line.Integration != IntegrationShim || line.GetCode() == "" {
@@ -244,49 +211,12 @@ func (c Crontab) ShimNotices() (stop bool, notices []string) {
 	return stop, notices
 }
 
-func redactExecFlags(flags []string) string {
-	out := make([]string, 0, len(flags))
-	for i := 0; i < len(flags); i++ {
-		tok := flags[i]
-		eq := strings.IndexByte(tok, '=')
-		base, attached := tok, false
-		if eq > 0 {
-			base = tok[:eq]
-		}
-		if eq < 0 && len(tok) > 2 && tok[0] == '-' && tok[1] != '-' {
-			for j := 1; j < len(tok)-1; j++ {
-				if tok[j] == 'k' || tok[j] == 'p' {
-					tok, attached = tok[:j+1]+"<redacted>", true
-					break
-				}
-			}
-		}
-		if !attached && eq > 0 && secretOpt(base) {
-			tok, attached = base+"=<redacted>", true
-		}
-		out = append(out, tok)
-		if !attached && (secretOpt(tok) || shortSecret(tok)) && i+1 < len(flags) {
-			i++
-			out = append(out, "<redacted>")
-		}
-	}
-	return strings.Join(out, " ")
-}
-
-func secretOpt(tok string) bool {
-	return tok == "--api-key" || tok == "--ping-api-key" || tok == "-k" || tok == "-p"
-}
-
-func shortSecret(tok string) bool {
-	return len(tok) > 2 && tok[0] == '-' && tok[1] != '-' && (tok[len(tok)-1] == 'k' || tok[len(tok)-1] == 'p')
-}
-
 func (c Crontab) linesForWrite() []*Line {
 	if runtime.GOOS == "windows" {
 		return c.Lines
 	}
 	switch c.WriteMode {
-	case WriteModeShim, WriteModeConvertToShim:
+	case WriteModeShim:
 		if c.EmitsShim() {
 			return c.withShimShell(c.shimPath())
 		}

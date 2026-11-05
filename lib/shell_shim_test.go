@@ -76,10 +76,10 @@ func TestExecFallbacksPlaceNoStdoutAfterExec(t *testing.T) {
 	t.Cleanup(func() { viper.Set("CRONITOR_ENV", original) })
 
 	ct := parseContent(t, `0 1 * * * /opt/cronitor --env staging --no-stdout exec k1 /bin/echo already`)
-	ct.WriteMode = WriteModeConvertToShim
+	ct.WriteMode = WriteModeShim
 	got := ct.Write()
 	if !strings.Contains(got, "/opt/cronitor --env staging exec --no-stdout k1 /bin/echo already") || strings.Contains(got, "--no-stdout exec") {
-		t.Fatalf("flagged convert wrote %s", got)
+		t.Fatalf("flagged exec line wrote %s", got)
 	}
 
 	// --exec-style, multiple SHELL= (legacy), and dash re-enable of a bare line
@@ -115,25 +115,6 @@ func TestResolveRealShell(t *testing.T) {
 	}
 }
 
-func TestExecFlagsComeFromWrapDetector(t *testing.T) {
-	ct := parseContent(t, `0 * * * * /opt/cronitor --env staging --no-stdout exec k1 echo "hi  there"`)
-	var line *Line
-	for _, l := range ct.Lines {
-		if l.IsJob {
-			line = l
-		}
-	}
-	if line == nil {
-		t.Fatal("no job")
-	}
-	if got := strings.Join(line.execFlags, " "); got != "--env staging --no-stdout" {
-		t.Fatalf("flags=%q", got)
-	}
-	if line.rawTail != `echo "hi  there"` {
-		t.Fatalf("raw tail=%q", line.rawTail)
-	}
-}
-
 func TestShimInstallPathRootUsesEtc(t *testing.T) {
 	old := shimEuid
 	t.Cleanup(func() { shimEuid = old })
@@ -151,34 +132,6 @@ func TestShimInstallPathRootUsesEtc(t *testing.T) {
 	}
 	if got := ResolveShimInstallPath(); got != filepath.Join(home, ".cronitor", ShimWrapperBase) {
 		t.Fatalf("user path=%s", got)
-	}
-}
-
-func TestRedactAttachedAPIKey(t *testing.T) {
-	got := redactExecFlags([]string{"-ksupersecretvalue", "--env", "staging"})
-	if strings.Contains(got, "supersecretvalue") || !strings.Contains(got, "-k<redacted>") {
-		t.Fatalf("redacted=%q", got)
-	}
-}
-
-func TestRedactPingKeyAndCluster(t *testing.T) {
-	got := redactExecFlags([]string{
-		"--ping-api-key", "pingsecret",
-		"-p", "psecret",
-		"-vkcombined",
-		"--ping-api-key=eqsecret",
-		"-vk", "tailsecret",
-		"--env", "staging",
-	})
-	for _, leak := range []string{"pingsecret", "psecret", "combined", "eqsecret", "tailsecret"} {
-		if strings.Contains(got, leak) {
-			t.Fatalf("leaked %s in %q", leak, got)
-		}
-	}
-	for _, want := range []string{"--ping-api-key", "-p", "-vk<redacted>", "--ping-api-key=<redacted>", "<redacted>", "--env", "staging"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("missing %s in %q", want, got)
-		}
 	}
 }
 

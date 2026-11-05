@@ -101,20 +101,20 @@ var cronitorBoolFlags = map[string]bool{
 
 // unwrapCronitorExec parses `cronitor [flags] exec [flags] <key> [command]`.
 // prefix is the original text through the key so Write can emit it unchanged.
-func unwrapCronitorExec(raw string) (code, command, prefix string, noStdout bool, flags []string, ok bool) {
+func unwrapCronitorExec(raw string) (code, command, prefix string, noStdout, ok bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", "", "", false, nil, false
+		return "", "", "", false, false
 	}
 
 	var keyIndex int
-	code, keyIndex, noStdout, flags, ok = detectCronitorWrap(strings.Fields(raw))
+	code, keyIndex, noStdout, ok = detectCronitorWrap(strings.Fields(raw))
 	if !ok {
-		return "", "", "", false, nil, false
+		return "", "", "", false, false
 	}
 	code = unquoteWord(code)
 	prefix, tail := cutAfterFields(raw, keyIndex+1)
-	return code, commandFromTail(tail), prefix, noStdout, flags, true
+	return code, commandFromTail(tail), prefix, noStdout, true
 }
 
 func unquoteWord(tok string) string {
@@ -147,44 +147,40 @@ func commandFromTail(tail string) string {
 	return words[0] + stdin
 }
 
-func detectCronitorWrap(words []string) (code string, keyIndex int, noStdout bool, flags []string, ok bool) {
+func detectCronitorWrap(words []string) (code string, keyIndex int, noStdout, ok bool) {
 	if len(words) < 3 || !isCronitorBinary(words[0]) {
-		return "", 0, false, nil, false
+		return "", 0, false, false
 	}
 
 	i := 1
 	for i < len(words) && words[i] != "exec" {
 		tok := words[i]
 		if !isCLIFlag(tok) {
-			return "", 0, false, nil, false
+			return "", 0, false, false
 		}
-		flags = append(flags, tok)
 		if tok == "--no-stdout" {
 			noStdout = true
 		}
 		if flagConsumesNext(tok, words, i) {
-			flags = append(flags, words[i+1])
 			i += 2
 			continue
 		}
 		i++
 	}
 	if i >= len(words) || words[i] != "exec" {
-		return "", 0, false, nil, false
+		return "", 0, false, false
 	}
 	i++
 	for i < len(words) && isExecArgFlag(words[i]) {
-		tok := words[i]
-		flags = append(flags, tok)
-		if tok == "--no-stdout" {
+		if words[i] == "--no-stdout" {
 			noStdout = true
 		}
 		i++
 	}
 	if i >= len(words) {
-		return "", 0, false, nil, false
+		return "", 0, false, false
 	}
-	return words[i], i, noStdout, flags, true
+	return words[i], i, noStdout, true
 }
 
 func isExecArgFlag(tok string) bool {
