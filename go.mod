@@ -1,6 +1,6 @@
 module github.com/cronitorio/cronitor-cli
 
-go 1.26.2
+go 1.26.10
 
 require (
 	github.com/capnspacehook/taskmaster v0.0.0-20210519235353-1629df7c85e9
