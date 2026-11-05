@@ -277,3 +277,49 @@ func TestShimLineKeepsDashEdit(t *testing.T) {
 		})
 	}
 }
+
+func TestConvertExecLines(t *testing.T) {
+	input := strings.Join([]string{
+		"0 1 * * * cronitor exec k1 echo hi",
+		"0 2 * * * /usr/local/bin/cronitor exec k2 'cd /tmp && echo x'",
+		`0 3 * * * cronitor exec k3 echo "a  b"`,
+		"0 4 * * * cronitor exec --no-stdout k4 echo y",
+		"0 5 * * * cronitor --api-key secret123 exec k5 echo z",
+		"0 6 * * * CRONITOR=k6 echo already",
+	}, "\n")
+	write := func(content string) (string, []string) {
+		ct := parseContent(t, content)
+		ct.WriteMode = WriteModeShim
+		ct.ConvertExec = true
+		ct.ShimShellPath = "/etc/cronitor/cronitor-shell"
+		_, notices := ct.ShimNotices()
+		return ct.Write(), notices
+	}
+	got, notices := write(input)
+	for _, want := range []string{
+		"SHELL=/etc/cronitor/cronitor-shell\n",
+		"0 1 * * * CRONITOR=k1 echo hi\n",
+		"0 2 * * * CRONITOR=k2 cd /tmp && echo x\n",
+		"0 3 * * * CRONITOR=k3 echo \"a  b\"\n",
+		"0 4 * * * cronitor exec --no-stdout k4 echo y\n",
+		"0 5 * * * cronitor --api-key secret123 exec k5 echo z\n",
+		"0 6 * * * CRONITOR=k6 echo already\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if t.Failed() {
+		t.Fatalf("got:\n%s", got)
+	}
+	joined := strings.Join(notices, "\n")
+	if len(notices) != 2 || !strings.Contains(joined, "k4") || !strings.Contains(joined, "k5") {
+		t.Fatalf("want one notice each for k4 and k5, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "secret123") || strings.Contains(joined, "--") {
+		t.Fatalf("notice prints flags:\n%s", joined)
+	}
+	if again, _ := write(got); again != got {
+		t.Fatalf("second convert changed the output\n--- first\n%s\n--- second\n%s", got, again)
+	}
+}

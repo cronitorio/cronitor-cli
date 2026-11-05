@@ -38,6 +38,7 @@ type Crontab struct {
 	RealShell               string                `json:"-"`
 	BlockNewShim            bool                  `json:"-"`
 	RewriteShimToExec       bool                  `json:"-"`
+	ConvertExec             bool                  `json:"-"` // sync --convert-exec
 }
 
 // isExampleCronLine checks if a line contains obvious placeholder/example text

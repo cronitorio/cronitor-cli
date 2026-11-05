@@ -18,7 +18,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	if len(os.Args) > 1 && os.Args[1] == "shell-shim" {
+	// The test binary also acts as the cronitor binary: as `shell-shim` for
+	// the wrapper, and as `exec` for the fixture's original exec lines.
+	if len(os.Args) > 1 && (os.Args[1] == "shell-shim" || os.Args[1] == "exec") {
 		if host := os.Getenv("CRONITOR_SHIM_PING_HOST"); host != "" {
 			lib.PingHostOverride = host
 		} else {
@@ -26,7 +28,14 @@ func TestMain(m *testing.M) {
 		}
 		viper.Set(varApiKey, "")
 		viper.Set(varPingApiKey, "")
-		os.Exit(RunShellShim(os.Args))
+		if os.Args[1] == "shell-shim" {
+			os.Exit(RunShellShim(os.Args))
+		}
+		RootCmd.SetArgs(os.Args[1:])
+		if err := RootCmd.Execute(); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }

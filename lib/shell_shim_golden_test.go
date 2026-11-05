@@ -13,21 +13,23 @@ import (
 var updateGolden = flag.Bool("update", false, "rewrite fixtures/shim/*.expected")
 
 // TestShimFixtureGolden writes fixtures/shim/crontab.input with every
-// monitorable job monitored and compares the result to the .expected files.
+// monitorable job monitored, in default, --exec-style and --convert-exec mode, and compares the result to the .expected files.
 func TestShimFixtureGolden(t *testing.T) {
 	input, err := os.ReadFile(filepath.Join("..", "fixtures", "shim", "crontab.input"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name string
-		mode WriteMode
+		name    string
+		mode    WriteMode
+		convert bool
 	}{
-		{"crontab.expected", WriteModeShim},
-		{"crontab.exec-style.expected", WriteModeExec},
+		{"crontab.expected", WriteModeShim, false},
+		{"crontab.exec-style.expected", WriteModeExec, false},
+		{"crontab.convert-exec.expected", WriteModeShim, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := writeFixture(t, string(input), tc.mode)
+			got := writeFixture(t, string(input), tc.mode, tc.convert)
 			path := filepath.Join("..", "fixtures", "shim", tc.name)
 			if *updateGolden {
 				if err := os.WriteFile(path, []byte(got), 0644); err != nil {
@@ -41,17 +43,18 @@ func TestShimFixtureGolden(t *testing.T) {
 			if got != string(want) {
 				t.Fatalf("output differs from %s (rerun with -update and review the diff)\n--- got\n%s", tc.name, got)
 			}
-			if again := writeFixture(t, got, tc.mode); again != got {
+			if again := writeFixture(t, got, tc.mode, tc.convert); again != got {
 				t.Fatalf("second sync changed the output\n--- first\n%s\n--- second\n%s", got, again)
 			}
 		})
 	}
 }
 
-func writeFixture(t *testing.T, content string, mode WriteMode) string {
+func writeFixture(t *testing.T, content string, mode WriteMode, convert bool) string {
 	t.Helper()
 	ct := parseContent(t, content)
 	ct.WriteMode = mode
+	ct.ConvertExec = convert
 	ct.ShimShellPath = "/etc/cronitor/cronitor-shell"
 	for i, l := range ct.Lines {
 		if l.IsMonitorable() && !l.IsComment && l.GetCode() == "" {

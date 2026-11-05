@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/kballard/go-shellquote"
 	"github.com/spf13/viper"
 )
 
@@ -106,13 +107,26 @@ func shimTail(line Line) string {
 
 // shimJob is the job text without a marker: the bytes from the file when
 // the command is unedited, otherwise CommandToRun (for example a dash edit).
+// An exec line whose command is one quoted word gives the unquoted command.
 func shimJob(line Line) string {
 	if line.CommandToRun == line.parsedCommand {
-		if raw := strings.TrimLeft(line.rawTail, " \t\v\f\r\n"); raw != "" {
+		raw := strings.TrimLeft(line.rawTail, " \t\v\f\r\n")
+		if line.Integration == IntegrationExec {
+			if words, err := shellquote.Split(raw); err == nil && len(words) == 1 && words[0] == line.CommandToRun {
+				return line.CommandToRun
+			}
+		}
+		if raw != "" {
 			return raw
 		}
 	}
 	return line.CommandToRun
+}
+
+// execHasFlags reports whether an exec line has flags, which a marker
+// cannot carry. The saved prefix is `<binary> exec <key>` without flags.
+func (l Line) execHasFlags() bool {
+	return len(strings.Fields(l.wrapPrefix)) != 3
 }
 
 func shimExecCommand(line Line) string {
@@ -145,6 +159,9 @@ func (l Line) renderIntegration(c Crontab) string {
 		return IntegrationExec
 	case WriteModeShim:
 		if l.Integration == IntegrationExec {
+			if c.ConvertExec && !l.execHasFlags() {
+				return IntegrationShim
+			}
 			return IntegrationExec
 		}
 		if l.Integration == IntegrationShim {
@@ -202,6 +219,14 @@ func (c Crontab) ShimNotices() (stop bool, notices []string) {
 				return true, notices
 			}
 			stop = true
+		}
+	}
+	if c.ConvertExec && c.WriteMode == WriteModeShim {
+		for _, line := range c.Lines {
+			if line.Integration == IntegrationExec && line.GetCode() != "" && line.execHasFlags() {
+				notices = append(notices, fmt.Sprintf(
+					"notice: monitor %s: kept as cronitor exec because the line has flags", line.GetCode()))
+			}
 		}
 	}
 	if c.RewriteShimToExec {

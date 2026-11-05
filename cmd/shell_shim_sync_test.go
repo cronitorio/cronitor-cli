@@ -28,11 +28,12 @@ func runSync(t *testing.T, serverURL, path string, extra ...string) string {
 	userAbortedSync = false
 	dryRun = false
 	execStyle = false
+	convertExec = false
 	noStdoutPassthru = false
 	_ = discoverCmd.Flags().Set("exec-style", "false")
 	_ = discoverCmd.Flags().Set("dry-run", "false")
 	_ = discoverCmd.Flags().Set("no-stdout", "false")
-	for _, name := range []string{"exec-style", "dry-run", "no-stdout"} {
+	for _, name := range []string{"exec-style", "convert-exec", "dry-run", "no-stdout"} {
 		if f := discoverCmd.Flags().Lookup(name); f != nil {
 			f.Changed = false
 		}
@@ -625,4 +626,30 @@ func TestInvokedExecutableKeepsSymlink(t *testing.T) {
 
 func hasShimMarker(body string) bool {
 	return strings.Contains(body, "CRONITOR=") || strings.Contains(body, "MONITORIO=")
+}
+
+func TestSyncConvertExec(t *testing.T) {
+	serverURL, shimPath := withSyncFixture(t)
+	path := writeCron(t, strings.Join([]string{
+		"SHELL=/bin/bash",
+		"0 1 * * * cronitor exec k1 'cd /tmp && echo x'",
+		"0 2 * * * cronitor exec --no-stdout k2 echo y",
+	}, "\n"))
+
+	runSync(t, serverURL, path, "--convert-exec")
+	got := readCron(t, path)
+	for _, want := range []string{
+		"CRONITOR_REAL_SHELL=/bin/bash\n",
+		"SHELL=" + shimPath + "\n",
+		"0 1 * * * CRONITOR=k1 cd /tmp && echo x\n",
+		"0 2 * * * cronitor exec --no-stdout k2 echo y\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+	runSync(t, serverURL, path)
+	if again := readCron(t, path); again != got {
+		t.Fatalf("plain sync after convert changed the crontab\n--- first\n%s\n--- second\n%s", got, again)
+	}
 }

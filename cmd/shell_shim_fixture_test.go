@@ -16,17 +16,13 @@ import (
 	"github.com/cronitorio/cronitor-cli/lib"
 )
 
-// TestShimFixtureRuns runs every marked job in fixtures/shim/crontab.expected
-// through the real wrapper and shell-shim, and runs the matching line from
-// crontab.input with plain /bin/sh. Output and exit code must match, and the
-// marked run must send a run ping and a final ping.
+// TestShimFixtureRuns runs every marked job in the default and
+// --convert-exec outputs through the real wrapper and shell-shim, and runs
+// the matching line from crontab.input with /bin/sh. Output and exit code must
+// match, and the marked run must send a run ping and a final ping. The test
+// binary is on PATH as cronitor and monicli, so original exec lines run
+// through the real `cronitor exec`.
 func TestShimFixtureRuns(t *testing.T) {
-	input := fixtureJobs(t, "crontab.input")
-	written := fixtureJobs(t, "crontab.expected")
-	if len(input) != len(written) || len(input) == 0 {
-		t.Fatalf("job count: input %d, expected %d", len(input), len(written))
-	}
-
 	fixture := t.TempDir()
 	app := filepath.Join(fixture, "my app")
 	if err := os.MkdirAll(app, 0755); err != nil {
@@ -35,6 +31,12 @@ func TestShimFixtureRuns(t *testing.T) {
 	script := "#!/bin/sh\nprintf '[%s]' \"$@\"; echo\n"
 	if err := os.WriteFile(filepath.Join(app, "run.sh"), []byte(script), 0755); err != nil {
 		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	for _, name := range []string{"cronitor", "monicli"} {
+		if err := os.Symlink(os.Args[0], filepath.Join(bin, name)); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	var mu sync.Mutex
@@ -47,36 +49,51 @@ func TestShimFixtureRuns(t *testing.T) {
 	defer server.Close()
 
 	wrapper := installRealShim(t, os.Args[0])
-	env := shimEnv("FIXTURE="+fixture, "CRONITOR_SHIM_PING_HOST="+server.URL)
+	env := shimEnv("FIXTURE="+fixture, "CRONITOR_SHIM_PING_HOST="+server.URL,
+		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	ran := 0
-	for i, field := range written {
-		if _, _, ok := lib.ParseMonitorMarker(cronCommand(field)); !ok {
-			continue
-		}
-		ran++
-		t.Run(field, func(t *testing.T) {
-			wantOut, wantCode := runCronField(t, "/bin/sh", input[i], env)
-			gotOut, gotCode := runCronField(t, wrapper, field, env)
-			if gotOut != wantOut || gotCode != wantCode {
-				t.Fatalf("written line differs from the original\n  input:   %s -> %q (exit %d)\n  written: %s -> %q (exit %d)",
-					input[i], wantOut, wantCode, field, gotOut, gotCode)
+	input := fixtureJobs(t, "crontab.input")
+	for _, file := range []string{"crontab.expected", "crontab.convert-exec.expected"} {
+		t.Run(file, func(t *testing.T) {
+			written := fixtureJobs(t, file)
+			if len(input) != len(written) || len(input) == 0 {
+				t.Fatalf("job count: input %d, %s %d", len(input), file, len(written))
 			}
-			key, _, _ := lib.ParseMonitorMarker(cronCommand(field))
-			mu.Lock()
-			defer mu.Unlock()
-			var run, final bool
-			for _, p := range pings {
-				run = run || strings.HasPrefix(p, "/"+key+"/run?")
-				final = final || strings.HasPrefix(p, "/"+key+"/complete?") || strings.HasPrefix(p, "/"+key+"/fail?")
+			ran := 0
+			for i, field := range written {
+				key, _, ok := lib.ParseMonitorMarker(cronCommand(field))
+				if !ok {
+					continue
+				}
+				ran++
+				// The fixture's absolute cronitor path does not exist here.
+				original := strings.Replace(input[i], "/usr/local/bin/cronitor ", "cronitor ", 1)
+				t.Run(field, func(t *testing.T) {
+					wantOut, wantCode := runCronField(t, "/bin/sh", original, env)
+					mu.Lock()
+					pings = nil
+					mu.Unlock()
+					gotOut, gotCode := runCronField(t, wrapper, field, env)
+					if gotOut != wantOut || gotCode != wantCode {
+						t.Fatalf("written line differs from the original\n  input:   %s -> %q (exit %d)\n  written: %s -> %q (exit %d)",
+							original, wantOut, wantCode, field, gotOut, gotCode)
+					}
+					mu.Lock()
+					defer mu.Unlock()
+					var run, final bool
+					for _, p := range pings {
+						run = run || strings.HasPrefix(p, "/"+key+"/run?")
+						final = final || strings.HasPrefix(p, "/"+key+"/complete?") || strings.HasPrefix(p, "/"+key+"/fail?")
+					}
+					if !run || !final {
+						t.Fatalf("pings for %s: run=%v final=%v\n%s", key, run, final, strings.Join(pings, "\n"))
+					}
+				})
 			}
-			if !run || !final {
-				t.Fatalf("pings for %s: run=%v final=%v\n%s", key, run, final, strings.Join(pings, "\n"))
+			if ran < 10 {
+				t.Fatalf("only %d marked jobs ran; the fixture or the writer changed", ran)
 			}
 		})
-	}
-	if ran < 10 {
-		t.Fatalf("only %d marked jobs ran; the fixture or the writer changed", ran)
 	}
 }
 
