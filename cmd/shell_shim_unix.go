@@ -37,11 +37,7 @@ func RunShellShim(args []string) int {
 		return 127
 	}
 	monitorCode = key
-	code := RunCommand(rest, true, true, shell)
-	if shellShimAfterJob != nil {
-		shellShimAfterJob()
-	}
-	return code
+	return RunCommand(rest, true, true, shell)
 }
 
 func shellShimDashC(args []string) (string, bool) {

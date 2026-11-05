@@ -135,7 +135,6 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 		env = makeCronLikeEnv()
 	}
 	env = append(env, "CRONITOR_EXEC=1")
-	env = dropEnv(env, "CRONITOR_SHIM_FD")
 	if shell != "" {
 		env = setEnv(env, "SHELL", shell)
 	}
@@ -149,7 +148,6 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 	} else {
 		defer execCmdStdin.Close()
 		go func() {
-			defer func() { recover() }()
 			defer execCmdStdin.Close()
 			io.Copy(execCmdStdin, os.Stdin)
 		}()
@@ -171,29 +169,18 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 
 	// Invoke subcommand and send a message when it's done
 	waitCh := make(chan error, 16)
-	var jobs jobSignal
-	var plainProc atomic.Pointer[os.Process]
+	var proc atomic.Pointer[os.Process]
 	go func() {
 		defer close(waitCh)
 
+		// Brief pause to allow gochannel selects
 		time.Sleep(20 * time.Millisecond)
-
-		if shell != "" {
-			commitShimHandshake()
-			if shimAfterHandshake != nil {
-				shimAfterHandshake()
-			}
-		}
 
 		if err := execCmd.Start(); err != nil {
 			waitCh <- err
 			return
 		}
-		if shell != "" {
-			jobs.started(execCmd.Process)
-		} else {
-			plainProc.Store(execCmd.Process)
-		}
+		proc.Store(execCmd.Process)
 		waitCh <- execCmd.Wait()
 	}()
 
@@ -204,16 +191,12 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 	for {
 		select {
 		case sig := <-sigChan:
-			if shell != "" {
-				jobs.deliver(sig)
-				continue
-			}
-			proc := plainProc.Load()
-			if proc == nil {
+			p := proc.Load()
+			if p == nil {
 				signal.Stop(sigChan)
 				continue
 			}
-			if err := proc.Signal(sig); err != nil {
+			if err := p.Signal(sig); err != nil {
 				signal.Stop(sigChan)
 			}
 
@@ -264,11 +247,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 				// Cribbed from aws-vault.
 				if exiterr, ok := err.(*exec.ExitError); ok {
 					if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-						if shell != "" {
-							exitCode = exitStatusOf(status)
-						} else {
-							exitCode = status.ExitStatus()
-						}
+						exitCode = status.ExitStatus()
 					} else {
 						exitCode = 1
 					}
@@ -287,11 +266,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 				}
 			}
 
-			if shell != "" {
-				waitForTelemetry(&monitoringWaitGroup, 3*time.Second)
-			} else {
-				monitoringWaitGroup.Wait()
-			}
+			monitoringWaitGroup.Wait()
 			return exitCode
 		}
 	}
@@ -465,56 +440,12 @@ func isStaleFile(file os.FileInfo) bool {
 }
 
 func shipLogData(tempFile *os.File, series string, wg *sync.WaitGroup) {
-	defer wg.Done()
-	defer finishTelemetry()
-	defer func() {
-		if rec := recover(); rec != nil {
-			log(fmt.Sprintf("log upload recovered: %v", rec))
-		}
-	}()
 	outputForLogs := gatherOutput(tempFile, false)
 	_, err := lib.SendLogData(viper.GetString(varApiKey), monitorCode, series, string(outputForLogs))
 	if err != nil {
 		log(fmt.Sprintf("%v", err))
 	}
-}
-
-func waitForTelemetry(wg *sync.WaitGroup, bound time.Duration) {
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(bound):
-	}
-}
-
-type jobSignal struct {
-	mu   sync.Mutex
-	sig  os.Signal
-	proc *os.Process
-}
-
-func (j *jobSignal) deliver(sig os.Signal) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	if j.proc == nil {
-		j.sig = sig
-		return
-	}
-	signalJob(j.proc, sig)
-}
-
-func (j *jobSignal) started(proc *os.Process) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	j.proc = proc
-	if j.sig != nil {
-		signalJob(proc, j.sig)
-		j.sig = nil
-	}
+	wg.Done()
 }
 
 func setEnv(env []string, key, value string) []string {

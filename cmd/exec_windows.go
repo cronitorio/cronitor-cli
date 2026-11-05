@@ -3,10 +3,7 @@
 
 package cmd
 
-import (
-	"os"
-	"syscall"
-)
+import "syscall"
 
 // getPlatformSysProcAttr returns platform-specific SysProcAttr configuration
 func getPlatformSysProcAttr() *syscall.SysProcAttr {
@@ -21,13 +18,5 @@ func getPlatformSysProcAttrForDash() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
 		// Windows doesn't support Setpgid, so we return an empty SysProcAttr
 		// Process group functionality is handled differently on Windows
-	}
-}
-
-func commitShimHandshake() {}
-
-func signalJob(proc *os.Process, sig os.Signal) {
-	if proc != nil && sig != nil {
-		_ = proc.Signal(sig)
 	}
 }

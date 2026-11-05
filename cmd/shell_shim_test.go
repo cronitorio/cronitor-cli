@@ -3,19 +3,11 @@
 package cmd
 
 import (
-	"bytes"
-	"context"
-	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -34,34 +26,9 @@ func TestMain(m *testing.M) {
 		}
 		viper.Set(varApiKey, "")
 		viper.Set(varPingApiKey, "")
-		if os.Getenv("CRONITOR_SHIM_CRASH_AFTER_BYTE") == "1" {
-			shimAfterHandshake = func() { os.Exit(99) }
-		}
-		if os.Getenv("CRONITOR_SHIM_SIGNAL_BEFORE_START") == "1" {
-			shimAfterHandshake = func() {
-				time.Sleep(50 * time.Millisecond)
-				_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
-			}
-		}
 		os.Exit(RunShellShim(os.Args))
 	}
-	closeOnExecInherited()
-	// Isolate wrapper mktemp from other packages running in parallel.
-	shimRoot, err := os.MkdirTemp("", "cronitor-shim-tests-")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	_ = os.Setenv("TMPDIR", shimRoot)
-	code := m.Run()
-	if leftovers, _ := filepath.Glob(filepath.Join(shimRoot, "cronitor-shim.*")); len(leftovers) > 0 {
-		fmt.Fprintf(os.Stderr, "leftover cronitor-shim temp dirs: %s\n", strings.Join(leftovers, " "))
-		if code == 0 {
-			code = 1
-		}
-	}
-	os.RemoveAll(shimRoot)
-	os.Exit(code)
+	os.Exit(m.Run())
 }
 
 func TestShellShimDashCIsNotTheConfigFlag(t *testing.T) {
@@ -183,69 +150,6 @@ func TestShellShimPassthroughAndNeverFail(t *testing.T) {
 	}
 }
 
-func TestShellShimJobRunsOnceWhenTelemetryPanics(t *testing.T) {
-	if os.Getenv("CRONITOR_SHIM_CHILD") == "1" && os.Getenv("CRONITOR_SHIM_PANIC") == "1" {
-		telemetryTestHook = func() { panic("ping boom") }
-		viper.Set(varApiKey, "")
-		lib.PingHostOverride = "http://127.0.0.1:1"
-		os.Exit(RunShellShim([]string{"cronitor", "shell-shim", "-c", os.Getenv("CRONITOR_SHIM_CMD")}))
-	}
-	if os.Getenv("CRONITOR_SHIM_CHILD") == "1" && os.Getenv("CRONITOR_SHIM_PANIC_AFTER") == "1" {
-		shellShimAfterJob = func() { panic("after job") }
-		viper.Set(varApiKey, "")
-		lib.PingHostOverride = "http://127.0.0.1:1"
-		os.Exit(RunShellShim([]string{"cronitor", "shell-shim", "-c", os.Getenv("CRONITOR_SHIM_CMD")}))
-	}
-	if os.Getenv("CRONITOR_SHIM_CHILD") == "1" {
-		return
-	}
-
-	dir := t.TempDir()
-	count := filepath.Join(dir, "count")
-	cmdText := "printf x >> " + shellQuote(count) + "; exit 5"
-	run := func(env string) int {
-		t.Helper()
-		os.Remove(count)
-		cmd := exec.Command(os.Args[0], "-test.run=^TestShellShimJobRunsOnceWhenTelemetryPanics$")
-		cmd.Env = append(os.Environ(),
-			"CRONITOR_SHIM_CHILD=1",
-			env+"=1",
-			"CRONITOR_SHIM_CMD=MONITORIO=abc123 "+cmdText,
-			"CRONITOR_REAL_SHELL=/bin/sh",
-			"CRONITOR_API_KEY=",
-		)
-		err := cmd.Run()
-		if err == nil {
-			return 0
-		}
-		exit, ok := err.(*exec.ExitError)
-		if !ok {
-			t.Fatal(err)
-		}
-		return exit.ExitCode()
-	}
-	if code := run("CRONITOR_SHIM_PANIC"); code != 5 {
-		t.Fatalf("ping panic exit=%d, want the job's 5", code)
-	}
-	if got := readTestFile(t, count); got != "x" {
-		t.Fatalf("ping panic ran job as %q", got)
-	}
-	code := run("CRONITOR_SHIM_PANIC_AFTER")
-	if code == 0 || code == 5 {
-		t.Fatalf("panic after the job was swallowed (exit %d); a re-run recover would hide it", code)
-	}
-	if got := readTestFile(t, count); got != "x" {
-		t.Fatalf("panic after the job ran it as %q, want once", got)
-	}
-}
-
-func TestSignalExitCode(t *testing.T) {
-	code := RunCommand("kill -TERM $$", false, false, "/bin/sh")
-	if code != 143 {
-		t.Fatalf("signal exit=%d, want 143", code)
-	}
-}
-
 func TestPlainExecSignalStatusUnchanged(t *testing.T) {
 	code := RunCommand("kill -TERM $$", false, false)
 	if code != -1 {
@@ -333,190 +237,6 @@ func TestPlainExecSignalLeavesBackgroundChild(t *testing.T) {
 	}
 }
 
-type lockedBuf struct {
-	mu sync.Mutex
-	b  bytes.Buffer
-}
-
-func (l *lockedBuf) Write(p []byte) (int, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.b.Write(p)
-}
-
-func (l *lockedBuf) String() string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.b.String()
-}
-
-func TestWrapperIntOnRunningJob(t *testing.T) {
-	var mu sync.Mutex
-	var urls []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		urls = append(urls, r.RequestURI)
-		mu.Unlock()
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(srv.Close)
-
-	run := func(t *testing.T, command string, wantCode int, wantOut []string, wantPing []string) {
-		t.Helper()
-		mu.Lock()
-		from := len(urls)
-		mu.Unlock()
-		wrapper := installRealShim(t, os.Args[0])
-		closeOnExecInherited()
-		cmd := exec.Command(wrapper, "-c", "MONITORIO=abc123 "+command)
-		cmd.Env = shimEnv("CRONITOR_SHIM_PING_HOST=" + srv.URL)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		var out lockedBuf
-		cmd.Stdout = &out
-		cmd.Stderr = &out
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if cmd.Process != nil {
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			}
-		})
-		deadline := time.Now().Add(4 * time.Second)
-		for !strings.Contains(out.String(), "started") {
-			if time.Now().After(deadline) {
-				t.Fatalf("job did not start; output=%q", out.String())
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
-			t.Fatal(err)
-		}
-		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
-		var waitErr error
-		select {
-		case waitErr = <-done:
-		case <-time.After(8 * time.Second):
-			t.Fatal("wrapper did not return after SIGINT")
-		}
-		code := 0
-		if waitErr != nil {
-			exit, ok := waitErr.(*exec.ExitError)
-			if !ok {
-				t.Fatal(waitErr)
-			}
-			code = exit.ExitCode()
-		}
-		if code != wantCode {
-			t.Fatalf("exit=%d, want %d; output=%q", code, wantCode, out.String())
-		}
-		got := out.String()
-		for _, s := range wantOut {
-			if !strings.Contains(got, s) {
-				t.Fatalf("output %q missing %q", got, s)
-			}
-		}
-		mu.Lock()
-		gotPings := strings.Join(urls[from:], "\n")
-		mu.Unlock()
-		for _, s := range wantPing {
-			if !strings.Contains(gotPings, s) {
-				t.Fatalf("pings missing %s:\n%s", s, gotPings)
-			}
-		}
-	}
-
-	t.Run("returns job code and pings", func(t *testing.T) {
-		run(t,
-			"trap 'sleep 2; echo cleaned; exit 7' INT; echo started; sleep 30",
-			7,
-			[]string{"cleaned"},
-			[]string{"/abc123/fail", "status_code=7"},
-		)
-	})
-	t.Run("ignored int still prints", func(t *testing.T) {
-		run(t,
-			"trap '' INT; echo started; sleep 2; echo to-stdout; echo end",
-			0,
-			[]string{"to-stdout", "end"},
-			[]string{"/abc123/complete", "status_code=0"},
-		)
-	})
-}
-
-func TestSignalBeforeStartReachesJob(t *testing.T) {
-	wrapper := installRealShim(t, os.Args[0])
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-	closeOnExecInherited()
-	cmd := exec.CommandContext(ctx, wrapper, "-c", "MONITORIO=k1 sleep 30")
-	cmd.Env = shimEnv("CRONITOR_SHIM_SIGNAL_BEFORE_START=1")
-	err := cmd.Run()
-	if ctx.Err() != nil {
-		t.Fatal("signal queued before Start was dropped; sleep 30 was still running")
-	}
-	exit, ok := err.(*exec.ExitError)
-	if !ok || exit.ExitCode() != 143 {
-		t.Fatalf("exit=%v, want 143", err)
-	}
-}
-
-func TestShimTelemetryWaitIsBounded(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var mu sync.Mutex
-	var conns []net.Conn
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			mu.Lock()
-			conns = append(conns, c)
-			mu.Unlock()
-			_, _ = io.Copy(io.Discard, c)
-		}
-	}()
-	oldHost := lib.PingHostOverride
-	oldBase := lib.BaseURLOverride
-	oldCode := monitorCode
-	oldKey := viper.GetString(varApiKey)
-	lib.PingHostOverride = "http://" + ln.Addr().String()
-	lib.BaseURLOverride = "http://127.0.0.1:1"
-	monitorCode = "abc123"
-	viper.Set(varApiKey, "")
-	var idle sync.WaitGroup
-	idle.Add(3)
-	telemetryDoneHook = idle.Done
-	defer func() {
-		ln.Close()
-		mu.Lock()
-		for _, c := range conns {
-			c.Close()
-		}
-		mu.Unlock()
-		idle.Wait()
-		telemetryDoneHook = nil
-		lib.PingHostOverride = oldHost
-		lib.BaseURLOverride = oldBase
-		monitorCode = oldCode
-		viper.Set(varApiKey, oldKey)
-	}()
-	start := time.Now()
-	code := RunCommand("exit 0", false, true, "/bin/sh")
-	elapsed := time.Since(start)
-	if code != 0 {
-		t.Fatalf("exit=%d", code)
-	}
-	if elapsed > 8*time.Second {
-		t.Fatalf("telemetry held the shim for %s", elapsed)
-	}
-}
-
 func readTestFile(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -549,92 +269,10 @@ func shimEnv(extra ...string) []string {
 	return append(env, extra...)
 }
 
-// closeOnExecInherited stops the agent and the test harness from leaking
-// fds >= 3 into the wrapper. os/exec keeps those fds open across exec.
-func closeOnExecInherited() {
-	f, err := os.Open("/proc/self/fd")
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	names, _ := f.Readdirnames(-1)
-	self := int(f.Fd())
-	for _, name := range names {
-		fd, err := strconv.Atoi(name)
-		if err != nil || fd < 3 || fd == self {
-			continue
-		}
-		syscall.CloseOnExec(fd)
-	}
-}
-
 func shimCommand(name string, args ...string) *exec.Cmd {
-	closeOnExecInherited()
 	cmd := exec.Command(name, args...)
 	cmd.Env = shimEnv()
 	return cmd
-}
-
-// TestMarkedHandshakeRunsJobOnce fails if the handshake byte is not sent:
-// the job would start and the wrapper would run it again after the timeout.
-func TestMarkedHandshakeRunsJobOnce(t *testing.T) {
-	dir := t.TempDir()
-	count := filepath.Join(dir, "count")
-	wrapper := installRealShim(t, os.Args[0])
-	cmd := shimCommand(wrapper, "-c", "MONITORIO=k1 printf x >> "+shellQuote(count))
-	if err := cmd.Run(); err != nil {
-		t.Fatal(err)
-	}
-	if got := readTestFile(t, count); got != "x" {
-		t.Fatalf("job ran as %q, want one x (a missing handshake byte runs it twice)", got)
-	}
-}
-
-func TestHandshakeDelayAtTimeoutRunsOnce(t *testing.T) {
-	dir := t.TempDir()
-	count := filepath.Join(dir, "count")
-	script := filepath.Join(dir, "delay")
-	body := "#!/bin/sh\nsleep 2.99\nexec " + shellQuote(os.Args[0]) + " \"$@\"\n"
-	if err := os.WriteFile(script, []byte(body), 0755); err != nil {
-		t.Fatal(err)
-	}
-	wrapper := installRealShim(t, script)
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-	closeOnExecInherited()
-	cmd := exec.CommandContext(ctx, wrapper, "-c", "MONITORIO=k1 printf x >> "+shellQuote(count))
-	cmd.Env = shimEnv()
-	start := time.Now()
-	err := cmd.Run()
-	if ctx.Err() != nil {
-		t.Fatal("wrapper did not return at the timeout boundary")
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := readTestFile(t, count); got != "x" {
-		t.Fatalf("delay at 2.99s ran job as %q, want exactly one", got)
-	}
-	if time.Since(start) > 8*time.Second {
-		t.Fatal("delay test exceeded its bound")
-	}
-}
-
-func TestCrashAfterHandshakeDoesNotRunJob(t *testing.T) {
-	dir := t.TempDir()
-	count := filepath.Join(dir, "count")
-	wrapper := installRealShim(t, os.Args[0])
-	cmd := shimCommand(wrapper, "-c", "MONITORIO=k1 printf x >> "+shellQuote(count))
-	cmd.Env = shimEnv("CRONITOR_SHIM_CRASH_AFTER_BYTE=1")
-	err := cmd.Run()
-	exit, ok := err.(*exec.ExitError)
-	if !ok || exit.ExitCode() != 99 {
-		t.Fatalf("exit=%v, want 99 from the crash after the byte", err)
-	}
-	if _, statErr := os.Stat(count); !os.IsNotExist(statErr) {
-		got := readTestFile(t, count)
-		t.Fatalf("crash after the byte ran the job as %q, want zero times", got)
-	}
 }
 
 func TestMarkedLineGetsCronStdin(t *testing.T) {
@@ -652,7 +290,6 @@ func TestMarkedLineGetsCronStdin(t *testing.T) {
 			if _, err := exec.LookPath(sh); err != nil {
 				t.Skip(sh)
 			}
-			closeOnExecInherited()
 			cmd := exec.Command(sh, wrapper, "-c", command)
 			cmd.Env = shimEnv()
 			cmd.Stdin = strings.NewReader(stdin)
@@ -664,106 +301,6 @@ func TestMarkedLineGetsCronStdin(t *testing.T) {
 				t.Fatalf("%s delivered %q, want %q", sh, out, stdin)
 			}
 		})
-	}
-}
-
-func TestMarkedJobDoesNotInheritHandshakeFd(t *testing.T) {
-	wrapper := installRealShim(t, os.Args[0])
-	cmd := shimCommand(wrapper, "-c", `MONITORIO=k1 if { echo hi >&3; } 2>/dev/null; then echo OPEN; else echo CLOSED; fi; printf '%s' "$CRONITOR_SHIM_FD$CRONITOR_SHIM_SAVED_FD"`)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("exit=%v\n%s", err, out)
-	}
-	if string(out) != "CLOSED\n" {
-		t.Fatalf("fd 3 / env = %q, want CLOSED and no shim env", out)
-	}
-}
-
-func TestMarkedJobKeepsExistingFd3(t *testing.T) {
-	wrapper := installRealShim(t, os.Args[0])
-	path := filepath.Join(t.TempDir(), "fd3")
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	cmd := shimCommand(wrapper, "-c", "MONITORIO=k1 echo JOB >&3")
-	cmd.ExtraFiles = []*os.File{f}
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("exit=%v\n%s", err, out)
-	}
-	if got := readTestFile(t, path); got != "JOB\n" {
-		t.Fatalf("fd 3 = %q, want the caller's file", got)
-	}
-}
-
-func TestStdoutClosesWhenHandshakeArrives(t *testing.T) {
-	wrapper := installRealShim(t, os.Args[0])
-	cmd := shimCommand(wrapper, "-c", "MONITORIO=k1 echo hi")
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd.Stdout = w
-	cmd.Stderr = w
-	start := time.Now()
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
-	out, err := io.ReadAll(r)
-	r.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Wait(); err != nil {
-		t.Fatal(err)
-	}
-	if time.Since(start) > 1500*time.Millisecond {
-		t.Fatalf("stdout stayed open for %s", time.Since(start))
-	}
-	if string(out) != "hi\n" {
-		t.Fatalf("output=%q", out)
-	}
-}
-
-func TestSignalReachesMarkedJob(t *testing.T) {
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "started")
-	wrapper := installRealShim(t, os.Args[0])
-	cmd := shimCommand(wrapper, "-c", "MONITORIO=k1 printf started > "+shellQuote(marker)+"; sleep 30")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if _, err := os.Stat(marker); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			cmd.Process.Kill()
-			t.Fatal("marked job did not start")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case err := <-done:
-		exit, ok := err.(*exec.ExitError)
-		if !ok || exit.ExitCode() != 143 {
-			t.Fatalf("exit=%v, want 143", err)
-		}
-	case <-time.After(3 * time.Second):
-		cmd.Process.Kill()
-		t.Fatal("SIGTERM did not stop the marked job")
-	}
-	out, err := exec.Command("pgrep", "-f", marker).CombinedOutput()
-	if err == nil {
-		t.Fatalf("job still running after SIGTERM:\n%s", out)
 	}
 }
 
