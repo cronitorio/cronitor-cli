@@ -161,8 +161,13 @@ func TestQuotedWordRoundTrip(t *testing.T) {
 	}
 }
 
-func TestUnwrappedPercentRoundTrip(t *testing.T) {
+func TestUnmonitoredLineRoundTrip(t *testing.T) {
 	lines := []string{
+		`0 * * * * echo "a  b"`,
+		`0 * * * * "/opt/my script.sh"`,
+		`0 * * * * /bin/true  arg`,
+		`# 0 * * * * echo "a  b"`,
+		`0 * * * * run-parts  /etc/cron.hourly`,
 		`0 * * * * cat%hello`,
 		`0 * * * * tr a-z A-Z%quiet please`,
 		`0 * * * * date +%Y`,
@@ -176,6 +181,51 @@ func TestUnwrappedPercentRoundTrip(t *testing.T) {
 			got := strings.TrimSpace(parseContent(t, line).Write())
 			if got != line {
 				t.Fatalf("unmonitored line changed\n got %s\nwant %s", got, line)
+			}
+		})
+	}
+}
+
+// TestRawCommandIsKept checks that the command bytes from the file are reused
+// while the command is not edited, and that an edit wins.
+func TestRawCommandIsKept(t *testing.T) {
+	withCronitorEnv(t, "")
+	tests := []struct {
+		name, line string
+		edit       func(*Line)
+		want       string
+	}{
+		{"wrap quoted path", `0 * * * * "/opt/my script.sh"`,
+			func(l *Line) { l.Code = "NEW" }, `0 * * * * cronitor exec NEW "/opt/my script.sh"`},
+		{"wrap keeps spaces in quotes", `0 * * * * echo "a  b"`,
+			func(l *Line) { l.Code = "NEW" }, `0 * * * * cronitor exec NEW echo "a  b"`},
+		{"wrapped keeps spaces in quotes", `0 * * * * cronitor exec k1 echo "a  b"`,
+			func(l *Line) {}, `0 * * * * cronitor exec k1 echo "a  b"`},
+		{"key change keeps tail", `0 * * * * cronitor exec k1 echo "a  b"`,
+			func(l *Line) { l.Code = "NEW" }, `0 * * * * cronitor exec NEW echo "a  b"`},
+		{"disable unquotes complex", `0 * * * * cronitor exec k1 'cd /tmp && ls'`,
+			func(l *Line) { l.Code = "" }, `0 * * * * cd /tmp && ls`},
+		{"wrap keeps spaces in complex", `0 2 * * * echo "two  spaces"   >  /dev/null; echo after-redirect`,
+			func(l *Line) { l.Code = "K" }, `0 2 * * * cronitor exec K 'echo "two  spaces"   >  /dev/null; echo after-redirect'`},
+		// Cron cuts at the first bare %, even inside quotes, so the original runs
+		// `printf '` with the rest as stdin. The wrap keeps that cut where it is.
+		{"wrap bare percent in quotes", `0 6 * * * printf '%s\n' a b | tr a-z A-Z`,
+			func(l *Line) { l.Code = "K" }, `0 6 * * * cronitor exec K printf '%s\n' a b | tr a-z A-Z`},
+		{"edit unwrapped", `0 * * * * echo "a  b"`,
+			func(l *Line) { l.CommandToRun = "/bin/other" }, `0 * * * * /bin/other`},
+		{"edit wrapped", `0 * * * * cronitor exec k1 echo "a  b"`,
+			func(l *Line) { l.CommandToRun = "/bin/other" }, `0 * * * * cronitor exec k1 /bin/other`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ct := parseContent(t, tc.line)
+			tc.edit(jobLines(ct)[0])
+			got := strings.TrimSpace(ct.Write())
+			if got != tc.want {
+				t.Fatalf("\n got %s\nwant %s", got, tc.want)
+			}
+			if again := strings.TrimSpace(parseContent(t, got).Write()); again != got {
+				t.Fatalf("not stable\n%s\n%s", got, again)
 			}
 		})
 	}

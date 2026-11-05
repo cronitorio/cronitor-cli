@@ -14,28 +14,13 @@ func commandIsComplex(command string) bool {
 
 // formatWrappedCommand quotes a complex command as one shell word. A bare %
 // starts cron stdin and is left outside the quotes; \% is left as written.
-// A single quoted or escaped word is kept as written.
 func formatWrappedCommand(command string) string {
 	body, stdin := splitCronStdin(command)
 	body = strings.TrimSpace(body)
-	formatted := formatCommandBody(body)
-	if formatted == "" {
-		return stdin
-	}
-	return formatted + stdin
-}
-
-func formatCommandBody(body string) string {
-	if body == "" {
-		return ""
-	}
-	if words, err := shellquote.Split(body); err == nil && len(words) == 1 && body != words[0] && !commandIsComplex(words[0]) {
-		return body
-	}
 	if commandIsComplex(body) {
-		return shellquote.Join(body)
+		body = shellquote.Join(body)
 	}
-	return strings.Join(strings.Fields(body), " ")
+	return body + stdin
 }
 
 // splitCronStdin cuts at the first % cronie would treat as stdin. A backslash

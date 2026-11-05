@@ -247,6 +247,9 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			}
 		}
 
+		line.rawCommand = rawCommand
+		line.parsedCommand = line.CommandToRun
+
 		if line.IsAutoDiscoverCommand() {
 			autoDiscoverLine = &line
 			if noAutoDiscover {
@@ -436,6 +439,8 @@ type Line struct {
 	Mon            Monitor
 	Crontab        Crontab
 	wrapPrefix     string // cronitor prefix through the key, from parse
+	rawCommand     string // exact command field from the file, after any run-as user
+	parsedCommand  string // CommandToRun as parsed; a different value means it was edited
 }
 
 func (l Line) IsMonitorable() bool {
@@ -490,7 +495,7 @@ func (l Line) Write() string {
 		} else {
 			lineParts = append(lineParts, l.FullLine)
 		}
-		outputLines = append(outputLines, strings.TrimSpace(strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)))
+		outputLines = append(outputLines, strings.TrimSpace(strings.Join(lineParts, " ")))
 		return strings.Join(outputLines, "\n")
 	}
 
@@ -511,7 +516,9 @@ func (l Line) Write() string {
 	if code := l.GetCode(); l.wrapPrefix != "" && code != "" {
 		prefix := insertSyncFlags(replacePrefixKey(l.wrapPrefix, code), l.Mon.NoStdoutPassthru)
 		lineParts = append(lineParts, prefix)
-		if len(l.CommandToRun) > 0 {
+		if raw, ok := l.rawJob(); ok {
+			lineParts = append(lineParts, raw)
+		} else if len(l.CommandToRun) > 0 {
 			lineParts = append(lineParts, formatWrappedCommand(l.CommandToRun))
 		}
 		outputLines = append(outputLines, strings.TrimSpace(strings.Join(lineParts, " ")))
@@ -532,18 +539,37 @@ func (l Line) Write() string {
 		}
 		lineParts = append(lineParts, code)
 
-		if len(l.CommandToRun) > 0 {
+		command := l.CommandToRun
+		if raw, ok := l.rawJob(); ok {
+			command = raw
+		}
+		if len(command) > 0 {
 			// Quoted as one shell word when complex, so the outer shell does not
-			// eat pipes and lists. Do not collapse spaces inside that word.
-			lineParts = append(lineParts, formatWrappedCommand(l.CommandToRun))
+			// eat pipes and lists.
+			lineParts = append(lineParts, formatWrappedCommand(command))
 		}
 		outputLines = append(outputLines, strings.TrimSpace(strings.Join(lineParts, " ")))
 		return strings.Join(outputLines, "\n")
 	}
 
-	lineParts = append(lineParts, l.CommandToRun)
-	outputLines = append(outputLines, strings.TrimSpace(strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)))
+	// A wrapped tail can be quoted for the wrap, so a line that loses its wrap
+	// uses CommandToRun. An unwrapped line keeps its bytes.
+	command := l.CommandToRun
+	if raw, ok := l.rawJob(); ok && l.wrapPrefix == "" {
+		command = raw
+	}
+	lineParts = append(lineParts, command)
+	outputLines = append(outputLines, strings.TrimSpace(strings.Join(lineParts, " ")))
 	return strings.Join(outputLines, "\n")
+}
+
+// rawJob returns the command bytes from the file after any wrap prefix. ok is
+// false when the line was not parsed or CommandToRun was edited since.
+func (l Line) rawJob() (string, bool) {
+	if l.rawCommand == "" || l.CommandToRun != l.parsedCommand || !strings.HasPrefix(l.rawCommand, l.wrapPrefix) {
+		return "", false
+	}
+	return strings.TrimLeft(l.rawCommand[len(l.wrapPrefix):], " \t"), true
 }
 
 func (l Line) Key(CanonicalPath string) string {
