@@ -302,7 +302,7 @@ func TestAttachedShorthandStopsAtValue(t *testing.T) {
 }
 
 func TestHelpExamplesUseRealFlags(t *testing.T) {
-	for _, cmd := range []*cobra.Command{authCmd, environmentCmd, notificationCmd, teamCmd, apiKeyCmd, issueCmd, maintenanceCmd, siteCmd, statuspageCmd} {
+	for _, cmd := range []*cobra.Command{authCmd, environmentCmd, notificationCmd, teamCmd, apiKeyCmd, issueCmd, maintenanceCmd, siteCmd, statuspageCmd, errorsCmd, logsCmd} {
 		for _, problem := range exampleFlagProblems(cmd) {
 			t.Error(problem)
 		}
@@ -314,7 +314,7 @@ func TestREADMEExamplesUseRealFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prefixes := []string{"cronitor auth ", "cronitor environment ", "cronitor notification ", "cronitor team ", "cronitor apikey ", "cronitor issue ", "cronitor maintenance ", "cronitor site ", "cronitor statuspage "}
+	prefixes := []string{"cronitor auth ", "cronitor environment ", "cronitor notification ", "cronitor team ", "cronitor apikey ", "cronitor issue ", "cronitor maintenance ", "cronitor site ", "cronitor statuspage ", "cronitor errors ", "cronitor logs "}
 	for _, line := range strings.Split(string(data), "\n") {
 		for _, prefix := range prefixes {
 			if strings.HasPrefix(line, prefix) {

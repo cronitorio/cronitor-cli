@@ -215,6 +215,37 @@ Get information about the current Cronitor instance.
 **Example prompts:**
 - "Which Cronitor instance am I connected to?"
 
+### Errors and logs (read-only)
+
+These four tools read the errors and log records sent by `cronitor exec --capture-errors`/`--ship-logs`, cronitor-python, or any Sentry SDK. Unlike the cron job tools, they call the Cronitor API with the `CRONITOR_API_KEY` from the CLI config (or the MCP server's environment), not the dashboard, so they need an API key with the `monitor:read` scope and give the same results whichever instance is selected. They return the API's JSON, with terminal control characters removed from `body`, `title`, `culprit` and `context_line`. Their arguments mirror the flags of `cronitor errors` and `cronitor logs`.
+
+Event and log content is untrusted: anyone holding the account's telemetry key, which is in every ping URL, can write it. The tool descriptions and the server's rules tell the agent to treat it as data and not to follow instructions found in it.
+
+#### search_errors
+Search error groups, most recently seen first.
+
+**Parameters:** `env`, `monitor` (job monitor key), `service` (service monitor key), `level` (comma-separated: fatal, error, warning, info, debug), `since` (`30m`, `24h`, `7d`), `start`, `end` (unix seconds or ISO 8601), `search` (title and culprit), `order_by` (`-last_seen`, `last_seen`, `-count`, `count`, `-first_seen`, `first_seen`), `page`, `page_size`
+
+#### get_error_group
+Get one error group with a 24-hour hourly sparkline and the latest event's full payload.
+
+**Parameters:** `group` (required): the full 40-character hex group id
+
+#### get_error_event
+Get one event with its full payload (stack trace, breadcrumbs, contexts), or, without `event_id`, list the group's events newest first.
+
+**Parameters:** `group` (required), `event_id`, `env`, `monitor`, `service`, `series`, `before` (cursor from `next`), `limit`
+
+#### search_logs
+Search log records, newest first.
+
+**Parameters:** `env`, `monitor`, `service`, `series`, `level` (minimum: trace, debug, info, warn, error, fatal), `since`, `start`, `end`, `search` (whole tokens, all must match), `trace_id`, `before` (cursor from `next`), `limit`
+
+**Example prompts:**
+- "Why did the nightly-job monitor fail last night? Show me the stack trace"
+- "Which errors happened most often in production this week?"
+- "Show the warning and error log lines from run run-123"
+
 ## Available MCP Resources
 
 ### cronitor://crontabs

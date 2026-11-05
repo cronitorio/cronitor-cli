@@ -39,7 +39,11 @@ Example:
 
 Example with no command output send to Cronitor:
   By default, stdout and stderr messages are sent to Cronitor when your job completes. To prevent any output from being sent to cronitor, use the --no-stdout flag:
-  $ cronitor exec --no-stdout d3x0c1 /path/to/command.sh --command-param argument1 argument2`,
+  $ cronitor exec --no-stdout d3x0c1 /path/to/command.sh --command-param argument1 argument2
+
+Example with error capture and log shipping:
+  With --capture-errors, a non-zero exit also sends an exception event, with the stack trace when the output contains a Python or Node traceback. With --ship-logs, each output line is sent as a searchable log record. Both are off by default.
+  $ cronitor exec --capture-errors --ship-logs d3x0c1 python3 /path/to/job.py`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		// We need to use raw os.Args so we can pass the wrapped command through unparsed
 		var foundExec, foundCode bool
@@ -49,6 +53,11 @@ Example with no command output send to Cronitor:
 		allFlags := map[string]bool{
 			"--": true, // seed with the argument separator
 		}
+
+		// main.go inserts "--" after the first argument following "exec", so a
+		// second flag before the monitor key is not parsed by cobra. Apply the
+		// boolean exec flags found before the key here so their order does not matter.
+		execBoolFlags := map[string]bool{"--no-stdout": true, "--capture-errors": true, "--ship-logs": true}
 		cmd.Flags().VisitAll(func(flag *flag.Flag) {
 			allFlags["--"+flag.Name] = true
 			allFlags["-"+flag.Shorthand] = true
@@ -64,6 +73,9 @@ Example with no command output send to Cronitor:
 
 			// After finding "exec" we are looking for a monitor code
 			if foundExec && !foundCode {
+				if execBoolFlags[arg] {
+					cmd.Flags().Set(strings.TrimPrefix(arg, "--"), "true")
+				}
 				if _, is_flag := allFlags[arg]; is_flag {
 					continue
 				}
@@ -122,6 +134,21 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 		go sendPing("run", monitorCode, subcommand, series, startTime, nil, nil, nil, schedule, &monitoringWaitGroup)
 	}
 
+	// Error capture and log shipping are opt-in and need a key; without one
+	// the command runs exactly as it would without the flags.
+	ingestKey := ""
+	var logs *logShipper
+	if withMonitoring && (captureErrors || shipLogs) {
+		ingestKey = ingestApiKey()
+		if ingestKey == "" {
+			log("Cannot capture errors or ship logs: set CRONITOR_PING_API_KEY or CRONITOR_API_KEY, or run 'cronitor configure'")
+		} else if shipLogs && noStdoutPassthru {
+			log("Not shipping logs because --no-stdout is set")
+		} else if shipLogs {
+			logs = newExecLogShipper(ingestKey, series)
+		}
+	}
+
 	log(fmt.Sprintf("Running subcommand: %s", subcommand))
 
 	execCmd := makeSubcommandExec(subcommand)
@@ -148,10 +175,18 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 	tempFile, err := getTempFile()
 	if err == nil {
 		defer tempFile.Close()
-		execCmd.Stdout = io.MultiWriter(os.Stdout, tempFile)
+		if logs != nil {
+			execCmd.Stdout = io.MultiWriter(os.Stdout, tempFile, logs)
+		} else {
+			execCmd.Stdout = io.MultiWriter(os.Stdout, tempFile)
+		}
 	} else {
 		log(err.Error())
-		execCmd.Stdout = os.Stdout
+		if logs != nil {
+			execCmd.Stdout = io.MultiWriter(os.Stdout, logs)
+		} else {
+			execCmd.Stdout = os.Stdout
+		}
 	}
 
 	// Combine stdout and stderr from the command into a single buffer which we'll stream as stdout
@@ -220,6 +255,16 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 			duration := endTime - startTime
 			exitCode := 0
 
+			// The command has exited and its output is fully written, so the
+			// last log lines can be flushed alongside the completion ping.
+			if logs != nil {
+				monitoringWaitGroup.Add(1)
+				go func() {
+					defer monitoringWaitGroup.Done()
+					logs.Close()
+				}()
+			}
+
 			if err == nil {
 				if withMonitoring {
 					monitoringWaitGroup.Add(1)
@@ -252,6 +297,15 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 						monitoringWaitGroup.Add(1)
 						go shipLogData(tempFile, series, &monitoringWaitGroup)
 					}
+					if captureErrors && ingestKey != "" {
+						output := ""
+						if !noStdoutPassthru {
+							output = readOutputTail(tempFile, captureReadBytes)
+						}
+						event := buildFailureEvent(output, subcommand, series, exitCode, err, endTime)
+						monitoringWaitGroup.Add(1)
+						go sendFailureEvent(event, ingestKey, &monitoringWaitGroup)
+					}
 				}
 			}
 
@@ -265,6 +319,8 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) in
 func init() {
 	RootCmd.AddCommand(execCmd)
 	execCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes")
+	execCmd.Flags().BoolVar(&captureErrors, "capture-errors", captureErrors, "On a non-zero exit, also send an exception event to Cronitor, with the stack trace when the output has a Python or Node traceback")
+	execCmd.Flags().BoolVar(&shipLogs, "ship-logs", shipLogs, "Send each line of command output to Cronitor as a searchable log record")
 }
 
 func makeCronLikeEnv() []string {

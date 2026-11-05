@@ -1021,6 +1021,7 @@ func runMCPServer(instanceName string) {
 
 	// Create and register the Cronitor MCP handler
 	handler := lib.NewCronitorMCPHandler(instanceName)
+	handler.UseDev = dev
 
 	// Register tools
 	if err := handler.RegisterTools(s); err != nil {

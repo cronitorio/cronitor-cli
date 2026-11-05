@@ -1,0 +1,110 @@
+{
+  "group": "a95936e78b4b51bf4abdbb64d45624ca804c2f4a",
+  "title": "JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+  "culprit": "jobs.nightly in fetch_rows",
+  "exception_type": "JSONDecodeError",
+  "level": "error",
+  "levels": ["error", "warning"],
+  "environment": "production",
+  "count": 42,
+  "first_seen": "2026-10-27T03:00:12.123456Z",
+  "last_seen": "2026-10-29T03:02:00.654321Z",
+  "monitors": [{"key": "nightly-job", "name": "Nightly job"}],
+  "services": [{"key": "billing-api", "name": "Billing API"}],
+  "last_event_id": "cd3dc8b6cffb41e4163dcbd857ca87da",
+  "sparkline": [
+    {"stamp": "2026-10-28T04:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T05:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T06:00:00Z", "count": 1},
+    {"stamp": "2026-10-28T07:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T08:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T09:00:00Z", "count": 2},
+    {"stamp": "2026-10-28T10:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T11:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T12:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T13:00:00Z", "count": 4},
+    {"stamp": "2026-10-28T14:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T15:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T16:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T17:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T18:00:00Z", "count": 1},
+    {"stamp": "2026-10-28T19:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T20:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T21:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T22:00:00Z", "count": 0},
+    {"stamp": "2026-10-28T23:00:00Z", "count": 3},
+    {"stamp": "2026-10-29T00:00:00Z", "count": 0},
+    {"stamp": "2026-10-29T01:00:00Z", "count": 0},
+    {"stamp": "2026-10-29T02:00:00Z", "count": 0},
+    {"stamp": "2026-10-29T03:00:00Z", "count": 8}
+  ],
+  "latest_event": {
+    "event_id": "cd3dc8b6cffb41e4163dcbd857ca87da",
+    "group": "a95936e78b4b51bf4abdbb64d45624ca804c2f4a",
+    "stamp": "2026-10-29T03:02:00.654321Z",
+    "level": "error",
+    "platform": "python",
+    "title": "JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+    "message": "",
+    "exception_type": "JSONDecodeError",
+    "exception_value": "Expecting value: line 1 column 1 (char 0)",
+    "culprit": "jobs.nightly in fetch_rows",
+    "transaction": "",
+    "logger": "",
+    "server_name": "worker-1",
+    "release": "2026.10.28",
+    "environment": "production",
+    "monitor": {"key": "nightly-job", "name": "Nightly job"},
+    "service": null,
+    "series": "run-123",
+    "handled": false,
+    "tags": {"cronitor.monitor": "nightly-job", "exit_code": "1", "host": "worker-1"},
+    "user": null,
+    "sdk": {"name": "cronitor-cli", "version": "33.11"},
+    "client": "cronitor-cli/33.11",
+    "ip": "203.0.113.7",
+    "payload": {
+      "event_id": "cd3dc8b6cffb41e4163dcbd857ca87da",
+      "platform": "python",
+      "level": "error",
+      "exception": {
+        "values": [
+          {
+            "type": "KeyError",
+            "value": "'rows'",
+            "module": "builtins",
+            "stacktrace": {
+              "frames": [
+                {"filename": "jobs/nightly.py", "abs_path": "/srv/app/jobs/nightly.py", "function": "fetch_rows", "lineno": 18, "context_line": "    rows = cache['rows']", "in_app": true}
+              ]
+            }
+          },
+          {
+            "type": "JSONDecodeError",
+            "value": "Expecting value: line 1 column 1 (char 0)",
+            "module": "json.decoder",
+            "mechanism": {"type": "cronitor.exec", "handled": false},
+            "stacktrace": {
+              "frames": [
+                {"filename": "jobs/nightly.py", "abs_path": "/srv/app/jobs/nightly.py", "function": "<module>", "lineno": 52, "context_line": "main()", "pre_context": ["", "if __name__ == '__main__':"], "post_context": [], "in_app": true},
+                {"filename": "jobs/nightly.py", "abs_path": "/srv/app/jobs/nightly.py", "function": "fetch_rows", "lineno": 21, "context_line": "        rows = json.loads(body)", "in_app": true},
+                {"filename": "/usr/lib/python3.12/json/__init__.py", "function": "loads", "lineno": 346, "context_line": "    return _default_decoder.decode(s)", "in_app": false},
+                {"filename": "/usr/lib/python3.12/json/decoder.py", "function": "raw_decode", "lineno": 355, "context_line": "    raise JSONDecodeError(\"Expecting value\", s, err.value) from None", "in_app": false}
+              ]
+            }
+          }
+        ]
+      },
+      "breadcrumbs": {
+        "values": [
+          {"timestamp": 1761706900.1, "category": "http", "message": "GET https://export.example.com/rows"},
+          {"timestamp": 1761706910.2, "category": "log", "message": "retrying"},
+          {"timestamp": 1761706920.3, "category": "log", "message": "giving up"}
+        ]
+      },
+      "contexts": {"os": {"name": "Linux"}},
+      "extra": {"output_tail": "Traceback (most recent call last):"},
+      "request": {}
+    }
+  }
+}

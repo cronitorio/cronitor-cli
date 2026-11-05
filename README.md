@@ -69,6 +69,30 @@ Logout revokes this installation's credential and removes it locally. **Schedule
 | `cronitor status` | View monitor status |
 | `cronitor dash` | Start the web dashboard |
 
+#### Error and log capture with `exec`
+
+`cronitor exec` can also send a failing job's error, and its output lines, to Cronitor. Both flags are off by default, go before the monitor key, and can be combined:
+
+```bash
+cronitor exec --capture-errors --ship-logs d3x0c1 python3 /path/to/job.py
+```
+
+- `--capture-errors`: when the command exits non-zero, send one exception event in addition to the fail ping. If the output contains a Python traceback or a Node.js stack trace, the event carries its exception type, message and stack frames (the last traceback in the output wins). Otherwise the type is `ExitStatus` and the message is the last non-empty output line. The event is tagged with the monitor key, the run's series, the exit code, the command (first 200 characters, with your Cronitor API and ping API keys replaced by `[REDACTED]`) and the host, and includes the last 100 lines of output.
+- `--ship-logs`: send each line of output (stdout and stderr) as a log record, in batches of 100 lines or once a second. Lines containing the word `error`, `exception`, `traceback`, `fatal` or `panic` get level `error`, lines containing `warn` or `warning` get `warn`, and the rest get `info`. Each record carries the monitor key, the run's series and its line number. The output sent with the completion ping is unchanged.
+
+Both use the ping API key (`CRONITOR_PING_API_KEY`, falling back to `CRONITOR_API_KEY`) and send to `/api/envelope` on the telemetry host (`CRONITOR_PING_API_HOST`, default `cronitor.link`). Without a key they send nothing. With `--no-stdout`, no output is sent: no log lines are shipped and the exception event leaves out the output and the command. A failed send never changes the command's exit code, and after the command exits the CLI waits at most about 10 seconds for these requests.
+
+Read them back with [`cronitor errors` and `cronitor logs`](#errors).
+
+Applications can report their own errors and logs instead. Cronitor accepts the Sentry envelope format, so any Sentry SDK works once its DSN is the `dsn` of a service monitor (`cronitor monitor create --data '{"type":"service","key":"billing-api","name":"Billing API"}'`, then `cronitor monitor get billing-api`). The path of the DSN is that monitor's numeric id. Tag events with `cronitor.monitor` to attach them to a job monitor:
+
+```python
+import sentry_sdk
+
+sentry_sdk.init(dsn="<the dsn of your service monitor>")
+sentry_sdk.set_tag("cronitor.monitor", "nightly-job")
+```
+
 ### API Resources
 
 Manage Cronitor resources directly from the command line.
@@ -126,6 +150,32 @@ cronitor issue resolve <key>                             # Shorthand for resolvi
 cronitor issue delete <key>
 cronitor issue bulk --action delete --issues KEY1,KEY2   # Bulk actions
 ```
+
+#### Errors
+
+Error groups and events sent by `cronitor exec --capture-errors`, cronitor-python, or any Sentry SDK that sends to a Cronitor DSN.
+
+```bash
+cronitor errors list --monitor nightly-job --since 24h   # Groups seen in the last day
+cronitor errors list --service billing-api --level fatal --level error --order-by -count
+cronitor errors get <group>                              # Summary, 24h sparkline, latest stack trace
+cronitor errors events <group> --limit 20                # A group's events, newest first
+cronitor errors events <group> <event_id>                # One event with its stack trace
+```
+
+`<group>` is the full 40-character group id. The list table shows its first 12 characters; `cronitor errors list --json` prints full ids. `--monitor` filters by job monitor and `--service` by service monitor.
+
+#### Logs
+
+Log records sent by `cronitor exec --ship-logs`, cronitor-python, or any Sentry SDK.
+
+```bash
+cronitor logs search --monitor nightly-job --since 1h    # One record per line, oldest first
+cronitor logs search --level warn -q timeout --attributes
+cronitor logs search --series run-123 --follow           # Keep polling for new records; Ctrl-C stops
+```
+
+`--level` is a minimum level and `-q` matches whole tokens (repeat it to require several). The `next:` cursor for `--before` goes to stderr, so stdout can be piped. Errors and logs commands need an API key with the `monitor:read` scope, print the API response with `--json`, and take `--start`/`--end` as unix seconds or ISO 8601 or `--since` as a duration such as `30m`, `24h` or `7d`.
 
 #### Notifications
 
@@ -213,13 +263,14 @@ cronitor apikey delete <key>                                   # Asks first; --y
 
 Team and API key commands need a credential from `cronitor auth login --admin` and act with the logged-in user's current role. Any role can list the team; inviting, changing roles, and removing members need the admin role. A team member's id is their email address, the same value `team list` prints in the ID column. You can only grant API key scopes your own role has. `apikey create` prints the full key once. Without `--yes`, `team remove` and `apikey delete` refuse to run when stdin is not a terminal.
 
-**Aliases:** `cronitor env` → `environment`, `cronitor notifications` → `notification`, `cronitor integrations` → `integration`, `cronitor teams` → `team`, `cronitor apikeys` / `cronitor keys` → `apikey`
+**Aliases:** `cronitor env` → `environment`, `cronitor notifications` → `notification`, `cronitor integrations` → `integration`, `cronitor teams` → `team`, `cronitor apikeys` / `cronitor keys` → `apikey`, `cronitor error` → `errors`, `cronitor log` → `logs`, `cronitor logs list` → `logs search`
 
 ### Common Flags
 
 | Flag | Description |
 |------|-------------|
 | `--format json\|table` | Output format (default: `table` for list, `json` for get). `monitor` also accepts `yaml` |
+| `--json` | Print the API response as JSON (`errors`, `logs`) |
 | `-o, --output <file>` | Write output to a file |
 | `--page <n>` | Page number for paginated results |
 | `-d, --data <json>` | JSON data for create/update |
@@ -333,6 +384,8 @@ You can also pass `--ping-api-host eu.cronitor.link`, or save it with `cronitor 
 The Cronitor CLI includes a built-in [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for managing cron jobs with natural language through AI-powered tools like Claude Code, Cursor, Cline, and Windsurf.
 
 **Quick start:** Run `cronitor dash` on your server, then configure your MCP client to spawn `cronitor dash --mcp-instance default`.
+
+It also has read-only `search_errors`, `get_error_group`, `get_error_event` and `search_logs` tools, which call the Cronitor API with your `CRONITOR_API_KEY` (scope `monitor:read`).
 
 For setup instructions, available tools, and configuration options, see the [MCP Integration Guide](docs/MCP_INTEGRATION.md).
 
