@@ -45,6 +45,7 @@ func TestWrapDetection(t *testing.T) {
 		{"not wrapped", `0 * * * * /usr/bin/true --flag`, "", "/usr/bin/true --flag", false},
 		{"suffix is not the binary", `0 * * * * notcronitor exec abc /bin/true`, "", "notcronitor exec abc /bin/true", false},
 		{"cronitor-helper", `0 * * * * cronitor-helper exec abc /bin/true`, "", "cronitor-helper exec abc /bin/true", false},
+		{"unknown flag takes no value", `0 * * * * cronitor --bogus v exec k1 /bin/true`, "", "cronitor --bogus v exec k1 /bin/true", false},
 		{"discover subcommand", `30 * * * * cronitor discover /etc/crontab`, "", "cronitor discover /etc/crontab", false},
 		{"simple quotes kept", `0 * * * * cronitor exec abc echo "hi there"`, "abc", `echo "hi there"`, true},
 		{"quoted simple word kept", `0 * * * * cronitor exec k1 'my script.sh'`, "k1", `'my script.sh'`, true},
