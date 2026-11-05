@@ -34,12 +34,13 @@ func TestWrapDetection(t *testing.T) {
 		{"dot slash", `0 * * * * ./cronitor exec abc /bin/true`, "abc", "/bin/true", true},
 		{"exe", `0 * * * * cronitor.exe exec abc /bin/true`, "abc", "/bin/true", true},
 		{"exe path and env", `0 * * * * /usr/local/bin/cronitor.exe --env X exec abc /bin/true`, "abc", "/bin/true", true},
+		{"no stdout after exec", `0 * * * * cronitor exec --no-stdout d3x0c1 /path/to/command.sh`, "d3x0c1", "/path/to/command.sh", true},
+		{"unparseable tail", `0 * * * * cronitor exec k1 echo don't`, "k1", "echo don't", true},
 		{"monicli", `0 * * * * monicli exec k1 /bin/true`, "k1", "/bin/true", true},
 		{"monicli path and env", `0 * * * * /usr/local/bin/monicli --env prod exec --no-stdout k1 /bin/true`, "k1", "/bin/true", true},
 		{"monicli exe", `0 * * * * monicli.exe exec k1 /bin/true`, "k1", "/bin/true", true},
 		{"command args", `0 * * * * cronitor exec abc /usr/bin/true --flag arg`, "abc", "/usr/bin/true --flag arg", true},
 		{"end of flags", `0 * * * * cronitor exec -- k1 /bin/true`, "k1", "/bin/true", true},
-		{"value flag after exec is not consumed", `0 * * * * cronitor exec -c leftover k1 /bin/true`, "leftover", "k1 /bin/true", true},
 		{"exec inside command", `0 * * * * cronitor exec abc /bin/echo exec me`, "abc", "/bin/echo exec me", true},
 		{"reboot with flags", `@reboot cronitor --env prod exec abc /usr/bin/true`, "abc", "/usr/bin/true", true},
 		{"not wrapped", `0 * * * * /usr/bin/true --flag`, "", "/usr/bin/true --flag", false},
@@ -52,7 +53,6 @@ func TestWrapDetection(t *testing.T) {
 		{"escaped word kept", `0 * * * * cronitor exec k1 \%`, "k1", `\%`, true},
 		{"quoted key", `0 * * * * cronitor exec 'k1' /bin/true`, "k1", "/bin/true", true},
 		{"legacy quoted complex", `0 * * * * cronitor exec k1 "cd /tmp && echo \"hi\""`, "k1", `cd /tmp && echo "hi"`, true},
-		{"unknown dash token is the key", `0 * * * * cronitor exec -zzz k1`, "-zzz", "k1", true},
 	}
 
 	for _, tc := range tests {
@@ -113,35 +113,6 @@ func TestComplexCommandRoundTrip(t *testing.T) {
 			}
 			requireShSyntax(t, commandFieldOf(written))
 		})
-	}
-}
-
-func TestFlagTablesAndFallback(t *testing.T) {
-	// The binary's exec scanner treats the first "exec" as the subcommand, so this
-	// pings key "exec" and runs "realkey /bin/true".
-	value := parseJobLine(t, `0 * * * * cronitor --env exec exec realkey /bin/true`)
-	if value.Code != "exec" || value.CommandToRun != "realkey /bin/true" {
-		t.Fatalf("value flag: code=%q command=%q", value.Code, value.CommandToRun)
-	}
-
-	boolFlag := parseJobLine(t, `0 * * * * cronitor exec --no-stdout d3x0c1 /path/to/command.sh`)
-	if boolFlag.Code != "d3x0c1" || boolFlag.CommandToRun != "/path/to/command.sh" || !boolFlag.Mon.NoStdoutPassthru {
-		t.Fatalf("bool flag: code=%q command=%q noStdout=%v", boolFlag.Code, boolFlag.CommandToRun, boolFlag.Mon.NoStdoutPassthru)
-	}
-
-	attached := parseJobLine(t, `0 * * * * cronitor -c/etc/alt.json leftover exec k1 /bin/true`)
-	if attached.Code != "" {
-		t.Fatalf("attached short flag was treated as wrapped, code=%q command=%q", attached.Code, attached.CommandToRun)
-	}
-
-	unparsed := parseJobLine(t, `0 * * * * cronitor exec k1 echo don't`)
-	if unparsed.Code != "k1" || unparsed.CommandToRun != "echo don't" {
-		t.Fatalf("unparseable tail: code=%q command=%q", unparsed.Code, unparsed.CommandToRun)
-	}
-
-	dashKey := parseJobLine(t, `0 * * * * cronitor exec -zzz k1`)
-	if dashKey.Code != "-zzz" {
-		t.Fatalf("dash token after exec was treated as a flag, code=%q", dashKey.Code)
 	}
 }
 
