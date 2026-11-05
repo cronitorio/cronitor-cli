@@ -250,7 +250,8 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 		} else if key, rest, ok := ParseMonitorMarker(rawCommand); ok {
 			line.Code = key
 			line.CommandToRun = rest
-			line.rawTail = rawCommand[len(MonitorPrefix)+len(key):]
+			line.marker = markerPrefix(rawCommand)
+			line.rawTail = rawCommand[len(line.marker)+len(key):]
 			line.Integration = IntegrationShim
 		} else {
 			line.CommandToRun = strings.Join(command, " ")
@@ -458,6 +459,7 @@ type Line struct {
 	wrapPrefix     string // cronitor prefix through the key, from parse
 	rawCommand     string // exact command field from the file
 	rawTail        string // shim: bytes after the key, including the separator; otherwise the job text
+	marker         string // shim: CRONITOR= or MONITORIO=, as parsed
 	Integration    string `json:"-"`
 }
 

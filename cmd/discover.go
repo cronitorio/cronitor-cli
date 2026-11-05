@@ -164,7 +164,7 @@ Example where you perform a dry-run without any crontab modifications:
       > Steps line by line, creates or updates monitors
       > Checks permissions to ensure integration can be applied later
 
-On Unix, new jobs use a SHELL shim (MONITORIO=<key>). --exec-style writes cronitor exec. Windows stays exec.
+On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read). --exec-style writes cronitor exec. Windows stays exec.
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
 
@@ -959,7 +959,7 @@ func init() {
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")
 	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Do not use an interactive shell. Write updated crontab to stdout.")
-	discoverCmd.Flags().BoolVar(&execStyle, "exec-style", false, "Write new lines as cronitor exec and revert MONITORIO lines. When no MONITORIO lines remain, restore the prior SHELL.")
+	discoverCmd.Flags().BoolVar(&execStyle, "exec-style", false, "Write new lines as cronitor exec and revert CRONITOR=/MONITORIO= lines. When none remain, restore the prior SHELL.")
 	discoverCmd.Flags().StringVar(&syncFile, "file", "", "Path to YAML or JSON file containing monitor definitions for bulk import")
 
 	discoverCmd.Flags().BoolVar(&isSilent, "silent", isSilent, "")

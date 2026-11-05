@@ -30,6 +30,9 @@ func TestParseMonitorMarker(t *testing.T) {
 		{name: "key without separator", in: "MONITORIO=abc123", matched: false},
 		{name: "similar name", in: "MONITOR=k /bin/true", matched: false},
 		{name: "empty", in: "", matched: false},
+		{name: "cronitor marker", in: "CRONITOR=k1 /bin/echo hello", key: "k1", rest: "/bin/echo hello", matched: true},
+		{name: "cronitor env var is not a marker", in: "CRONITOR_API_KEY=x /bin/true", matched: false},
+		{name: "cronitor key without separator", in: "CRONITOR=abc123", matched: false},
 		// Quoted keys are not a format sync writes. The key runs to the first space.
 		{name: "quoted key is not special", in: `MONITORIO="a b" echo hi`, key: `"a`, rest: `b" echo hi`, matched: true},
 	}
@@ -185,4 +188,35 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func TestShimMarkers(t *testing.T) {
+	ct := parseContent(t, strings.Join([]string{
+		"0 1 * * * CRONITOR=k1 echo one",
+		"0 2 * * * MONITORIO=k2 echo two",
+		"0 3 * * * echo three",
+	}, "\n"))
+	ct.WriteMode = WriteModeShim
+	ct.ShimShellPath = "/etc/cronitor/cronitor-shell"
+	for _, l := range ct.Lines {
+		switch l.CommandToRun {
+		case "echo one", "echo two":
+			if l.Integration != IntegrationShim {
+				t.Fatalf("%q not parsed as a shim line", l.CommandToRun)
+			}
+			l.Code = l.Code + "x"
+		case "echo three":
+			l.Code = "k3"
+		}
+	}
+	got := ct.Write()
+	for _, want := range []string{
+		"0 1 * * * CRONITOR=k1x echo one\n",
+		"0 2 * * * MONITORIO=k2x echo two\n",
+		"0 3 * * * CRONITOR=k3 echo three\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
 }

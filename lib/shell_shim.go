@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	MonitorPrefix        = "MONITORIO="
+	MonitorPrefix        = "CRONITOR=" // written on new lines
 	RealShellEnv         = "CRONITOR_REAL_SHELL"
 	DefaultRealShell     = "/bin/sh"
 	ShimWrapperBase      = "cronitor-shell"
@@ -33,11 +33,24 @@ const (
 
 var ShimShellPathOverride string
 
+// MonitorPrefixes are the markers sync and the wrapper accept.
+var MonitorPrefixes = []string{MonitorPrefix, "MONITORIO="}
+
+func markerPrefix(command string) string {
+	for _, p := range MonitorPrefixes {
+		if strings.HasPrefix(command, p) {
+			return p
+		}
+	}
+	return ""
+}
+
 func ParseMonitorMarker(command string) (key, rest string, ok bool) {
-	if !strings.HasPrefix(command, MonitorPrefix) {
+	prefix := markerPrefix(command)
+	if prefix == "" {
 		return "", "", false
 	}
-	body := command[len(MonitorPrefix):]
+	body := command[len(prefix):]
 	if body == "" || isPOSIXSpace(body[0]) {
 		return "", "", false
 	}
@@ -74,11 +87,11 @@ func ResolveRealShell(envValue string) string {
 }
 
 func formatShimCommand(line Line, code string) string {
-	tail := shimTail(line)
-	if tail == "" {
-		return MonitorPrefix + code
+	prefix := line.marker
+	if prefix == "" {
+		prefix = MonitorPrefix
 	}
-	return MonitorPrefix + code + tail
+	return prefix + code + shimTail(line)
 }
 
 func shimTail(line Line) string {
@@ -204,7 +217,7 @@ func (c Crontab) ShimNotices() (stop bool, notices []string) {
 				continue
 			}
 			notices = append(notices, fmt.Sprintf(
-				"notice: monitor %s: --no-stdout cannot be expressed on a MONITORIO line; rewritten as exec",
+				"notice: monitor %s: --no-stdout cannot be expressed on a shim marker line; rewritten as exec",
 				line.GetCode()))
 		}
 	}
@@ -386,10 +399,10 @@ if [ "$#" -ne 2 ] || [ "$1" != "-c" ]; then
 fi
 cmd=$2
 case $cmd in
-  MONITORIO=*) ;;
+  CRONITOR=*) rest=${cmd#CRONITOR=} ;;
+  MONITORIO=*) rest=${cmd#MONITORIO=} ;;
   *) exec "$REAL_SHELL" "$@" ;;
 esac
-rest=${cmd#MONITORIO=}
 key=${rest%%[[:space:]]*}
 after=${rest#"$key"}
 case $after in

@@ -225,8 +225,8 @@ func TestSyncDefaultShimThroughCommand(t *testing.T) {
 	if strings.Contains(first, "cronitor exec") {
 		t.Fatalf("new lines used exec style:\n%s", first)
 	}
-	if !strings.Contains(first, "MONITORIO=") {
-		t.Fatalf("expected MONITORIO lines:\n%s", first)
+	if !strings.Contains(first, "CRONITOR=") {
+		t.Fatalf("expected CRONITOR= lines:\n%s", first)
 	}
 	for _, untouched := range []string{
 		"15 2 * * * echo skip-me",
@@ -281,7 +281,7 @@ func TestSyncKeepsExistingExecLineByteForByte(t *testing.T) {
 	if !strings.Contains(first, "SHELL="+shimPath) {
 		t.Fatalf("new line did not install the shim:\n%s", first)
 	}
-	if !strings.Contains(first, "MONITORIO=") {
+	if !strings.Contains(first, "CRONITOR=") {
 		t.Fatalf("new line was not shim style:\n%s", first)
 	}
 	if !strings.Contains(first, "CRONITOR_REAL_SHELL=/bin/sh\n") {
@@ -303,7 +303,7 @@ func TestSyncExecStyleRevertsShimAndRestoresShell(t *testing.T) {
 	}, "\n"))
 	runSync(t, serverURL, path)
 	shimmed := readCron(t, path)
-	if !strings.Contains(shimmed, "SHELL="+shimPath) || !strings.Contains(shimmed, "MONITORIO=") {
+	if !strings.Contains(shimmed, "SHELL="+shimPath) || !strings.Contains(shimmed, "CRONITOR=") {
 		t.Fatalf("setup sync did not shim:\n%s", shimmed)
 	}
 	if !strings.Contains(shimmed, "/opt/cronitor --env staging exec k1 /bin/echo already") {
@@ -312,8 +312,8 @@ func TestSyncExecStyleRevertsShimAndRestoresShell(t *testing.T) {
 
 	runSync(t, serverURL, path, "--exec-style")
 	reverted := readCron(t, path)
-	if strings.Contains(reverted, "MONITORIO=") {
-		t.Fatalf("exec-style left a MONITORIO line:\n%s", reverted)
+	if hasShimMarker(reverted) {
+		t.Fatalf("exec-style left a marker line:\n%s", reverted)
 	}
 	if strings.Contains(reverted, "CRONITOR_REAL_SHELL=") {
 		t.Fatalf("real-shell line kept after revert:\n%s", reverted)
@@ -342,7 +342,7 @@ func TestSyncExecStyleOnNewLines(t *testing.T) {
 	path := writeCron(t, "SHELL=/bin/bash\n0 * * * * date +\\%Y\n")
 	runSync(t, serverURL, path, "--exec-style", "--no-stdout")
 	got := readCron(t, path)
-	if strings.Contains(got, "MONITORIO=") || strings.Contains(got, "cronitor-shell") {
+	if hasShimMarker(got) || strings.Contains(got, "cronitor-shell") {
 		t.Fatalf("exec-style wrote a shim:\n%s", got)
 	}
 	if !strings.Contains(got, "SHELL=/bin/bash\n") {
@@ -379,8 +379,8 @@ func TestSyncSystemCrontabUserField(t *testing.T) {
 		t.Fatalf("user-field line double-escaped %%:\n%s", first)
 	}
 	for _, snippet := range []string{
-		"0 4 * * * root MONITORIO=",
-		"0 5 * * * root MONITORIO=",
+		"0 4 * * * root CRONITOR=",
+		"0 5 * * * root CRONITOR=",
 		`date +\%Y`,
 		"0 6 * * * root MONITORIO=k9 /bin/echo hi",
 	} {
@@ -389,7 +389,7 @@ func TestSyncSystemCrontabUserField(t *testing.T) {
 		}
 	}
 	// The username stays a single field in front of the marker.
-	if strings.Contains(first, "root root") || strings.Contains(first, "MONITORIO=root") {
+	if strings.Contains(first, "root root") || strings.Contains(first, "CRONITOR=root") {
 		t.Fatalf("user field was wrapped or duplicated:\n%s", first)
 	}
 	runSync(t, serverURL, path)
@@ -400,14 +400,14 @@ func TestSyncSystemCrontabUserField(t *testing.T) {
 
 func TestSyncFlagsOnNewLinesStayExec(t *testing.T) {
 	serverURL, shimPath := withSyncFixture(t)
-	// --env and --no-stdout are copied onto exec lines. A MONITORIO line cannot
+	// --env and --no-stdout are copied onto exec lines. A marker line cannot
 	// carry them, so new jobs stay exec style.
 	viper.Set("CRONITOR_ENV", "staging")
 	t.Cleanup(func() { viper.Set("CRONITOR_ENV", "") })
 	path := writeCron(t, "0 * * * * /bin/true\n")
 	runSync(t, serverURL, path, "--no-stdout")
 	got := readCron(t, path)
-	if strings.Contains(got, "MONITORIO=") || strings.Contains(got, shimPath) {
+	if hasShimMarker(got) || strings.Contains(got, shimPath) {
 		t.Fatalf("flagged sync wrote a shim:\n%s", got)
 	}
 	if !strings.Contains(got, "cronitor --env staging exec --no-stdout ") {
@@ -418,7 +418,7 @@ func TestSyncFlagsOnNewLinesStayExec(t *testing.T) {
 	viper.Set("CRONITOR_ENV", "")
 	runSync(t, serverURL, hostPath, "--hostname", "box")
 	hosted := readCron(t, hostPath)
-	if strings.Contains(hosted, "MONITORIO=") || strings.Contains(hosted, shimPath) {
+	if hasShimMarker(hosted) || strings.Contains(hosted, shimPath) {
 		t.Fatalf("--hostname sync wrote a shim:\n%s", hosted)
 	}
 	if !strings.Contains(hosted, "cronitor exec ") {
@@ -434,7 +434,7 @@ func TestSyncMultipleShellsStayExec(t *testing.T) {
 	if !strings.Contains(stderr, "more than one SHELL=") {
 		t.Fatalf("expected a multiple-shell notice:\n%s", stderr)
 	}
-	if strings.Contains(got, "MONITORIO=") || strings.Contains(got, shimPath) || strings.Contains(got, "CRONITOR_REAL_SHELL=") {
+	if hasShimMarker(got) || strings.Contains(got, shimPath) || strings.Contains(got, "CRONITOR_REAL_SHELL=") {
 		t.Fatalf("multiple SHELL= installed a shim:\n%s", got)
 	}
 	if !hasLine(got, "SHELL=/bin/bash") || !hasLine(got, "SHELL=/bin/zsh") {
@@ -457,7 +457,7 @@ func TestSyncDryRunDoesNotInstallWrapper(t *testing.T) {
 		// Present only if something else created it. The override path must stay absent.
 	}
 	body := readCron(t, path)
-	if strings.Contains(body, "MONITORIO=") {
+	if hasShimMarker(body) {
 		t.Fatalf("dry-run rewrote the crontab:\n%s", body)
 	}
 }
@@ -472,7 +472,7 @@ func TestSyncExecStyleQuotesCompoundShimLine(t *testing.T) {
 	}
 	command := "cd " + app + " && ./run.sh " + marker
 	original := "SHELL=/bin/sh\n0 1 * * * cronitor exec k1 " + shellquote.Join(command) + "\n"
-	path := writeCron(t, "CRONITOR_REAL_SHELL=/bin/sh\nSHELL="+shimPath+"\n0 1 * * * MONITORIO=k1 "+command+"\n")
+	path := writeCron(t, "CRONITOR_REAL_SHELL=/bin/sh\nSHELL="+shimPath+"\n0 1 * * * CRONITOR=k1 "+command+"\n")
 
 	runSync(t, serverURL, path, "--exec-style")
 	if got := readCron(t, path); got != original {
@@ -511,7 +511,7 @@ func TestSyncNoStdoutRewritesShimLines(t *testing.T) {
 	if got != want {
 		t.Fatalf("shim line was not rewritten\nwant:\n%s\ngot:\n%s", want, got)
 	}
-	if strings.Contains(got, "MONITORIO=") || strings.Contains(got, "CRONITOR_REAL_SHELL=") || strings.Contains(got, shimPath) {
+	if hasShimMarker(got) || strings.Contains(got, "CRONITOR_REAL_SHELL=") || strings.Contains(got, shimPath) {
 		t.Fatalf("shim left behind:\n%s", got)
 	}
 	if again := runSync(t, serverURL, path, "--no-stdout"); again != "" {
@@ -535,8 +535,8 @@ func TestSyncNoStdoutWithShellAfterRewritesLines(t *testing.T) {
 		t.Fatalf("expected shell and rewrite notices:\n%s", stderr)
 	}
 	got := readCron(t, path)
-	if strings.Contains(got, "MONITORIO=") {
-		t.Fatalf("MONITORIO line still ships output:\n%s", got)
+	if hasShimMarker(got) {
+		t.Fatalf("marker line still ships output:\n%s", got)
 	}
 	if !strings.Contains(got, "cronitor exec --no-stdout abc /bin/true") {
 		t.Fatalf("line was not rewritten:\n%s", got)
@@ -575,7 +575,7 @@ func TestSyncNewLinesKeepVerbatimCommand(t *testing.T) {
 	runSync(t, serverURL, path)
 	got := readCron(t, path)
 	for _, cmd := range commands {
-		if !strings.Contains(got, "MONITORIO=") || !strings.Contains(got, " "+cmd) {
+		if !strings.Contains(got, "CRONITOR=") || !strings.Contains(got, " "+cmd) {
 			t.Fatalf("new line lost verbatim bytes %q\n%s", cmd, got)
 		}
 	}
@@ -621,4 +621,8 @@ func TestInvokedExecutableKeepsSymlink(t *testing.T) {
 	if got != link {
 		t.Fatalf("LookPath symlink resolved to %q, want %q", got, link)
 	}
+}
+
+func hasShimMarker(body string) bool {
+	return strings.Contains(body, "CRONITOR=") || strings.Contains(body, "MONITORIO=")
 }

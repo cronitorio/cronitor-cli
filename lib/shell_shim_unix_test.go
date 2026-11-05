@@ -194,3 +194,27 @@ func TestWrapperExecsBinaryInPlace(t *testing.T) {
 		t.Fatalf("binary saw:\n%s\nwant (same pid as the wrapper, so no supervisor):\n%s", got, want)
 	}
 }
+
+func TestWrapperRoutesBothMarkers(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "seen")
+	bin := filepath.Join(dir, "cronitor")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s|' \"$@\" >> \"$OUT\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	wrapper, err := InstallShimWrapper(filepath.Join(dir, "cronitor-shell"), bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"CRONITOR=k1 echo a", "MONITORIO=k2 echo b", "CRONITOR_X=1 printf c >> " + out} {
+		cmd := exec.Command(wrapper, "-c", line)
+		cmd.Env = append(os.Environ(), "CRONITOR_REAL_SHELL=/bin/sh", "OUT="+out)
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s: %v\n%s", line, err, b)
+		}
+	}
+	want := "shell-shim|-c|CRONITOR=k1 echo a|shell-shim|-c|MONITORIO=k2 echo b|c"
+	if got := readFile(t, out); got != want {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+}

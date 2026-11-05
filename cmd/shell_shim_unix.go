@@ -50,5 +50,5 @@ func shellShimDashC(args []string) (string, bool) {
 }
 
 func shellShimUsage() {
-	fmt.Fprintln(os.Stderr, "shell-shim: expected: cronitor shell-shim -c 'MONITORIO=<key> <command>'")
+	fmt.Fprintln(os.Stderr, "shell-shim: expected: cronitor shell-shim -c 'CRONITOR=<key> <command>'")
 }
