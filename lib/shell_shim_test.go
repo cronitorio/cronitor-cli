@@ -220,3 +220,31 @@ func TestShimMarkers(t *testing.T) {
 		}
 	}
 }
+
+func TestShimLineKeepsDashEdit(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		code string
+		mode WriteMode
+		want string
+	}{
+		{"key kept", "k1", WriteModeShim, "0 1 * * * CRONITOR=k1 echo new"},
+		{"monitoring off", "", WriteModeShim, "0 1 * * * echo new"},
+		{"exec style", "k1", WriteModeExec, "0 1 * * * cronitor exec k1 echo new"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ct := parseContent(t, "0 1 * * * CRONITOR=k1 echo  old")
+			ct.WriteMode = tc.mode
+			ct.ShimShellPath = "/etc/cronitor/cronitor-shell"
+			for _, l := range ct.Lines {
+				if l.IsJob {
+					l.CommandToRun = "echo new"
+					l.Code = tc.code
+				}
+			}
+			if got := ct.Write(); !strings.Contains(got, tc.want+"\n") {
+				t.Fatalf("want line %q in:\n%s", tc.want, got)
+			}
+		})
+	}
+}

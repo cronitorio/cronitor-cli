@@ -95,24 +95,28 @@ func formatShimCommand(line Line, code string) string {
 }
 
 func shimTail(line Line) string {
-	if line.Integration == IntegrationShim && line.rawTail != "" {
+	if line.Integration == IntegrationShim && line.rawTail != "" && line.CommandToRun == line.parsedCommand {
 		return line.rawTail
 	}
-	cmd := line.CommandToRun
-	if raw := strings.TrimLeft(line.rawTail, " \t\v\f\r\n"); raw != "" {
-		cmd = raw
+	if cmd := shimJob(line); cmd != "" {
+		return " " + cmd
 	}
-	if cmd == "" {
-		return ""
+	return ""
+}
+
+// shimJob is the job text without a marker: the bytes from the file when
+// the command is unedited, otherwise CommandToRun (for example a dash edit).
+func shimJob(line Line) string {
+	if line.CommandToRun == line.parsedCommand {
+		if raw := strings.TrimLeft(line.rawTail, " \t\v\f\r\n"); raw != "" {
+			return raw
+		}
 	}
-	return " " + cmd
+	return line.CommandToRun
 }
 
 func shimExecCommand(line Line) string {
-	cmd := strings.TrimLeft(line.rawTail, " \t\v\f\r\n")
-	if cmd == "" {
-		cmd = line.CommandToRun
-	}
+	cmd := shimJob(line)
 	if cmd == "" {
 		return ""
 	}

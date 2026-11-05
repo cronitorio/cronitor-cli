@@ -106,7 +106,7 @@ func TestDashShimDisableReenableAndKeyChange(t *testing.T) {
 	if err := os.WriteFile(quoted, []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
-	putDashJob(t, Job{CrontabFilename: quoted, Code: "shimk", Monitored: false, Command: "/opt/my app/run.sh", Expression: "0 * * * *"})
+	putDashJob(t, Job{CrontabFilename: quoted, Code: "shimk", Monitored: false, Command: `"/opt/my app/run.sh" --flag "x y"`, Expression: "0 * * * *"})
 	if got := strings.TrimSpace(readCrontab(t, quoted)); got != `0 * * * * "/opt/my app/run.sh" --flag "x y"` {
 		t.Fatalf("disable broke a quoted path: %q", got)
 	}

@@ -555,11 +555,7 @@ func (l Line) writeUsing(c Crontab) string {
 	}
 
 	if l.Integration == IntegrationShim && code == "" {
-		cmd := strings.TrimLeft(l.rawTail, " \t\v\f\r\n")
-		if cmd == "" {
-			cmd = l.CommandToRun
-		}
-		lineParts = append(lineParts, cmd)
+		lineParts = append(lineParts, shimJob(l))
 		outputLines = append(outputLines, strings.Join(lineParts, " "))
 		return strings.Join(outputLines, "\n")
 	}
