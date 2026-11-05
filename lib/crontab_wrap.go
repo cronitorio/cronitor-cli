@@ -225,9 +225,11 @@ func flagConsumesNext(tok string, words []string, i int) bool {
 	return true
 }
 
+// isCronitorBinary matches the CLI under its current and future name.
 func isCronitorBinary(token string) bool {
 	base := strings.ToLower(path.Base(strings.ReplaceAll(token, `\`, "/")))
-	return base == "cronitor" || base == "cronitor.exe"
+	base = strings.TrimSuffix(base, ".exe")
+	return base == "cronitor" || base == "monicli"
 }
 
 // replacePrefixKey swaps the monitor key, the last field of a saved prefix.

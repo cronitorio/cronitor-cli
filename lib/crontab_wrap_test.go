@@ -34,6 +34,9 @@ func TestWrapDetection(t *testing.T) {
 		{"dot slash", `0 * * * * ./cronitor exec abc /bin/true`, "abc", "/bin/true", true},
 		{"exe", `0 * * * * cronitor.exe exec abc /bin/true`, "abc", "/bin/true", true},
 		{"exe path and env", `0 * * * * /usr/local/bin/cronitor.exe --env X exec abc /bin/true`, "abc", "/bin/true", true},
+		{"monicli", `0 * * * * monicli exec k1 /bin/true`, "k1", "/bin/true", true},
+		{"monicli path and env", `0 * * * * /usr/local/bin/monicli --env prod exec --no-stdout k1 /bin/true`, "k1", "/bin/true", true},
+		{"monicli exe", `0 * * * * monicli.exe exec k1 /bin/true`, "k1", "/bin/true", true},
 		{"command args", `0 * * * * cronitor exec abc /usr/bin/true --flag arg`, "abc", "/usr/bin/true --flag arg", true},
 		{"end of flags", `0 * * * * cronitor exec -- k1 /bin/true`, "k1", "/bin/true", true},
 		{"value flag after exec is not consumed", `0 * * * * cronitor exec -c leftover k1 /bin/true`, "leftover", "k1 /bin/true", true},
@@ -239,6 +242,10 @@ func TestSyncFlagsMergeIntoPrefix(t *testing.T) {
 		{
 			`20 * * * * /opt/cronitor   --env staging exec k5 /bin/true`,
 			`20 * * * * /opt/cronitor --env staging exec --no-stdout k5 /bin/true`,
+		},
+		{
+			`25 * * * * /usr/local/bin/monicli exec k6 /bin/true`,
+			`25 * * * * /usr/local/bin/monicli --env prod exec --no-stdout k6 /bin/true`,
 		},
 	}
 	for _, tc := range cases {
