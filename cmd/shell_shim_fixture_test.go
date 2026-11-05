@@ -17,7 +17,7 @@ import (
 )
 
 // TestShimFixtureRuns runs every marked job in the default and
-// --convert-exec outputs through the real wrapper and shell-shim, and runs
+// --format=short outputs through the real wrapper and shell-shim, and runs
 // the matching line from crontab.input with /bin/sh. Output and exit code must
 // match, and the marked run must send a run ping and a final ping. The test
 // binary is on PATH as cronitor and monicli, so original exec lines run
@@ -53,7 +53,7 @@ func TestShimFixtureRuns(t *testing.T) {
 		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	input := fixtureJobs(t, "crontab.input")
-	for _, file := range []string{"crontab.expected", "crontab.convert-exec.expected"} {
+	for _, file := range []string{"crontab.expected", "crontab.format-short.expected"} {
 		t.Run(file, func(t *testing.T) {
 			written := fixtureJobs(t, file)
 			if len(input) != len(written) || len(input) == 0 {

@@ -114,8 +114,7 @@ var existingMonitors = ExistingMonitors{}
 var processingMultipleCrontabs = false
 var userAbortedSync = false // Set to true when user presses Ctrl+D to abort sync entirely
 var syncFile string         // Path to YAML/JSON file for bulk monitor import
-var execStyle bool          // --exec-style: write cronitor exec lines
-var convertExec bool        // --convert-exec: rewrite flag-free exec lines as CRONITOR=<key>
+var syncFormat string       // --format: "", "short" or "exec"
 
 // To deprecate this feature we are hijacking this flag that will trigger removal of auto-discover lines from existing user's crontabs.
 var noAutoDiscover = true
@@ -165,7 +164,7 @@ Example where you perform a dry-run without any crontab modifications:
       > Steps line by line, creates or updates monitors
       > Checks permissions to ensure integration can be applied later
 
-On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read). --convert-exec converts flag-free cronitor exec lines. --exec-style writes cronitor exec. Windows stays exec.
+On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read). --format=short also converts cronitor exec lines without flags. --format=exec writes cronitor exec and restores SHELL. Windows stays exec.
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
 
@@ -186,10 +185,10 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 		if len(viper.GetString(varApiKey)) < 10 {
 			fatal(discoverMissingAPIKeyGuidance(), 1)
 		}
-		if execStyle && convertExec {
-			fatal("--exec-style and --convert-exec cannot be used together", 1)
+		if _, err := parseSyncFormat(syncFormat); err != nil {
+			fatal(err.Error(), 1)
 		}
-		if runtime.GOOS == "windows" && (execStyle || convertExec) {
+		if runtime.GOOS == "windows" && syncFormat != "" {
 			printWarningText("The shell shim is Unix-only. Sync keeps cronitor exec lines.", false)
 		}
 
@@ -369,17 +368,38 @@ func importMonitorsFromFile(filePath string) {
 	printSuccessText("View your dashboard: https://cronitor.io/app/dashboard", false)
 }
 
+type syncFormatMode int
+
+const (
+	formatDefault syncFormatMode = iota
+	formatShort
+	formatExec
+)
+
+func parseSyncFormat(value string) (syncFormatMode, error) {
+	switch value {
+	case "":
+		return formatDefault, nil
+	case "short":
+		return formatShort, nil
+	case "exec":
+		return formatExec, nil
+	}
+	return formatDefault, fmt.Errorf("--format must be short or exec, not %q", value)
+}
+
 func configureShellShim(crontab *lib.Crontab) error {
 	if runtime.GOOS == "windows" {
 		crontab.WriteMode = lib.WriteModeLegacy
 		return nil
 	}
-	switch {
-	case execStyle:
+	format, _ := parseSyncFormat(syncFormat)
+	switch format {
+	case formatExec:
 		crontab.WriteMode = lib.WriteModeExec
 	default:
 		crontab.WriteMode = lib.WriteModeShim
-		crontab.ConvertExec = convertExec
+		crontab.ConvertExec = format == formatShort
 	}
 	if noStdoutPassthru {
 		crontab.RewriteShimToExec = true
@@ -964,8 +984,7 @@ func init() {
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")
 	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Do not use an interactive shell. Write updated crontab to stdout.")
-	discoverCmd.Flags().BoolVar(&convertExec, "convert-exec", false, "Rewrite cronitor exec <key> <command> lines as CRONITOR=<key> <command>. Lines with flags stay as exec.")
-	discoverCmd.Flags().BoolVar(&execStyle, "exec-style", false, "Write new lines as cronitor exec and revert CRONITOR=/MONITORIO= lines. When none remain, restore the prior SHELL.")
+	discoverCmd.Flags().StringVar(&syncFormat, "format", "", "Line format on Unix. short: write every line as CRONITOR=<key> <command>, converting cronitor exec lines (lines with exec flags stay as exec). exec: write every line as cronitor exec <key> <command> and restore the prior SHELL. Default: new lines short, existing lines unchanged.")
 	discoverCmd.Flags().StringVar(&syncFile, "file", "", "Path to YAML or JSON file containing monitor definitions for bulk import")
 
 	discoverCmd.Flags().BoolVar(&isSilent, "silent", isSilent, "")

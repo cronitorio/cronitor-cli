@@ -27,13 +27,12 @@ func runSync(t *testing.T, serverURL, path string, extra ...string) string {
 	existingMonitors = ExistingMonitors{}
 	userAbortedSync = false
 	dryRun = false
-	execStyle = false
-	convertExec = false
+	syncFormat = ""
 	noStdoutPassthru = false
-	_ = discoverCmd.Flags().Set("exec-style", "false")
+	_ = discoverCmd.Flags().Set("format", "")
 	_ = discoverCmd.Flags().Set("dry-run", "false")
 	_ = discoverCmd.Flags().Set("no-stdout", "false")
-	for _, name := range []string{"exec-style", "convert-exec", "dry-run", "no-stdout"} {
+	for _, name := range []string{"format", "dry-run", "no-stdout"} {
 		if f := discoverCmd.Flags().Lookup(name); f != nil {
 			f.Changed = false
 		}
@@ -125,7 +124,7 @@ func withSyncFixture(t *testing.T) (serverURL, shimPath string) {
 	oldOverride := lib.ShimShellPathOverride
 	oldBase := lib.BaseURLOverride
 	oldAuto, oldSilent := isAutoDiscover, isSilent
-	oldExec := execStyle
+	oldFormat := syncFormat
 	oldDry := dryRun
 	oldMonitors := existingMonitors
 	oldKey := viper.GetString(varApiKey)
@@ -136,7 +135,7 @@ func withSyncFixture(t *testing.T) (serverURL, shimPath string) {
 		lib.BaseURLOverride = oldBase
 		isAutoDiscover = oldAuto
 		isSilent = oldSilent
-		execStyle = oldExec
+		syncFormat = oldFormat
 		dryRun = oldDry
 		existingMonitors = oldMonitors
 		cfgFile = oldCfg
@@ -153,7 +152,7 @@ func withSyncFixture(t *testing.T) (serverURL, shimPath string) {
 			_ = f.Value.Set("false")
 			f.Changed = false
 		}
-		_ = discoverCmd.Flags().Set("exec-style", "false")
+		_ = discoverCmd.Flags().Set("format", "")
 		_ = discoverCmd.Flags().Set("auto", "false")
 		_ = discoverCmd.Flags().Set("silent", "false")
 		if oldCfg == "" {
@@ -311,10 +310,10 @@ func TestSyncExecStyleRevertsShimAndRestoresShell(t *testing.T) {
 		t.Fatalf("setup sync rewrote the exec line:\n%s", shimmed)
 	}
 
-	runSync(t, serverURL, path, "--exec-style")
+	runSync(t, serverURL, path, "--format=exec")
 	reverted := readCron(t, path)
 	if hasShimMarker(reverted) {
-		t.Fatalf("exec-style left a marker line:\n%s", reverted)
+		t.Fatalf("--format=exec left a marker line:\n%s", reverted)
 	}
 	if strings.Contains(reverted, "CRONITOR_REAL_SHELL=") {
 		t.Fatalf("real-shell line kept after revert:\n%s", reverted)
@@ -332,19 +331,19 @@ func TestSyncExecStyleRevertsShimAndRestoresShell(t *testing.T) {
 		t.Fatalf("reverted line double-escaped a percent:\n%s", reverted)
 	}
 
-	runSync(t, serverURL, path, "--exec-style")
+	runSync(t, serverURL, path, "--format=exec")
 	if again := readCron(t, path); again != reverted {
-		t.Fatalf("exec-style not idempotent\n--- first\n%s\n--- second\n%s", reverted, again)
+		t.Fatalf("--format=exec not idempotent\n--- first\n%s\n--- second\n%s", reverted, again)
 	}
 }
 
 func TestSyncExecStyleOnNewLines(t *testing.T) {
 	serverURL, _ := withSyncFixture(t)
 	path := writeCron(t, "SHELL=/bin/bash\n0 * * * * date +\\%Y\n")
-	runSync(t, serverURL, path, "--exec-style", "--no-stdout")
+	runSync(t, serverURL, path, "--format=exec", "--no-stdout")
 	got := readCron(t, path)
 	if hasShimMarker(got) || strings.Contains(got, "cronitor-shell") {
-		t.Fatalf("exec-style wrote a shim:\n%s", got)
+		t.Fatalf("--format=exec wrote a shim:\n%s", got)
 	}
 	if !strings.Contains(got, "SHELL=/bin/bash\n") {
 		t.Fatalf("SHELL changed even though no shim was installed:\n%s", got)
@@ -358,7 +357,7 @@ func TestSyncExecStyleOnNewLines(t *testing.T) {
 	if strings.Contains(got, `+\\%`) {
 		t.Fatalf("double-escaped percent:\n%s", got)
 	}
-	runSync(t, serverURL, path, "--exec-style")
+	runSync(t, serverURL, path, "--format=exec")
 	if again := readCron(t, path); again != got {
 		t.Fatalf("not stable\n--- first\n%s\n--- second\n%s", got, again)
 	}
@@ -475,7 +474,7 @@ func TestSyncExecStyleQuotesCompoundShimLine(t *testing.T) {
 	original := "SHELL=/bin/sh\n0 1 * * * cronitor exec k1 " + shellquote.Join(command) + "\n"
 	path := writeCron(t, "CRONITOR_REAL_SHELL=/bin/sh\nSHELL="+shimPath+"\n0 1 * * * CRONITOR=k1 "+command+"\n")
 
-	runSync(t, serverURL, path, "--exec-style")
+	runSync(t, serverURL, path, "--format=exec")
 	if got := readCron(t, path); got != original {
 		t.Fatalf("revert is not the #65 line\nwant:\n%s\ngot:\n%s", original, got)
 	}
@@ -628,7 +627,7 @@ func hasShimMarker(body string) bool {
 	return strings.Contains(body, "CRONITOR=") || strings.Contains(body, "MONITORIO=")
 }
 
-func TestSyncConvertExec(t *testing.T) {
+func TestSyncFormatShort(t *testing.T) {
 	serverURL, shimPath := withSyncFixture(t)
 	path := writeCron(t, strings.Join([]string{
 		"SHELL=/bin/bash",
@@ -636,7 +635,7 @@ func TestSyncConvertExec(t *testing.T) {
 		"0 2 * * * cronitor exec --no-stdout k2 echo y",
 	}, "\n"))
 
-	runSync(t, serverURL, path, "--convert-exec")
+	runSync(t, serverURL, path, "--format=short")
 	got := readCron(t, path)
 	for _, want := range []string{
 		"CRONITOR_REAL_SHELL=/bin/bash\n",
@@ -651,5 +650,17 @@ func TestSyncConvertExec(t *testing.T) {
 	runSync(t, serverURL, path)
 	if again := readCron(t, path); again != got {
 		t.Fatalf("plain sync after convert changed the crontab\n--- first\n%s\n--- second\n%s", got, again)
+	}
+}
+
+func TestParseSyncFormat(t *testing.T) {
+	for in, want := range map[string]syncFormatMode{"": formatDefault, "short": formatShort, "exec": formatExec} {
+		got, err := parseSyncFormat(in)
+		if err != nil || got != want {
+			t.Fatalf("parseSyncFormat(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	if _, err := parseSyncFormat("env"); err == nil || !strings.Contains(err.Error(), "short") || !strings.Contains(err.Error(), "exec") {
+		t.Fatalf("bad value error = %v; want one that lists short and exec", err)
 	}
 }

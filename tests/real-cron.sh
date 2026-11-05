@@ -6,7 +6,7 @@
 #   sudo tests/real-cron.sh
 #
 # It builds cronitor with the API pointed at a local mock, syncs a fixture
-# crontab with --convert-exec, installs it, and checks three cron ticks:
+# crontab with --format=short, installs it, and checks three cron ticks:
 #   1. healthy binary: every job runs once and sends run + final pings
 #   2. binary missing: marked jobs still run, no pings
 #   3. binary truncated: marked jobs do not run (same as cronitor exec);
@@ -61,7 +61,7 @@ HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
 PY
 python3 "$work/mock.py" "$port" "$work/requests.log" &
 mock=$!
-trap 'kill $mock 2>/dev/null; crontab -r 2>/dev/null || true' EXIT
+trap 'kill $mock 2>/dev/null; crontab -r 2>/dev/null || true; rm -f /etc/cronitor/cronitor-shell' EXIT
 sleep 1
 
 # 3. Fixture crontab, then sync it with the real binary.
@@ -76,7 +76,7 @@ PATH=$work/bin:/usr/bin:/bin
 * * * * * cronitor exec --no-stdout keep01 echo kept-exec
 EOF
 echo '{"CRONITOR_API_KEY":"real-cron-test-key-0000"}' > "$work/cronitor.json"
-"$work/bin/cronitor" --config "$work/cronitor.json" sync --auto --silent --convert-exec "$work/crontab"
+"$work/bin/cronitor" --config "$work/cronitor.json" sync --auto --silent --format=short "$work/crontab"
 # A line added after sync has no marker. It must survive a broken binary.
 echo "* * * * * echo raw >> $out/raw.log" >> "$work/crontab"
 echo "--- synced crontab"

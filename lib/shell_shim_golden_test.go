@@ -13,7 +13,7 @@ import (
 var updateGolden = flag.Bool("update", false, "rewrite fixtures/shim/*.expected")
 
 // TestShimFixtureGolden writes fixtures/shim/crontab.input with every
-// monitorable job monitored, in default, --exec-style and --convert-exec mode, and compares the result to the .expected files.
+// monitorable job monitored, in default, --format=exec and --format=short mode, and compares the result to the .expected files.
 func TestShimFixtureGolden(t *testing.T) {
 	input, err := os.ReadFile(filepath.Join("..", "fixtures", "shim", "crontab.input"))
 	if err != nil {
@@ -25,8 +25,8 @@ func TestShimFixtureGolden(t *testing.T) {
 		convert bool
 	}{
 		{"crontab.expected", WriteModeShim, false},
-		{"crontab.exec-style.expected", WriteModeExec, false},
-		{"crontab.convert-exec.expected", WriteModeShim, true},
+		{"crontab.format-exec.expected", WriteModeExec, false},
+		{"crontab.format-short.expected", WriteModeShim, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := writeFixture(t, string(input), tc.mode, tc.convert)

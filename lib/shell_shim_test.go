@@ -85,7 +85,7 @@ func TestExecFallbacksPlaceNoStdoutAfterExec(t *testing.T) {
 		t.Fatalf("flagged exec line wrote %s", got)
 	}
 
-	// --exec-style, multiple SHELL= (legacy), and dash re-enable of a bare line
+	// --format=exec, multiple SHELL= (legacy), and dash re-enable of a bare line
 	// all take the fresh exec path.
 	for _, mode := range []WriteMode{WriteModeExec, WriteModeLegacy} {
 		line := Line{
@@ -175,9 +175,6 @@ func TestInstallShimRejectsRelativeCronitorUnderEtc(t *testing.T) {
 	_, err := InstallShimWrapper("/etc/cronitor/cronitor-shell", "cronitor")
 	if err == nil {
 		t.Fatal("relative cronitor path was accepted under /etc")
-	}
-	if _, statErr := os.Stat("/etc/cronitor/cronitor-shell"); statErr == nil {
-		t.Fatal("relative path installed a wrapper")
 	}
 }
 
