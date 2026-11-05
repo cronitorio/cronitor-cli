@@ -99,10 +99,17 @@ func shimTail(line Line) string {
 	if line.Integration == IntegrationShim && line.rawTail != "" && line.CommandToRun == line.parsedCommand {
 		return line.rawTail
 	}
-	if cmd := shimJob(line); cmd != "" {
-		return " " + cmd
+	parts := line.shimSettings
+	if line.Integration == IntegrationExec {
+		parts, _ = line.execSettings()
 	}
-	return ""
+	if cmd := shimJob(line); cmd != "" {
+		parts = append(append([]string{}, parts...), cmd)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " " + strings.Join(parts, " ")
 }
 
 // shimJob is the job text without a marker: the bytes from the file when
@@ -111,6 +118,9 @@ func shimTail(line Line) string {
 func shimJob(line Line) string {
 	if line.CommandToRun == line.parsedCommand {
 		raw := strings.TrimLeft(line.rawTail, " \t\v\f\r\n")
+		if line.Integration == IntegrationShim {
+			_, raw = SplitShimSettings(raw)
+		}
 		if line.Integration == IntegrationExec {
 			if words, err := shellquote.Split(raw); err == nil && len(words) == 1 && words[0] == line.CommandToRun {
 				return line.CommandToRun
@@ -121,12 +131,6 @@ func shimJob(line Line) string {
 		}
 	}
 	return line.CommandToRun
-}
-
-// execHasFlags reports whether an exec line has flags, which a marker
-// cannot carry. The saved prefix is `<binary> exec <key>` without flags.
-func (l Line) execHasFlags() bool {
-	return len(strings.Fields(l.wrapPrefix)) != 3
 }
 
 func shimExecCommand(line Line) string {
@@ -159,7 +163,7 @@ func (l Line) renderIntegration(c Crontab) string {
 		return IntegrationExec
 	case WriteModeShim:
 		if l.Integration == IntegrationExec {
-			if c.ConvertExec && !l.execHasFlags() {
+			if _, ok := l.execSettings(); ok && c.ConvertExec {
 				return IntegrationShim
 			}
 			return IntegrationExec
@@ -223,9 +227,9 @@ func (c Crontab) ShimNotices() (stop bool, notices []string) {
 	}
 	if c.ConvertExec && c.WriteMode == WriteModeShim {
 		for _, line := range c.Lines {
-			if line.Integration == IntegrationExec && line.GetCode() != "" && line.execHasFlags() {
+			if _, ok := line.execSettings(); line.Integration == IntegrationExec && line.GetCode() != "" && !ok {
 				notices = append(notices, fmt.Sprintf(
-					"notice: monitor %s: kept as cronitor exec because the line has flags", line.GetCode()))
+					"notice: monitor %s: kept as cronitor exec because the line has flags a CRONITOR= line cannot carry", line.GetCode()))
 			}
 		}
 	}

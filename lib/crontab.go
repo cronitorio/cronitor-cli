@@ -249,7 +249,12 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			}
 		} else if key, rest, ok := ParseMonitorMarker(rawCommand); ok {
 			line.Code = key
-			line.CommandToRun = rest
+			line.shimSettings, line.CommandToRun = SplitShimSettings(rest)
+			for _, s := range line.shimSettings {
+				if s == "CRONITOR_NO_STDOUT=1" {
+					line.Mon.NoStdoutPassthru = true
+				}
+			}
 			line.marker = markerPrefix(rawCommand)
 			line.rawTail = rawCommand[len(line.marker)+len(key):]
 			line.Integration = IntegrationShim
@@ -459,12 +464,13 @@ type Line struct {
 	Ignored        bool
 	Mon            Monitor
 	Crontab        Crontab
-	wrapPrefix     string // cronitor prefix through the key, from parse
-	rawCommand     string // exact command field from the file, after any run-as user
-	parsedCommand  string // CommandToRun as parsed; a different value means it was edited
-	rawTail        string // shim: bytes after the key, including the separator; otherwise the job text
-	marker         string // shim: CRONITOR= or MONITORIO=, as parsed
-	Integration    string `json:"-"`
+	wrapPrefix     string   // cronitor prefix through the key, from parse
+	rawCommand     string   // exact command field from the file, after any run-as user
+	parsedCommand  string   // CommandToRun as parsed; a different value means it was edited
+	rawTail        string   // shim: bytes after the key, including the separator; otherwise the job text
+	marker         string   // shim: CRONITOR= or MONITORIO=, as parsed
+	shimSettings   []string // shim: CRONITOR_ENV=... words after the key
+	Integration    string   `json:"-"`
 }
 
 func (l Line) IsMonitorable() bool {
@@ -571,7 +577,9 @@ func (l Line) writeUsing(c Crontab) string {
 		lineParts = append(lineParts, "cronitor")
 
 		// Root flags belong before the subcommand. --no-stdout is local to exec.
-		if env := viper.GetString("CRONITOR_ENV"); env != "" {
+		flags := settingFlags(l.shimSettings)
+		lineParts = append(lineParts, flags...)
+		if env := viper.GetString("CRONITOR_ENV"); env != "" && !containsString(flags, "--env") {
 			lineParts = append(lineParts, "--env")
 			lineParts = append(lineParts, env)
 		}

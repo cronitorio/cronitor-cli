@@ -5,9 +5,11 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/cronitorio/cronitor-cli/lib"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var shellShimCmd = &cobra.Command{
@@ -37,7 +39,9 @@ func RunShellShim(args []string) int {
 		return 127
 	}
 	monitorCode = key
-	return RunCommand(rest, true, true, shell)
+	settings, job := lib.SplitShimSettings(rest)
+	applyShimSettings(settings)
+	return RunCommand(job, true, true, shell)
 }
 
 func shellShimDashC(args []string) (string, bool) {
@@ -51,4 +55,17 @@ func shellShimDashC(args []string) (string, bool) {
 
 func shellShimUsage() {
 	fmt.Fprintln(os.Stderr, "shell-shim: expected: cronitor shell-shim -c 'CRONITOR=<key> <command>'")
+}
+
+// applyShimSettings applies CRONITOR_*=value words from a marker line, as the
+// matching exec flags would. They are not passed to the job.
+func applyShimSettings(settings []string) {
+	for _, s := range settings {
+		name, value, _ := strings.Cut(s, "=")
+		if name == "CRONITOR_NO_STDOUT" {
+			noStdoutPassthru = value == "1"
+			continue
+		}
+		viper.Set(name, value)
+	}
 }

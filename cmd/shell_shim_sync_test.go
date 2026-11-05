@@ -633,6 +633,7 @@ func TestSyncFormatShort(t *testing.T) {
 		"SHELL=/bin/bash",
 		"0 1 * * * cronitor exec k1 'cd /tmp && echo x'",
 		"0 2 * * * cronitor exec --no-stdout k2 echo y",
+		"0 3 * * * cronitor --config /etc/other.json exec k3 echo z",
 	}, "\n"))
 
 	runSync(t, serverURL, path, "--format=short")
@@ -641,7 +642,8 @@ func TestSyncFormatShort(t *testing.T) {
 		"CRONITOR_REAL_SHELL=/bin/bash\n",
 		"SHELL=" + shimPath + "\n",
 		"0 1 * * * CRONITOR=k1 cd /tmp && echo x\n",
-		"0 2 * * * cronitor exec --no-stdout k2 echo y\n",
+		"0 2 * * * CRONITOR=k2 CRONITOR_NO_STDOUT=1 echo y\n",
+		"0 3 * * * cronitor --config /etc/other.json exec k3 echo z\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)

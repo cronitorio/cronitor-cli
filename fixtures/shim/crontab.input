@@ -24,12 +24,17 @@ PATH=/usr/local/bin:/usr/bin:/bin
 0 10 * * * CRONITOR=keep1 echo cronitor-marker
 0 11 * * * MONITORIO=keep2 echo monitorio-marker
 0 12 * * * CRONITOR=keep3 cat%stdin-a%stdin-b
+0 17 * * * CRONITOR=keep10 CRONITOR_ENV=staging echo marker-with-env
 
-# --- already wrapped with exec (left as exec) ---
+# --- already wrapped with exec (left as exec; --format=short converts all
+# but the --config line, which a CRONITOR= line cannot carry) ---
 0 13 * * * cronitor exec keep4 echo exec-plain
 0 14 * * * /usr/local/bin/cronitor exec keep5 'cd /tmp && echo exec-compound'
 0 15 * * * cronitor exec --no-stdout keep6 echo exec-no-stdout
 0 16 * * * monicli exec keep7 echo monicli-exec
+0 18 * * * cronitor --env staging exec keep8 echo exec-env
+0 20 * * * cronitor -p pk12345 exec keep11 echo exec-ping-key
+0 19 * * * cronitor --config /etc/cronitor/other.json exec keep9 echo exec-config
 
 # --- comments and disabled jobs stay as written ---
 # 0 17 * * * echo commented-out

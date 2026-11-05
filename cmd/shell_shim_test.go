@@ -17,20 +17,36 @@ import (
 	"github.com/spf13/viper"
 )
 
+// actsAsExec reports a `cronitor [flags] exec ...` call, not a go test run.
+func actsAsExec(args []string) bool {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-test.") {
+			return false
+		}
+	}
+	for _, a := range args {
+		if a == "exec" {
+			return true
+		}
+	}
+	return false
+}
+
 func TestMain(m *testing.M) {
 	// The test binary also acts as the cronitor binary: as `shell-shim` for
 	// the wrapper, and as `exec` for the fixture's original exec lines.
-	if len(os.Args) > 1 && (os.Args[1] == "shell-shim" || os.Args[1] == "exec") {
+	if len(os.Args) > 1 && (os.Args[1] == "shell-shim" || actsAsExec(os.Args[1:])) {
 		if host := os.Getenv("CRONITOR_SHIM_PING_HOST"); host != "" {
 			lib.PingHostOverride = host
 		} else {
 			lib.PingHostOverride = "http://127.0.0.1:1"
 		}
-		viper.Set(varApiKey, "")
-		viper.Set(varPingApiKey, "")
 		if os.Args[1] == "shell-shim" {
+			viper.Set(varApiKey, "")
+			viper.Set(varPingApiKey, "")
 			os.Exit(RunShellShim(os.Args))
 		}
+		// exec: the caller's env has empty keys, and flags such as -p must win.
 		RootCmd.SetArgs(os.Args[1:])
 		if err := RootCmd.Execute(); err != nil {
 			os.Exit(1)

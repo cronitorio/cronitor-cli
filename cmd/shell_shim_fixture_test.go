@@ -4,11 +4,15 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -69,8 +73,12 @@ func TestShimFixtureRuns(t *testing.T) {
 				// The fixture's absolute cronitor path does not exist here.
 				original := strings.Replace(input[i], "/usr/local/bin/cronitor ", "cronitor ", 1)
 				t.Run(field, func(t *testing.T) {
+					mu.Lock()
+					pings = nil
+					mu.Unlock()
 					wantOut, wantCode := runCronField(t, "/bin/sh", original, env)
 					mu.Lock()
+					wantPings := normalizePings(pings)
 					pings = nil
 					mu.Unlock()
 					gotOut, gotCode := runCronField(t, wrapper, field, env)
@@ -82,11 +90,20 @@ func TestShimFixtureRuns(t *testing.T) {
 					defer mu.Unlock()
 					var run, final bool
 					for _, p := range pings {
-						run = run || strings.HasPrefix(p, "/"+key+"/run?")
-						final = final || strings.HasPrefix(p, "/"+key+"/complete?") || strings.HasPrefix(p, "/"+key+"/fail?")
+						state := pingState(p, key)
+						run = run || state == "run"
+						final = final || state == "complete" || state == "fail"
 					}
 					if !run || !final {
 						t.Fatalf("pings for %s: run=%v final=%v\n%s", key, run, final, strings.Join(pings, "\n"))
+					}
+					// An original cronitor exec line pings too. Both must send the same pings.
+					if got := normalizePings(pings); len(wantPings) > 0 && got != wantPings {
+						t.Fatalf("pings differ from the original exec line\n  input:   %s\n%s\n  written: %s\n%s", original, wantPings, field, got)
+					}
+					// A CRONITOR_ENV setting must reach the pings.
+					if strings.Contains(field, " CRONITOR_ENV=staging ") && !strings.Contains(normalizePings(pings), "env=staging") {
+						t.Fatalf("CRONITOR_ENV did not reach the pings:\n%s", strings.Join(pings, "\n"))
 					}
 				})
 			}
@@ -179,4 +196,37 @@ func runCronField(t *testing.T, shell, field string, env []string) (string, int)
 		t.Fatalf("%s: %v", field, err)
 	}
 	return out.String(), code
+}
+
+// normalizePings keeps the parts of each ping that must match between an
+// exec line and its CRONITOR= line: path, env, message and exit code.
+func normalizePings(pings []string) string {
+	var out []string
+	for _, p := range pings {
+		u, err := url.Parse(p)
+		if err != nil {
+			out = append(out, p)
+			continue
+		}
+		q := u.Query()
+		out = append(out, fmt.Sprintf("%s env=%s msg=%q status=%s", u.Path, q.Get("env"), q.Get("msg"), q.Get("status_code")))
+	}
+	sort.Strings(out)
+	return strings.Join(out, "\n")
+}
+
+// pingState returns the state of a ping for key, in either URL form:
+// /<key>/<state>?... or, with a ping API key, /ping/<pingkey>/<key>?state=<state>.
+func pingState(ping, key string) string {
+	u, err := url.Parse(ping)
+	if err != nil {
+		return ""
+	}
+	if state := u.Query().Get("state"); state != "" && strings.HasSuffix(u.Path, "/"+key) {
+		return state
+	}
+	if dir, state := path.Split(u.Path); strings.HasSuffix(dir, "/"+key+"/") {
+		return state
+	}
+	return ""
 }

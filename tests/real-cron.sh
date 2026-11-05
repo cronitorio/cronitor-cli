@@ -73,9 +73,12 @@ PATH=$work/bin:/usr/bin:/bin
 * * * * * echo "a  b" | tr a A >> $out/pipe.log
 * * * * * echo failing >> $out/fail.log; exit 3
 * * * * * cronitor exec conv01 'cd $out && echo converted >> conv.log'
-* * * * * cronitor exec --no-stdout keep01 echo kept-exec
+* * * * * cronitor exec --no-stdout nostd01 echo no-stdout-job
+* * * * * cronitor --env staging exec env01 echo env-job
+* * * * * cronitor --config $work/other.json exec keep01 echo kept-exec
 EOF
 echo '{"CRONITOR_API_KEY":"real-cron-test-key-0000"}' > "$work/cronitor.json"
+echo '{}' > "$work/other.json"
 "$work/bin/cronitor" --config "$work/cronitor.json" sync --auto --silent --format=short "$work/crontab"
 # A line added after sync has no marker. It must survive a broken binary.
 echo "* * * * * echo raw >> $out/raw.log" >> "$work/crontab"
@@ -83,7 +86,9 @@ echo "--- synced crontab"
 cat "$work/crontab"
 grep -q '^SHELL=.*cronitor-shell$' "$work/crontab"
 grep -q 'CRONITOR=conv01 cd ' "$work/crontab"
-grep -q 'cronitor exec --no-stdout keep01' "$work/crontab"
+grep -q 'CRONITOR=nostd01 CRONITOR_NO_STDOUT=1 echo no-stdout-job' "$work/crontab"
+grep -q 'CRONITOR=env01 CRONITOR_ENV=staging echo env-job' "$work/crontab"
+grep -q 'cronitor --config .* exec keep01' "$work/crontab"
 
 crontab "$work/crontab"
 pgrep -x cron >/dev/null || cron
@@ -114,6 +119,8 @@ for path in $(grep -o 'CRONITOR=[A-Za-z0-9]*' "$work/crontab" | cut -d= -f2); do
 done
 check "fail ping carries exit 3" "$(count $work/requests.log 'status_code=3')" 1
 check "exec line pinged" "$(count $work/requests.log '/keep01/run?')" 1
+check "env setting reached pings" "$(count $work/requests.log '/env01/run?' )-$(grep '/env01/' $work/requests.log | grep -c 'env=staging' || true)" "1-2"
+check "no-stdout keeps output out of the ping" "$(grep '/nostd01/complete?' $work/requests.log | grep -c 'msg=no-stdout-job' || true)" 0
 
 # Tick 2: binary missing. Marked jobs run without monitoring.
 mv "$work/bin/cronitor" "$work/bin/cronitor.real"

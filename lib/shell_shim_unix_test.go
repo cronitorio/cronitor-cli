@@ -285,6 +285,8 @@ func TestConvertExecLines(t *testing.T) {
 		`0 3 * * * cronitor exec k3 echo "a  b"`,
 		"0 4 * * * cronitor exec --no-stdout k4 echo y",
 		"0 5 * * * cronitor --api-key secret123 exec k5 echo z",
+		"0 7 * * * cronitor --config /etc/other.json exec k7 echo c",
+		"0 8 * * * cronitor -v exec k8 echo v",
 		"0 6 * * * CRONITOR=k6 echo already",
 	}, "\n")
 	write := func(content string) (string, []string) {
@@ -301,8 +303,10 @@ func TestConvertExecLines(t *testing.T) {
 		"0 1 * * * CRONITOR=k1 echo hi\n",
 		"0 2 * * * CRONITOR=k2 cd /tmp && echo x\n",
 		"0 3 * * * CRONITOR=k3 echo \"a  b\"\n",
-		"0 4 * * * cronitor exec --no-stdout k4 echo y\n",
-		"0 5 * * * cronitor --api-key secret123 exec k5 echo z\n",
+		"0 4 * * * CRONITOR=k4 CRONITOR_NO_STDOUT=1 echo y\n",
+		"0 5 * * * CRONITOR=k5 CRONITOR_API_KEY=secret123 echo z\n",
+		"0 7 * * * cronitor --config /etc/other.json exec k7 echo c\n",
+		"0 8 * * * cronitor -v exec k8 echo v\n",
 		"0 6 * * * CRONITOR=k6 echo already\n",
 	} {
 		if !strings.Contains(got, want) {
@@ -313,13 +317,55 @@ func TestConvertExecLines(t *testing.T) {
 		t.Fatalf("got:\n%s", got)
 	}
 	joined := strings.Join(notices, "\n")
-	if len(notices) != 2 || !strings.Contains(joined, "k4") || !strings.Contains(joined, "k5") {
-		t.Fatalf("want one notice each for k4 and k5, got:\n%s", joined)
+	if len(notices) != 2 || !strings.Contains(joined, "k7") || !strings.Contains(joined, "k8") {
+		t.Fatalf("want one notice each for k7 and k8, got:\n%s", joined)
 	}
-	if strings.Contains(joined, "secret123") || strings.Contains(joined, "--") {
+	if strings.Contains(joined, "other.json") || strings.Contains(joined, "--") {
 		t.Fatalf("notice prints flags:\n%s", joined)
 	}
 	if again, _ := write(got); again != got {
 		t.Fatalf("second convert changed the output\n--- first\n%s\n--- second\n%s", got, again)
+	}
+}
+
+func TestShimSettingsOnMarkerLines(t *testing.T) {
+	line := "0 1 * * * CRONITOR=k1 CRONITOR_ENV=staging CRONITOR_API_KEY=abc123 CRONITOR_NO_STDOUT=1 echo  hi"
+	parse := func(mode WriteMode) (*Crontab, *Line) {
+		ct := parseContent(t, line)
+		ct.WriteMode = mode
+		ct.ShimShellPath = "/etc/cronitor/cronitor-shell"
+		for _, l := range ct.Lines {
+			if l.IsJob {
+				return ct, l
+			}
+		}
+		t.Fatal("no job")
+		return nil, nil
+	}
+
+	ct, job := parse(WriteModeShim)
+	if job.CommandToRun != "echo  hi" {
+		t.Fatalf("CommandToRun = %q; settings must not reach the dashboard or the monitor key", job.CommandToRun)
+	}
+	if !job.Mon.NoStdoutPassthru {
+		t.Fatal("CRONITOR_NO_STDOUT=1 did not set NoStdoutPassthru")
+	}
+	if got := ct.Write(); !strings.Contains(got, line+"\n") {
+		t.Fatalf("unedited line changed:\n%s", got)
+	}
+
+	job.CommandToRun = "echo new"
+	if got := ct.Write(); !strings.Contains(got, "0 1 * * * CRONITOR=k1 CRONITOR_ENV=staging CRONITOR_API_KEY=abc123 CRONITOR_NO_STDOUT=1 echo new\n") {
+		t.Fatalf("dash edit lost the settings:\n%s", got)
+	}
+
+	job.Code = ""
+	if got := ct.Write(); !strings.Contains(got, "0 1 * * * echo new\n") {
+		t.Fatalf("monitoring off kept the settings:\n%s", got)
+	}
+
+	ct, _ = parse(WriteModeExec)
+	if got := ct.Write(); !strings.Contains(got, "0 1 * * * cronitor --env staging --api-key abc123 exec --no-stdout k1 echo  hi\n") {
+		t.Fatalf("--format=exec did not turn settings into flags:\n%s", got)
 	}
 }
