@@ -194,6 +194,7 @@ func (r *APIResponse) ParseError() string {
 	var errResp struct {
 		Error   string `json:"error"`
 		Message string `json:"message"`
+		Detail  string `json:"detail"`
 		Errors  []struct {
 			Message string `json:"message"`
 		} `json:"errors"`
@@ -209,6 +210,10 @@ func (r *APIResponse) ParseError() string {
 		}
 		if errResp.Message != "" {
 			return errResp.Message
+		}
+		// Django REST Framework errors: {"detail":"..."}
+		if errResp.Detail != "" {
+			return errResp.Detail
 		}
 		if len(errResp.Errors) > 0 {
 			var messages []string

@@ -526,6 +526,16 @@ func TestAPIResponse_ParseError_ErrorsArray(t *testing.T) {
 	}
 }
 
+func TestAPIResponse_ParseError_DetailField(t *testing.T) {
+	resp := &lib.APIResponse{
+		StatusCode: 403,
+		Body:       []byte(`{"detail":"This API key has no account access. Run: cronitor auth login --admin"}`),
+	}
+	if msg := resp.ParseError(); msg != "This API key has no account access. Run: cronitor auth login --admin" {
+		t.Errorf("expected the detail message, got %q", msg)
+	}
+}
+
 func TestAPIResponse_ParseError_RawFallback(t *testing.T) {
 	resp := &lib.APIResponse{
 		Body: []byte(`not json at all`),

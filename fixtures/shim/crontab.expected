@@ -15,7 +15,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
 0 3 * * * CRONITOR=new12 "$FIXTURE/my app/run.sh" --flag "x y"
 0 4 * * * CRONITOR=new13 date +\%Y > /dev/null && echo escaped-percent
 0 5 * * * CRONITOR=new14 cat%line-one%line-two
-0 6 * * * CRONITOR=new15 printf '%s\n' a b | tr a-z A-Z
+0 6 * * * CRONITOR=new15 printf '\%s\n' a b | tr a-z A-Z
 0 7 * * * CRONITOR=new16 cd /tmp && pwd; exit 3
 0 8 * * * CRONITOR=new17 FOO=bar sh -c 'echo $FOO'
 @daily CRONITOR=new18 echo at-daily
@@ -31,7 +31,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
 0 13 * * * cronitor exec keep4 echo exec-plain
 0 14 * * * /usr/local/bin/cronitor exec keep5 'cd /tmp && echo exec-compound'
 0 15 * * * cronitor exec --no-stdout keep6 echo exec-no-stdout
-0 16 * * * CRONITOR=new31 monicli exec keep7 echo monicli-exec
+0 16 * * * monicli exec keep7 echo monicli-exec
 
 # --- comments and disabled jobs stay as written ---
 # 0 17 * * * echo commented-out

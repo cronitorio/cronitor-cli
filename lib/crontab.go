@@ -235,7 +235,6 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			Crontab:        c.lightweightCopy(),
 		}
 
-		line.rawCommand = rawCommand
 		if code, unwrapped, prefix, noStdout, ok := unwrapCronitorExec(rawCommand); ok {
 			line.Code = code
 			line.CommandToRun = unwrapped
@@ -263,6 +262,9 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 				line.CommandToRun = strings.Replace(line.CommandToRun, "\\\"", "\"", -1)
 			}
 		}
+
+		line.rawCommand = rawCommand
+		line.parsedCommand = line.CommandToRun
 
 		if line.IsAutoDiscoverCommand() {
 			autoDiscoverLine = &line
@@ -457,7 +459,8 @@ type Line struct {
 	Mon            Monitor
 	Crontab        Crontab
 	wrapPrefix     string // cronitor prefix through the key, from parse
-	rawCommand     string // exact command field from the file
+	rawCommand     string // exact command field from the file, after any run-as user
+	parsedCommand  string // CommandToRun as parsed; a different value means it was edited
 	rawTail        string // shim: bytes after the key, including the separator; otherwise the job text
 	marker         string // shim: CRONITOR= or MONITORIO=, as parsed
 	Integration    string `json:"-"`
@@ -519,7 +522,7 @@ func (l Line) writeUsing(c Crontab) string {
 		} else {
 			lineParts = append(lineParts, l.FullLine)
 		}
-		outputLines = append(outputLines, strings.TrimSpace(strings.Replace(strings.Join(lineParts, " "), "  ", " ", -1)))
+		outputLines = append(outputLines, strings.TrimSpace(strings.Join(lineParts, " ")))
 		return strings.Join(outputLines, "\n")
 	}
 
@@ -542,7 +545,9 @@ func (l Line) writeUsing(c Crontab) string {
 	if l.wrapPrefix != "" && code != "" && style != IntegrationShim {
 		prefix := insertSyncFlags(replacePrefixKey(l.wrapPrefix, code), l.Mon.NoStdoutPassthru)
 		lineParts = append(lineParts, prefix)
-		if len(l.CommandToRun) > 0 {
+		if raw, ok := l.rawJob(); ok {
+			lineParts = append(lineParts, raw)
+		} else if len(l.CommandToRun) > 0 {
 			lineParts = append(lineParts, formatWrappedCommand(l.CommandToRun))
 		}
 		outputLines = append(outputLines, strings.TrimSpace(strings.Join(lineParts, " ")))
@@ -583,22 +588,39 @@ func (l Line) writeUsing(c Crontab) string {
 			if cmd := shimExecCommand(l); cmd != "" {
 				lineParts = append(lineParts, cmd)
 			}
-		} else if quoted := preservedRawCommand(l); quoted != "" {
-			lineParts = append(lineParts, quoted)
-		} else if len(l.CommandToRun) > 0 {
-			lineParts = append(lineParts, formatWrappedCommand(l.CommandToRun))
+		} else {
+			command := l.CommandToRun
+			if raw, ok := l.rawJob(); ok {
+				command = raw
+			}
+			if len(command) > 0 {
+				// Quoted as one shell word when complex, so the outer shell does not
+				// eat pipes and lists.
+				lineParts = append(lineParts, formatWrappedCommand(command))
+			}
 		}
 		outputLines = append(outputLines, strings.TrimSpace(strings.Join(lineParts, " ")))
 		return strings.Join(outputLines, "\n")
 	}
 
-	cmd := l.CommandToRun
-	if l.rawCommand != "" && l.wrapPrefix == "" && l.Integration == "" {
-		cmd = l.rawCommand
+	// A wrapped tail can be quoted for the wrap, so a line that loses its wrap
+	// uses CommandToRun. An unwrapped line keeps its bytes.
+	command := l.CommandToRun
+	if raw, ok := l.rawJob(); ok && l.wrapPrefix == "" {
+		command = raw
 	}
-	lineParts = append(lineParts, cmd)
+	lineParts = append(lineParts, command)
 	outputLines = append(outputLines, strings.TrimSpace(strings.Join(lineParts, " ")))
 	return strings.Join(outputLines, "\n")
+}
+
+// rawJob returns the command bytes from the file after any wrap prefix. ok is
+// false when the line was not parsed or CommandToRun was edited since.
+func (l Line) rawJob() (string, bool) {
+	if l.rawCommand == "" || l.CommandToRun != l.parsedCommand || !strings.HasPrefix(l.rawCommand, l.wrapPrefix) {
+		return "", false
+	}
+	return strings.TrimLeft(l.rawCommand[len(l.wrapPrefix):], " \t"), true
 }
 
 func (l Line) Key(CanonicalPath string) string {

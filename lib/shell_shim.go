@@ -122,17 +122,6 @@ func shimExecCommand(line Line) string {
 	return cmd
 }
 
-func preservedRawCommand(line Line) string {
-	raw := line.rawCommand
-	if line.wrapPrefix != "" || line.Integration != "" || raw == "" || raw == line.CommandToRun {
-		return ""
-	}
-	if commandIsComplex(raw) || !strings.ContainsAny(raw, `"'`) {
-		return ""
-	}
-	return raw
-}
-
 func IsShimShellPath(p string) bool {
 	return filepath.Base(strings.TrimSpace(p)) == ShimWrapperBase
 }

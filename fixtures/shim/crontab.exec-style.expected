@@ -9,11 +9,11 @@ PATH=/usr/local/bin:/usr/bin:/bin
 
 # --- plain commands (new lines get CRONITOR=<key>) ---
 0 1 * * * cronitor exec new10 echo plain
-0 2 * * * cronitor exec new11 'echo "two spaces" > /dev/null; echo after-redirect'
+0 2 * * * cronitor exec new11 'echo "two  spaces"   >  /dev/null; echo after-redirect'
 0 3 * * * cronitor exec new12 "$FIXTURE/my app/run.sh" --flag "x y"
 0 4 * * * cronitor exec new13 'date +\%Y > /dev/null && echo escaped-percent'
 0 5 * * * cronitor exec new14 cat%line-one%line-two
-0 6 * * * cronitor exec new15 printf '%s\n' a b | tr a-z A-Z
+0 6 * * * cronitor exec new15 'printf '\''\%s\n'\'' a b | tr a-z A-Z'
 0 7 * * * cronitor exec new16 'cd /tmp && pwd; exit 3'
 0 8 * * * cronitor exec new17 FOO=bar sh -c 'echo $FOO'
 @daily cronitor exec new18 echo at-daily
@@ -29,7 +29,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
 0 13 * * * cronitor exec keep4 echo exec-plain
 0 14 * * * /usr/local/bin/cronitor exec keep5 'cd /tmp && echo exec-compound'
 0 15 * * * cronitor exec --no-stdout keep6 echo exec-no-stdout
-0 16 * * * cronitor exec new31 monicli exec keep7 echo monicli-exec
+0 16 * * * monicli exec keep7 echo monicli-exec
 
 # --- comments and disabled jobs stay as written ---
 # 0 17 * * * echo commented-out

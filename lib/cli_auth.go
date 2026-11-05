@@ -49,30 +49,35 @@ func (t *AuthorizationToken) Discard() {
 }
 
 // MachineCredential is the frozen Cronitor CLI machine-credential document.
-// GET /current never includes Key; POST create does, once.
+// GET /current never includes Key; POST create does, once. AccountAccess is
+// the one optional addition: a server that predates it omits the field,
+// which reads as false.
 type MachineCredential struct {
-	Key          string   `json:"key,omitempty"`
-	Name         string   `json:"name"`
-	Kind         string   `json:"kind"`
-	Scopes       []string `json:"scopes"`
-	Organization string   `json:"organization"`
+	Key           string   `json:"key,omitempty"`
+	Name          string   `json:"name"`
+	Kind          string   `json:"kind"`
+	Scopes        []string `json:"scopes"`
+	Organization  string   `json:"organization"`
+	AccountAccess bool     `json:"account_access"`
 }
 
 type machineCredentialWire struct {
-	Key          string          `json:"key"`
-	Name         string          `json:"name"`
-	Kind         string          `json:"kind"`
-	Scopes       json.RawMessage `json:"scopes"`
-	Organization json.RawMessage `json:"organization"`
+	Key           string          `json:"key"`
+	Name          string          `json:"name"`
+	Kind          string          `json:"kind"`
+	Scopes        json.RawMessage `json:"scopes"`
+	Organization  json.RawMessage `json:"organization"`
+	AccountAccess bool            `json:"account_access"`
 }
 
 func (w machineCredentialWire) credential() MachineCredential {
 	return MachineCredential{
-		Key:          w.Key,
-		Name:         w.Name,
-		Kind:         w.Kind,
-		Scopes:       parseStringList(w.Scopes),
-		Organization: parseOrganization(w.Organization),
+		Key:           w.Key,
+		Name:          w.Name,
+		Kind:          w.Kind,
+		Scopes:        parseStringList(w.Scopes),
+		Organization:  parseOrganization(w.Organization),
+		AccountAccess: w.AccountAccess,
 	}
 }
 
@@ -163,12 +168,17 @@ func readResponse(resp *http.Response) ([]byte, error) {
 
 // CreateMachineCredential calls POST /api/cli/machine-credentials with the
 // WorkOS access token. The body is exactly {"hostname": ...} per the frozen
-// contract. Success is 201 and includes the key once.
-func CreateMachineCredential(apiBase, accessToken, hostname string) (*MachineCredential, error) {
+// contract; account_access is the one optional addition and is sent only
+// when accountAccess is true. Success is 201 and includes the key once.
+func CreateMachineCredential(apiBase, accessToken, hostname string, accountAccess bool) (*MachineCredential, error) {
 	if accessToken == "" {
 		return nil, fmt.Errorf("missing access token")
 	}
-	payload, err := json.Marshal(map[string]string{"hostname": hostname})
+	fields := map[string]interface{}{"hostname": hostname}
+	if accountAccess {
+		fields["account_access"] = true
+	}
+	payload, err := json.Marshal(fields)
 	if err != nil {
 		return nil, err
 	}

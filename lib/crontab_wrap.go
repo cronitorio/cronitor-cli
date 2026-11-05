@@ -14,28 +14,13 @@ func commandIsComplex(command string) bool {
 
 // formatWrappedCommand quotes a complex command as one shell word. A bare %
 // starts cron stdin and is left outside the quotes; \% is left as written.
-// A single quoted or escaped word is kept as written.
 func formatWrappedCommand(command string) string {
 	body, stdin := splitCronStdin(command)
 	body = strings.TrimSpace(body)
-	formatted := formatCommandBody(body)
-	if formatted == "" {
-		return stdin
-	}
-	return formatted + stdin
-}
-
-func formatCommandBody(body string) string {
-	if body == "" {
-		return ""
-	}
-	if words, err := shellquote.Split(body); err == nil && len(words) == 1 && body != words[0] && !commandIsComplex(words[0]) {
-		return body
-	}
 	if commandIsComplex(body) {
-		return shellquote.Join(body)
+		body = shellquote.Join(body)
 	}
-	return strings.Join(strings.Fields(body), " ")
+	return body + stdin
 }
 
 // splitCronStdin cuts at the first % cronie would treat as stdin. A backslash
@@ -201,33 +186,21 @@ func isCLIFlag(tok string) bool {
 	return strings.HasPrefix(tok, "-") && tok != "-" && tok != "--"
 }
 
+// flagConsumesNext reports whether a known value flag takes the next word.
+// The first "exec" is always the subcommand, as in the binary.
 func flagConsumesNext(tok string, words []string, i int) bool {
-	if strings.Contains(tok, "=") {
+	// --env=prod and -c/path carry their value in the same token.
+	if strings.Contains(tok, "=") || (!strings.HasPrefix(tok, "--") && len(tok) > 2) {
 		return false
 	}
-	// -c/path is one token and must not consume the next word.
-	if strings.HasPrefix(tok, "-") && !strings.HasPrefix(tok, "--") && len(tok) > 2 {
-		return false
-	}
-	name := strings.TrimLeft(tok, "-")
-	if cronitorValueFlags[name] {
-		// The exec arg scanner treats the first "exec" as the subcommand, even
-		// when it sits where a flag value would be (`--env exec exec realkey`).
-		return i+1 < len(words) && words[i+1] != "exec"
-	}
-	if i+1 >= len(words) {
-		return false
-	}
-	next := words[i+1]
-	if next == "exec" || isCLIFlag(next) || next == "--" {
-		return false
-	}
-	return true
+	return cronitorValueFlags[strings.TrimLeft(tok, "-")] && i+1 < len(words) && words[i+1] != "exec"
 }
 
+// isCronitorBinary matches the CLI under its current and future name.
 func isCronitorBinary(token string) bool {
 	base := strings.ToLower(path.Base(strings.ReplaceAll(token, `\`, "/")))
-	return base == "cronitor" || base == "cronitor.exe"
+	base = strings.TrimSuffix(base, ".exe")
+	return base == "cronitor" || base == "monicli"
 }
 
 // replacePrefixKey swaps the monitor key, the last field of a saved prefix.

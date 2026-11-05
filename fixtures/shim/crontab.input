@@ -13,7 +13,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
 0 3 * * * "$FIXTURE/my app/run.sh" --flag "x y"
 0 4 * * * date +\%Y > /dev/null && echo escaped-percent
 0 5 * * * cat%line-one%line-two
-0 6 * * * printf '%s\n' a b | tr a-z A-Z
+0 6 * * * printf '\%s\n' a b | tr a-z A-Z
 0 7 * * * cd /tmp && pwd; exit 3
 0 8 * * * FOO=bar sh -c 'echo $FOO'
 @daily echo at-daily

@@ -25,8 +25,8 @@ Examples:
   cronitor issue list --state unresolved
   cronitor issue list --severity outage --time 24h
   cronitor issue get <key>
-  cronitor issue create "Database connection issues" --severity outage
-  cronitor issue update <key> --state investigating
+  cronitor issue create --data '{"name":"Database connection issues","severity":"outage"}'
+  cronitor issue update <key> --data '{"name":"Database connection issues","state":"investigating"}'
   cronitor issue resolve <key>
   cronitor issue delete <key>
 
@@ -322,9 +322,11 @@ var issueUpdateCmd = &cobra.Command{
 	Short: "Update an issue",
 	Long: `Update an existing issue.
 
+Updates use PUT: send every required field (current values are in ` + "`cronitor issue get <key>`" + `). Fields you leave out keep their values.
+
 Examples:
-  cronitor issue update my-issue --data '{"state":"investigating"}'
-  cronitor issue update my-issue --data '{"severity":"outage"}'`,
+  cronitor issue update my-issue --data '{"name":"Database connection issues","state":"investigating"}'
+  cronitor issue update my-issue --data '{"name":"Database connection issues","severity":"outage"}'`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]

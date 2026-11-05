@@ -24,9 +24,9 @@ discord, telegram, gchat, larksuite, webhooks, and SMS (phones).
 Examples:
   cronitor notification list
   cronitor notification get default
-  cronitor notification create "DevOps Team" --emails "dev@example.com,ops@example.com"
-  cronitor notification create "Slack Alerts" --slack "#alerts"
-  cronitor notification update my-list --name "New Name"
+  cronitor notification create --data '{"name":"DevOps Team","notifications":{"emails":["dev@example.com","ops@example.com"]}}'
+  cronitor notification create --data '{"name":"Slack Alerts","notifications":{"slack":["#alerts"]}}'
+  cronitor notification update my-list --data '{"name":"New Name"}'
   cronitor notification delete old-list
 
 For full API documentation:

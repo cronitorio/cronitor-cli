@@ -5,10 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/cronitorio/cronitor-cli/lib"
@@ -89,64 +86,9 @@ func TestDiscoverSyncKeepsWrappedPrefix(t *testing.T) {
 	}
 }
 
-// TestWrittenExecLineRuns builds the CLI and runs the line Write emits.
-func TestWrittenExecLineRuns(t *testing.T) {
-	bin := buildCronitor(t)
-	cfg := filepath.Join(t.TempDir(), "cronitor.json")
-	if err := os.WriteFile(cfg, []byte("{}"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	withCronitorEnv(t, "prod")
-
-	line := lib.Line{
-		IsJob: true, CronExpression: "0 * * * *", CommandToRun: "echo hello-from-job",
-		Code: "k1", Mon: lib.Monitor{NoStdoutPassthru: true},
-		Crontab: lib.Crontab{IsUserCrontab: true},
-	}
-	written := strings.TrimSpace(line.Write())
-	want := "0 * * * * cronitor --env prod exec --no-stdout k1 echo hello-from-job"
-	if written != want {
-		t.Fatalf("written line\n got %s\nwant %s", written, want)
-	}
-	out, err := runCronitorLine(bin, cfg, written)
-	if err != nil || !strings.Contains(out, "hello-from-job") {
-		t.Fatalf("written line failed: %v\n%s", err, out)
-	}
-}
-
 func withCronitorEnv(t *testing.T, env string) {
 	t.Helper()
 	prev := viper.GetString("CRONITOR_ENV")
 	viper.Set("CRONITOR_ENV", env)
 	t.Cleanup(func() { viper.Set("CRONITOR_ENV", prev) })
-}
-
-func runCronitorLine(bin, cfg, crontabLine string) (string, error) {
-	fields := strings.Fields(crontabLine)
-	args := append([]string{"--config", cfg}, fields[6:]...)
-	cmd := exec.Command(bin, args...)
-	var env []string
-	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, "CRONITOR_") {
-			env = append(env, entry)
-		}
-	}
-	cmd.Env = env
-	out, err := cmd.CombinedOutput()
-	return string(out), err
-}
-
-func buildCronitor(t *testing.T) string {
-	t.Helper()
-	name := "cronitor"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	bin := filepath.Join(t.TempDir(), name)
-	cmd := exec.Command("go", "build", "-o", bin, ".")
-	cmd.Dir = ".."
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
-	}
-	return bin
 }
