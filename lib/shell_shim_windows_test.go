@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-func closeInheritedFDs() {}
-
 func TestWindowsWriteDoesNotEmitShim(t *testing.T) {
 	ct := parseContent(t, "15 * * * * /bin/true")
 	ct.WriteMode = WriteModeShim

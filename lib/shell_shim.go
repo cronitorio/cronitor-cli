@@ -475,65 +475,8 @@ while :; do
     *) break ;;
   esac
 done
-if [ ! -x "$CRONITOR_BIN" ]; then
-  exec "$REAL_SHELL" -c "$after"
+if [ -x "$CRONITOR_BIN" ]; then
+  exec "$CRONITOR_BIN" shell-shim -c "$cmd"
 fi
-if ( : <&3 ) 2>/dev/null || ( : >&3 ) 2>/dev/null; then
-  exec "$REAL_SHELL" -c "$after"
-fi
-exec 4<&0
-hs=$(mktemp -d "${TMPDIR:-/tmp}/cronitor-shim.XXXXXX") || exec "$REAL_SHELL" -c "$after"
-fifo=$hs/started
-if ! mkfifo "$fifo"; then
-  rm -rf "$hs"
-  exec "$REAL_SHELL" -c "$after"
-fi
-(
-  exec </dev/null >/dev/null 2>&1
-  if read byte <"$fifo"; then
-    case $byte in
-      1) printf '1\n' >"$hs/byte" ;;
-    esac
-  fi
-) &
-reader=$!
-CRONITOR_SHIM_FD=3 "$CRONITOR_BIN" shell-shim -c "$cmd" 3>"$fifo" <&4 4<&- &
-child=$!
-exec 4<&-
-(
-  exec </dev/null >/dev/null 2>&1
-  sleep 3 &
-  sp=$!
-  trap 'kill "$sp" 2>/dev/null; exit 0' TERM INT HUP
-  wait "$sp"
-  : >"$hs/timeout"
-) &
-watch=$!
-trap 'rm -rf "$hs"; kill -TERM "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' TERM
-trap 'kill -INT "$child" 2>/dev/null; i=0; while [ -z "$started" ] && [ ! -s "$hs/byte" ] && kill -0 "$child" 2>/dev/null && [ "$i" -lt 20 ]; do i=$((i+1)); sleep 0.05; done; [ -n "$started" ] || [ -s "$hs/byte" ] || kill -KILL "$child" 2>/dev/null; rm -rf "$hs"; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' INT
-trap 'rm -rf "$hs"; kill -HUP "$child" 2>/dev/null; kill "$reader" "$watch" 2>/dev/null; wait "$child"; exit $?' HUP
-while [ ! -s "$hs/byte" ] && [ ! -f "$hs/timeout" ]; do
-  kill -0 "$child" 2>/dev/null || break
-  sleep 0.05
-done
-kill "$watch" 2>/dev/null
-wait "$watch" 2>/dev/null
-if [ -s "$hs/byte" ]; then
-  kill "$reader" 2>/dev/null
-  started=1
-  wait "$reader" 2>/dev/null
-  rm -rf "$hs"
-  wait "$child"
-  exit $?
-fi
-kill -KILL "$child" 2>/dev/null
-wait "$child"
-status=$?
-wait "$reader" 2>/dev/null
-if [ -s "$hs/byte" ]; then
-  rm -rf "$hs"
-  exit "$status"
-fi
-rm -rf "$hs"
 exec "$REAL_SHELL" -c "$after"
 `

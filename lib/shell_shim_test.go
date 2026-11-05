@@ -1,7 +1,6 @@
 package lib
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,25 +8,6 @@ import (
 
 	"github.com/spf13/viper"
 )
-
-func TestMain(m *testing.M) {
-	closeInheritedFDs()
-	shimRoot, err := os.MkdirTemp("", "cronitor-shim-tests-")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	_ = os.Setenv("TMPDIR", shimRoot)
-	code := m.Run()
-	if leftovers, _ := filepath.Glob(filepath.Join(shimRoot, "cronitor-shim.*")); len(leftovers) > 0 {
-		fmt.Fprintf(os.Stderr, "leftover cronitor-shim temp dirs: %s\n", strings.Join(leftovers, " "))
-		if code == 0 {
-			code = 1
-		}
-	}
-	os.RemoveAll(shimRoot)
-	os.Exit(code)
-}
 
 func TestParseMonitorMarker(t *testing.T) {
 	tests := []struct {
@@ -232,30 +212,6 @@ func TestInstallShimKeepsSymlinkPath(t *testing.T) {
 	}
 	if strings.Contains(body, "real-cronitor") {
 		t.Fatalf("wrapper resolved the symlink:\n%s", body)
-	}
-}
-
-func TestWrapperRechecksByteAfterKill(t *testing.T) {
-	dir := t.TempDir()
-	dest, err := InstallShimWrapper(filepath.Join(dir, "cronitor-shell"), "/bin/true")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := readFile(t, dest)
-	// The INT trap also contains kill -KILL. The watchdog's kill is the one
-	// followed immediately by wait, and the byte re-check has to follow that.
-	const kill = "kill -KILL \"$child\" 2>/dev/null\nwait \"$child\""
-	killAt := strings.Index(body, kill)
-	if killAt < 0 {
-		t.Fatal("wrapper does not SIGKILL a timed-out cronitor")
-	}
-	rest := body[killAt+len(kill):]
-	fallback := strings.Index(rest, `exec "$REAL_SHELL" -c "$after"`)
-	if fallback < 0 {
-		t.Fatal("wrapper has no fallback after SIGKILL")
-	}
-	if !strings.Contains(rest[:fallback], `$hs/byte`) {
-		t.Fatalf("no byte re-check between SIGKILL and the fallback exec:\n%s", rest[:fallback])
 	}
 }
 

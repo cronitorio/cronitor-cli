@@ -637,31 +637,6 @@ func TestCrashAfterHandshakeDoesNotRunJob(t *testing.T) {
 	}
 }
 
-func TestWrapperKillsHungBinary(t *testing.T) {
-	dir := t.TempDir()
-	count := filepath.Join(dir, "count")
-	script := filepath.Join(dir, "hung")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nexec sleep 30\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	wrapper := installRealShim(t, script)
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-	defer cancel()
-	closeOnExecInherited()
-	cmd := exec.CommandContext(ctx, wrapper, "-c", "MONITORIO=k1 printf x >> "+shellQuote(count))
-	cmd.Env = shimEnv()
-	start := time.Now()
-	if err := cmd.Run(); err != nil {
-		t.Fatal(err)
-	}
-	if ctx.Err() != nil || time.Since(start) > 6*time.Second {
-		t.Fatal("hung cronitor was not killed at the watchdog")
-	}
-	if got := readTestFile(t, count); got != "x" {
-		t.Fatalf("hung binary fallback ran job as %q", got)
-	}
-}
-
 func TestMarkedLineGetsCronStdin(t *testing.T) {
 	// Cron splits at % and feeds the rest as stdin. The wrapper must not
 	// point the backgrounded cronitor at /dev/null (dash does that before

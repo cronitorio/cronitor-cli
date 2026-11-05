@@ -9,147 +9,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
-
-// closeInheritedFDs keeps a leaked fd 3 from looking like cron's own fd.
-// os/exec does not close fds >= 3, so the wrapper would skip monitoring.
-func closeInheritedFDs() {
-	f, err := os.Open("/proc/self/fd")
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	names, _ := f.Readdirnames(-1)
-	self := int(f.Fd())
-	for _, name := range names {
-		fd, err := strconv.Atoi(name)
-		if err != nil || fd < 3 || fd == self {
-			continue
-		}
-		syscall.CloseOnExec(fd)
-	}
-}
-
-func TestOpenFd3SkipsCronitor(t *testing.T) {
-	dir := t.TempDir()
-	log := filepath.Join(dir, "invoked")
-	bin := filepath.Join(dir, "cronitor")
-	stub := "#!/bin/sh\nprintf RAN >> \"$LOG\"\nexit 42\n"
-	if err := os.WriteFile(bin, []byte(stub), 0755); err != nil {
-		t.Fatal(err)
-	}
-	wrapper, err := InstallShimWrapper(filepath.Join(dir, "cronitor-shell"), bin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fdPath := filepath.Join(dir, "fd3")
-	f, err := os.Create(fdPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	cmd := exec.Command(wrapper, "-c", "MONITORIO=k1 printf JOB >&3")
-	cmd.Env = append(os.Environ(), "CRONITOR_REAL_SHELL=/bin/sh", "LOG="+log)
-	cmd.ExtraFiles = []*os.File{f}
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("exit=%v\n%s", err, out)
-	}
-	if got := readFile(t, fdPath); got != "JOB" {
-		t.Fatalf("fd 3 = %q, want the caller's file", got)
-	}
-	if _, err := os.Stat(log); !os.IsNotExist(err) {
-		t.Fatalf("open fd 3 still ran cronitor: %s", readFile(t, log))
-	}
-}
-
-func TestWrapperSignalRemovesTempDir(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "hung")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nexec sleep 30\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	wrapper, err := InstallShimWrapper(filepath.Join(dir, "cronitor-shell"), script)
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := os.Getenv("TMPDIR")
-	if root == "" {
-		root = os.TempDir()
-	}
-	cmd := exec.Command(wrapper, "-c", "MONITORIO=k1 printf x")
-	cmd.Env = append(os.Environ(), "CRONITOR_REAL_SHELL=/bin/sh", "TMPDIR="+root)
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(200 * time.Millisecond)
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		cmd.Process.Kill()
-		t.Fatal("SIGTERM did not stop the wrapper")
-	}
-	if leftovers, _ := filepath.Glob(filepath.Join(root, "cronitor-shim.*")); len(leftovers) > 0 {
-		t.Fatalf("signal left %s", leftovers)
-	}
-}
-
-func TestWrapperIntHungBinaryStopsWithoutRunningJob(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "hung")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nexec sleep 30\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	wrapper, err := InstallShimWrapper(filepath.Join(dir, "cronitor-shell"), script)
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := os.Getenv("TMPDIR")
-	marker := filepath.Join(dir, "job-ran")
-	cmd := exec.Command(wrapper, "-c", "MONITORIO=k1 touch "+marker)
-	cmd.Env = append(os.Environ(), "CRONITOR_REAL_SHELL=/bin/sh", "TMPDIR="+root)
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(200 * time.Millisecond)
-	start := time.Now()
-	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	var waitErr error
-	select {
-	case waitErr = <-done:
-	case <-time.After(3 * time.Second):
-		cmd.Process.Kill()
-		t.Fatal("SIGINT did not stop the wrapper")
-	}
-	elapsed := time.Since(start)
-	if elapsed < 700*time.Millisecond {
-		t.Fatalf("SIGINT killed the hung binary immediately (%s)", elapsed)
-	}
-	if elapsed > 2500*time.Millisecond {
-		t.Fatalf("SIGINT left the wrapper blocked for %s", elapsed)
-	}
-	exit, ok := waitErr.(*exec.ExitError)
-	if !ok || exit.ExitCode() != 137 {
-		t.Fatalf("exit=%v, want 137", waitErr)
-	}
-	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatal("hung binary still ran the job")
-	}
-	if leftovers, _ := filepath.Glob(filepath.Join(root, "cronitor-shim.*")); len(leftovers) > 0 {
-		t.Fatalf("SIGINT left %s", leftovers)
-	}
-}
 
 func TestShimCommandBytesSurviveWrite(t *testing.T) {
 	line := `15 * * * * MONITORIO=k1 echo "hello  world" && date +%Y`
@@ -247,7 +109,7 @@ func TestWrapperRoutesAndFallsBack(t *testing.T) {
 	}
 }
 
-func TestWrapperTruncatedBinaryRunsJobOnce(t *testing.T) {
+func TestBrokenBinaryDoesNotAffectUnmarkedLines(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "cronitor")
 	if err := os.WriteFile(bin, []byte("not an executable"), 0755); err != nil {
@@ -258,23 +120,13 @@ func TestWrapperTruncatedBinaryRunsJobOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	count := filepath.Join(dir, "count")
-	marked := exec.Command(wrapper, "-c", "MONITORIO=k1 printf x >> "+count)
-	marked.Env = append(os.Environ(), "CRONITOR_REAL_SHELL=/bin/sh")
-	start := time.Now()
-	if err := marked.Run(); err != nil {
-		t.Fatal(err)
-	}
-	if time.Since(start) > 1500*time.Millisecond {
-		t.Fatalf("broken binary waited %s; the poll must stop when the child has exited", time.Since(start))
-	}
 	plain := exec.Command(wrapper, "-c", "printf y >> "+count)
 	plain.Env = append(os.Environ(), "CRONITOR_REAL_SHELL=/bin/sh")
 	if err := plain.Run(); err != nil {
 		t.Fatal(err)
 	}
-	got := readFile(t, count)
-	if got != "xy" {
-		t.Fatalf("jobs ran as %q, want one each of x and y", got)
+	if got := readFile(t, count); got != "y" {
+		t.Fatalf("unmarked job ran as %q, want y", got)
 	}
 }
 
@@ -282,7 +134,7 @@ func TestWrapperExecsHealthyBinaryOnce(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "invoked")
 	bin := filepath.Join(dir, "cronitor")
-	stub := "#!/bin/sh\nprintf x >> \"$LOG\"\nprintf '1\\n' >&3\nexit 42\n"
+	stub := "#!/bin/sh\nprintf x >> \"$LOG\"\nexit 42\n"
 	if err := os.WriteFile(bin, []byte(stub), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -317,5 +169,28 @@ func TestWrapperExecsHealthyBinaryOnce(t *testing.T) {
 	}
 	if got := readFile(t, log); got != "y" {
 		t.Fatalf("unmarked log=%q", got)
+	}
+}
+
+func TestWrapperExecsBinaryInPlace(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "seen")
+	bin := filepath.Join(dir, "cronitor")
+	stub := "#!/bin/sh\nprintf '%s\\n' \"$$\" \"$@\" > \"$OUT\"\n"
+	if err := os.WriteFile(bin, []byte(stub), 0755); err != nil {
+		t.Fatal(err)
+	}
+	wrapper, err := InstallShimWrapper(filepath.Join(dir, "cronitor-shell"), bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(wrapper, "-c", "MONITORIO=k1 echo hi")
+	cmd.Env = append(os.Environ(), "CRONITOR_REAL_SHELL=/bin/sh", "OUT="+out)
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	want := strconv.Itoa(cmd.Process.Pid) + "\nshell-shim\n-c\nMONITORIO=k1 echo hi\n"
+	if got := readFile(t, out); got != want {
+		t.Fatalf("binary saw:\n%s\nwant (same pid as the wrapper, so no supervisor):\n%s", got, want)
 	}
 }
