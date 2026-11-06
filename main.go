@@ -4,7 +4,6 @@ import (
 	"os"
 
 	"github.com/cronitorio/cronitor-cli/cmd"
-	"github.com/cronitorio/cronitor-cli/internal/dashboard"
 )
 
 func main() {
@@ -38,7 +37,8 @@ func main() {
 	cmd.Execute()
 }
 
-// registerCommands adds commands that live outside the cmd package.
+// registerCommands adds commands that only the cronitor binary has.
+// crontab-dashboard is built from cmd/crontab-dashboard.
 func registerCommands() {
-	dashboard.Register(cmd.RootCmd)
+	cmd.RegisterDashLauncher()
 }
