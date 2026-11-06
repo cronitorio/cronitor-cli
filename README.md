@@ -81,7 +81,7 @@ SHELL=/etc/cronitor/shell-wrapper
 0 1 * * * CRONITOR=abc123 /usr/local/bin/backup.sh
 ```
 
-- `shell-wrapper` is a small script. For a line that starts with `CRONITOR=<key>`, it runs the job through `cronitor`. Every other line runs in the shell named by `CRONITOR_SHELL` (your previous `SHELL`), as before. The job runs in that shell too.
+- A `CRONITOR=<key> <command>` line runs exactly like `cronitor exec <key> <command>`. `shell-wrapper` is a small script that cron starts every line with. For a line that starts with `CRONITOR=<key>`, it runs `cronitor exec`. Every other line runs in the shell named by `CRONITOR_SHELL` (your previous `SHELL`), as before.
 - Sync installs the script in `/etc/cronitor/` as root, or in `~/.cronitor/` otherwise.
 - If the `cronitor` binary is missing, marked jobs still run, without monitoring.
 - `MONITORIO=<key>` works the same as `CRONITOR=<key>`.
@@ -90,7 +90,6 @@ SHELL=/etc/cronitor/shell-wrapper
   ```
   0 1 * * * CRONITOR=abc123 CRONITOR_ENV=staging CRONITOR_NO_STDOUT=1 /usr/local/bin/backup.sh
   ```
-- A `CRONITOR=<key>` line runs in the crontab's shell, the same as cron. `cronitor exec` uses bash when the crontab's shell is `/bin/sh`. When `--format=short` would move jobs from bash to `/bin/sh`, sync prints a warning that lists them, and a command that `/bin/sh` cannot parse stays `cronitor exec`. To keep bash, set `CRONITOR_SHELL=/bin/bash` in the crontab.
 - A `CRONITOR=<key>` line works only in a crontab that sync has changed. To add monitoring by hand to any other crontab, script or task, use `cronitor exec <key> <cmd>`.
 - To go back, run `cronitor sync --format=exec`.
 - Windows scheduled tasks always use `cronitor exec`.

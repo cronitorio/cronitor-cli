@@ -4,7 +4,7 @@ import "strings"
 
 // Settings a marker line can carry after CRONITOR=<key>, for example
 // `CRONITOR=abc CRONITOR_ENV=staging ./job.sh`. Each one stands for an exec
-// flag. cronitor shell-shim applies them and removes them from the job.
+// flag. shell-wrapper passes them to cronitor exec as those flags.
 var shimSettingNames = map[string]bool{
 	"CRONITOR_NO_STDOUT":    true,
 	"CRONITOR_ENV":          true,
@@ -136,32 +136,4 @@ func containsString(list []string, want string) bool {
 		}
 	}
 	return false
-}
-
-// ShellChange describes a --format=short conversion that moves exec jobs to
-// another shell: cronitor exec ran them in From, and a CRONITOR= line runs
-// them in To, the crontab's shell. Parses reports whether To accepts a
-// command's syntax; a command it rejects stays exec.
-type ShellChange struct {
-	From, To string
-	Parses   func(command string) bool
-	parsed   map[string]bool
-}
-
-// accepts reports whether the line's command can move to the new shell. A nil
-// ShellChange means the shell does not change.
-func (s *ShellChange) accepts(l Line) bool {
-	if s == nil || s.Parses == nil {
-		return true
-	}
-	body, _ := splitCronStdin(shimJob(l))
-	command := strings.ReplaceAll(body, `\%`, "%") // what the shell receives from cron
-	if ok, seen := s.parsed[command]; seen {
-		return ok
-	}
-	if s.parsed == nil {
-		s.parsed = map[string]bool{}
-	}
-	s.parsed[command] = s.Parses(command)
-	return s.parsed[command]
 }
