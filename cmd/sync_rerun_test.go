@@ -423,3 +423,80 @@ func TestSyncSkipForGoodWritesIgnoreMarker(t *testing.T) {
 		t.Fatalf("asked %v; the second sync must not ask about an ignored job", *asked)
 	}
 }
+
+func TestSyncUpdatesNameCommentFromCronitor(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	api, apiURL := newRerunAPI(t, backupMonitor)
+	path := writeCron(t, "# Name: Old name\n0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n")
+
+	runSync(t, apiURL, path)
+
+	if len(api.sent()) != 0 {
+		t.Fatalf("sent %v; the name in Cronitor wins, nothing is sent", api.sent())
+	}
+	if want := "# Name: Nightly backup\n0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n"; readCron(t, path) != want {
+		t.Fatalf("crontab:\n%s\nwant:\n%s", readCron(t, path), want)
+	}
+}
+
+func TestSyncDoesNotAddNameComment(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	_, apiURL := newRerunAPI(t, backupMonitor)
+	body := "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n"
+	path := writeCron(t, body)
+
+	runSync(t, apiURL, path)
+
+	if got := readCron(t, path); got != body {
+		t.Fatalf("crontab changed:\n%s", got)
+	}
+}
+
+func TestSyncDryRunSendsNothing(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	resetDryRun(t)
+	api, apiURL := newRerunAPI(t, backupMonitor)
+	body := "30 3 * * * cronitor exec abc123 /usr/bin/backup.sh\n0 5 * * * /usr/bin/new-job.sh\n"
+	path := writeCron(t, body)
+
+	runSync(t, apiURL, path, "--dry-run")
+
+	if len(api.sent()) != 0 {
+		t.Fatalf("dry run sent %v", api.sent())
+	}
+	if got := readCron(t, path); got != body {
+		t.Fatalf("dry run wrote the crontab:\n%s", got)
+	}
+}
+
+func TestSyncDryRunInteractiveAsksNoFinalQuestion(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	resetWithMonitored(t)
+	resetDryRun(t)
+	api, apiURL := newRerunAPI(t, backupMonitor)
+	answerPrompts(t, keepName)
+	questions := answerConfirm(t, true)
+	path := writeCron(t, "0 5 * * * /usr/bin/new-job.sh\n")
+
+	out := runSyncStdout(t, apiURL, path, "--dry-run")
+
+	if len(*questions) != 0 || len(api.sent()) != 0 {
+		t.Fatalf("asked %v, sent %v; a dry run only shows the summary", *questions, api.sent())
+	}
+	if !strings.Contains(out, "1 new") {
+		t.Fatalf("summary missing:\n%s", out)
+	}
+}
+
+func resetDryRun(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		dryRun = false
+		_ = discoverCmd.Flags().Set("dry-run", "false")
+		discoverCmd.Flags().Lookup("dry-run").Changed = false
+	})
+}

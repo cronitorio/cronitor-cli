@@ -159,8 +159,8 @@ Example excluding secrets or common text from monitor names:
 
 Example where you perform a dry-run without any crontab modifications:
   $ cronitor sync /path/to/crontab --dry-run
-      > Steps line by line, creates or updates monitors
-      > Checks permissions to ensure integration can be applied later
+      > Asks about new jobs and shows what would change
+      > Sends nothing to Cronitor and does not write the crontab
 
 On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read). --format=short also converts cronitor exec lines; --no-stdout, --env, --api-key, --ping-api-key and --hostname become CRONITOR_* settings on the line. --format=exec writes cronitor exec and restores SHELL. Windows stays exec.
 	`,
@@ -500,12 +500,15 @@ var confirm = func(question string, defaultYes bool) bool {
 
 // planCounts counts the planned actions of one crontab.
 type planCounts struct {
-	new, updated, unchanged, skipped, ignored, missing int
+	new, updated, unchanged, skipped, ignored, missing, comments int
 }
 
 func (p *crontabPlan) counts() planCounts {
 	var c planCounts
 	for _, l := range p.lines {
+		if l.commentUpdated {
+			c.comments++
+		}
 		switch l.action {
 		case actionNew:
 			c.new++
@@ -544,8 +547,9 @@ func (p *crontabPlan) summary() string {
 	add(c.skipped, "skipped")
 	add(c.ignored, "ignored")
 	add(c.missing, "missing in Cronitor")
+	add(c.comments, "# Name: comments updated")
 	line := strings.Join(parts, " · ")
-	if p.rewrites && c.new == 0 && c.ignored == 0 {
+	if p.rewrites && c.new == 0 && c.ignored == 0 && c.comments == 0 {
 		if line != "" {
 			line += " · "
 		}
@@ -584,11 +588,13 @@ func finishSync(plans []*crontabPlan) int {
 			fmt.Println("    " + p.summary())
 		}
 		fmt.Println()
-		question := "Apply these changes?"
-		if dryRun {
-			question = "Send these changes to Cronitor? This is a dry run: the crontab is not written."
-		}
-		if !confirm(question, true) {
+	}
+	if dryRun {
+		printWarningText("Dry run: nothing was sent to Cronitor or written to the crontab", false)
+		return len(todo)
+	}
+	if interactive {
+		if !confirm("Apply these changes?", true) {
 			printWarningText("Nothing was changed", false)
 			return 0
 		}
@@ -620,6 +626,9 @@ type plannedLine struct {
 	key     string // hash key of the line, see Line.Key
 	action  syncAction
 	payload *lib.Monitor // what to send for actionNew and actionUpdate
+	// commentUpdated is set when the "# Name:" comment was changed to the
+	// monitor's name in Cronitor.
+	commentUpdated bool
 }
 
 // crontabPlan holds every decision for one crontab. planCrontab fills it
@@ -783,7 +792,16 @@ func planCrontab(crontab *lib.Crontab) *crontabPlan {
 
 		if monitored {
 			applyNoStdout(line)
-			plan.lines = append(plan.lines, planUpdate(line, key, existing, found, currentName, name))
+			// The name in Cronitor wins. Keep an existing "# Name:" comment
+			// in step with it; do not add one.
+			commentUpdated := false
+			if found && existing.Name != "" && line.Name != "" && line.Name != existing.Name {
+				line.Name = existing.Name
+				commentUpdated = true
+			}
+			planned := planUpdate(line, key, existing, found, currentName, name)
+			planned.commentUpdated = commentUpdated && line.Name == existing.Name
+			plan.lines = append(plan.lines, planned)
 			continue
 		}
 
@@ -1241,7 +1259,7 @@ func init() {
 	RootCmd.AddCommand(discoverCmd)
 
 	discoverCmd.Flags().BoolVar(&saveCrontabFile, "save", saveCrontabFile, "Save the updated crontab file")
-	discoverCmd.Flags().BoolVar(&dryRun, "dry-run", dryRun, "Import crontab into Cronitor without applying necessary integration")
+	discoverCmd.Flags().BoolVar(&dryRun, "dry-run", dryRun, "Show what sync would change. Sends nothing to Cronitor and does not write the crontab.")
 	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from auto-generated monitor name e.g. $ cronitor sync -e '> /dev/null' -e '/path/to/app'")
 	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
