@@ -570,3 +570,28 @@ func TestSyncOneSudoHintForUnwritableCrontabs(t *testing.T) {
 		t.Fatalf("stderr = %q; want one hint that counts the 2 jobs", stderr)
 	}
 }
+
+// A rerun without --auto is how most people pick up a schedule change. It
+// must send the change without asking about the monitored job.
+func TestSyncInteractiveRerunSendsScheduleChange(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	resetWithMonitored(t)
+	api, apiURL := newRerunAPI(t, backupMonitor)
+	asked := answerPrompts(t, keepName)
+	questions := answerConfirm(t, true)
+	path := writeCron(t, "30 3 * * * cronitor exec abc123 /usr/bin/backup.sh\n")
+
+	out := runSyncStdout(t, apiURL, path)
+
+	if len(*asked) != 0 || len(*questions) != 1 {
+		t.Fatalf("asked %v, questions %v; want no job prompt and one Apply question", *asked, *questions)
+	}
+	puts := api.sent()
+	if len(puts) != 1 || !reflect.DeepEqual(puts[0][0]["schedules"], []interface{}{"30 3 * * *"}) {
+		t.Fatalf("sent %v; want the new schedule", puts)
+	}
+	if !strings.Contains(out, "1 updated") {
+		t.Fatalf("summary:\n%s", out)
+	}
+}
