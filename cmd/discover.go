@@ -32,6 +32,7 @@ func getJobLabel() string {
 }
 
 type ExistingMonitors struct {
+	Loaded      bool // Monitors is the full list from Cronitor
 	Monitors    []lib.Monitor
 	Names       []string
 	CurrentKey  string
@@ -69,12 +70,18 @@ func (em ExistingMonitors) HasMonitorByName(name string) bool {
 }
 
 func (em ExistingMonitors) Get(key string, code string) lib.Monitor {
+	m, _ := em.Find(key, code)
+	return m
+}
+
+// Find returns the monitor for a line and whether it exists.
+func (em ExistingMonitors) Find(key string, code string) (lib.Monitor, bool) {
 	for _, value := range em.Monitors {
 		if monitorMatches(value, key, code) {
-			return value
+			return value, true
 		}
 	}
-	return lib.Monitor{}
+	return lib.Monitor{}, false
 }
 
 func (em ExistingMonitors) GetNameForCurrent() (string, error) {
@@ -195,7 +202,9 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 		printSuccessText(fmt.Sprintf("Scanning for %ss...", getJobLabel()), false)
 
 		// Fetch list of existing monitor names for easy unique name validation and prompt prefill later on
-		existingMonitors.Monitors, _ = getCronitorApi().GetMonitors()
+		monitors, err := getCronitorApi().GetMonitors()
+		existingMonitors.Monitors = monitors
+		existingMonitors.Loaded = err == nil
 
 		if runtime.GOOS == "windows" {
 			if processWindowsTaskScheduler() {
@@ -465,14 +474,18 @@ func processCrontab(crontab *lib.Crontab) bool {
 type syncAction int
 
 const (
-	actionSend syncAction = iota // send line.Mon to Cronitor
-	actionSkip                   // the user skipped the line
+	actionNew       syncAction = iota // create a monitor: send line.Mon
+	actionUpdate                      // send only the changed fields of a monitor
+	actionUnchanged                   // the monitor is up to date: send nothing
+	actionMissing                     // the line has a key but Cronitor has no monitor for it
+	actionSkip                        // the user skipped the line
 )
 
 type plannedLine struct {
-	line   *lib.Line
-	key    string // hash key of the line, see Line.Key
-	action syncAction
+	line    *lib.Line
+	key     string // hash key of the line, see Line.Key
+	action  syncAction
+	payload *lib.Monitor // what to send for actionNew and actionUpdate
 }
 
 // crontabPlan holds every decision for one crontab. planCrontab fills it
@@ -582,24 +595,30 @@ func planCrontab(crontab *lib.Crontab) *crontabPlan {
 
 		defaultName := createDefaultName(line, crontab, effectiveHostname(), excludeFromName, allNameCandidates)
 		key := line.Key(crontab.CanonicalName())
-		name := defaultName
 
-		// Priority order for name selection:
-		// 1. Use Line.Name if it exists (from "# Name: <name>" comment)
-		// 2. Use existing monitor name if available
-		// 3. Use default generated name or prompt user
-		if line.Name != "" {
-			name = line.Name
-		} else {
-			existingMonitors.CurrentKey = key
-			existingMonitors.CurrentCode = line.Code
-			if existingName, err := existingMonitors.GetNameForCurrent(); err == nil {
-				name = existingName
-			}
+		monitored := line.Code != ""
+		existing, found := existingMonitors.Find(key, line.Code)
+		if monitored && !found && existingMonitors.Loaded {
+			applyNoStdout(line)
+			syncWarning(fmt.Sprintf("Line %d of %s: monitor %s no longer exists in Cronitor. Sync does not create it again.",
+				line.LineNumber, crontab.DisplayName(), line.Code))
+			plan.lines = append(plan.lines, plannedLine{line: line, key: key, action: actionMissing})
+			continue
+		}
+
+		// The name to show: the monitor's name in Cronitor, then the
+		// "# Name:" comment, then a generated name.
+		currentName := line.Name
+		if found && existing.Name != "" {
+			currentName = existing.Name
+		}
+		name := currentName
+		if name == "" {
+			name = defaultName
 		}
 
 		if !isAutoDiscover && !line.IsAutoDiscoverCommand() {
-			answer := askAboutJob(line, name, line.Code != "")
+			answer := askAboutJob(line, name, monitored)
 			if answer.choice == choiceQuit {
 				userAbortedSync = true
 				plan.aborted = true
@@ -614,44 +633,96 @@ func planCrontab(crontab *lib.Crontab) *crontabPlan {
 
 		existingMonitors.AddName(name)
 
-		// Only clear the name if it was the auto-generated default name
-		// Preserve Line.Name (from "# Name:" comments) and existing monitor names
-		if name == defaultName && line.Name == "" {
-			name = ""
+		if monitored {
+			applyNoStdout(line)
+			plan.lines = append(plan.lines, planUpdate(line, key, existing, found, currentName, name))
+			continue
 		}
 
-		var notifications []string
-		if notificationList != "" {
-			notifications = []string{notificationList}
-		} else {
-			notifications = []string{"default"}
+		// Only clear the name if it was the auto-generated default name
+		// Preserve Line.Name (from "# Name:" comments)
+		if name == defaultName && line.Name == "" {
+			name = ""
 		}
 
 		line.Mon = lib.Monitor{
 			Name:             name,
 			DefaultName:      defaultName,
-			Key:              line.Code,
+			Key:              key,
 			Tags:             createTags(),
 			Schedules:        &[]string{line.CronExpression},
 			Type:             "job",
 			Platform:         lib.CRON,
-			Code:             line.Code,
 			Timezone:         timezone.Name,
 			Note:             createNote(line, crontab),
-			Notify:           notifications,
+			Notify:           notifyList(),
 			NoStdoutPassthru: noStdoutPassthru,
 		}
-
-		// If we're enabling monitoring for the first time, we won't have a code yet, use the key instead
-		if line.Code == "" {
-			line.Mon.Key = key
-		}
-
-		plan.lines = append(plan.lines, plannedLine{line: line, key: key, action: actionSend})
+		plan.lines = append(plan.lines, plannedLine{line: line, key: key, action: actionNew, payload: &line.Mon})
 	}
 
 	printLn()
 	return plan
+}
+
+// planUpdate compares a monitored line with its monitor and returns only the
+// fields that changed. Tags, alert lists and notes set in Cronitor are kept.
+// When the monitor list could not be loaded (found is false), the schedule is
+// sent because sync cannot compare it.
+func planUpdate(line *lib.Line, key string, existing lib.Monitor, found bool, currentName, name string) plannedLine {
+	payload := lib.Monitor{Key: line.Code, Type: "job"}
+	changed := false
+
+	if !found || !sameSchedule(existing.Schedules, line.CronExpression) {
+		payload.Schedules = &[]string{line.CronExpression}
+		payload.Timezone = timezone.Name
+		changed = true
+	}
+	if name != "" && name != currentName {
+		payload.Name = name
+		line.Name = name
+		changed = true
+	}
+	if notify := notifyList(); notify != nil {
+		payload.Notify = notify
+		changed = true
+	}
+
+	if !changed {
+		return plannedLine{line: line, key: key, action: actionUnchanged}
+	}
+	return plannedLine{line: line, key: key, action: actionUpdate, payload: &payload}
+}
+
+// applyNoStdout marks a monitored line for --no-stdout. A flag already on
+// the line is kept.
+func applyNoStdout(line *lib.Line) {
+	if noStdoutPassthru {
+		line.Mon.NoStdoutPassthru = true
+	}
+}
+
+func sameSchedule(schedules *[]string, expression string) bool {
+	return schedules != nil && len(*schedules) == 1 && (*schedules)[0] == expression
+}
+
+// notifyList is the alert list to send, or nil to leave it to Cronitor: the
+// default list for a new monitor, the current list for an existing one.
+func notifyList() []string {
+	if notificationList == "" {
+		return nil
+	}
+	return []string{notificationList}
+}
+
+// syncWarning prints a warning. Without the interactive UI it goes to stderr,
+// so --auto output on stdout stays a clean crontab.
+func syncWarning(message string) {
+	if isAutoDiscover || isSilent {
+		fmt.Fprintln(os.Stderr, message)
+		return
+	}
+	printWarningText(message, true)
 }
 
 // applyPlan sends the planned monitors to Cronitor and writes the crontab.
@@ -659,30 +730,26 @@ func applyPlan(plan *crontabPlan) bool {
 	crontab := plan.crontab
 	monitors := map[string]*lib.Monitor{}
 	for _, p := range plan.lines {
-		if p.action == actionSend {
-			monitors[p.key] = &p.line.Mon
+		if p.payload != nil {
+			monitors[p.key] = p.payload
 		}
 	}
 
 	if len(monitors) > 0 {
 		printDoneText("Sending to Cronitor", true)
-	}
-
-	var err error
-	monitors, err = getCronitorApi().PutMonitors(monitors)
-	if err != nil {
-		fatal(err.Error(), 1)
-	}
-
-	// Update the line objects with the returned monitor codes
-	for _, line := range crontab.Lines {
-		if !line.IsMonitorable() {
-			continue
+		sent, err := getCronitorApi().PutMonitors(monitors)
+		if err != nil {
+			fatal(err.Error(), 1)
 		}
-
-		key := line.Key(crontab.CanonicalName())
-		if updatedMonitor, exists := monitors[key]; exists {
-			line.ApplyDiscoveredMonitor(*updatedMonitor)
+		// New monitors get their code from the response. Existing lines keep
+		// the key they have: it may be a hand-written key, not the code.
+		for _, p := range plan.lines {
+			if p.action != actionNew {
+				continue
+			}
+			if updated, ok := sent[p.key]; ok {
+				p.line.ApplyDiscoveredMonitor(*updated)
+			}
 		}
 	}
 
@@ -703,7 +770,8 @@ func applyPlan(plan *crontabPlan) bool {
 		fmt.Println(strings.TrimSpace(updatedCrontabLines))
 	}
 
-	if !dryRun && len(monitors) > 0 {
+	changed := updatedCrontabLines != crontab.Original()
+	if !dryRun && changed {
 		if err := crontab.Save(updatedCrontabLines); err == nil {
 			if !isSilent {
 				printDoneText("Integration complete", true)
@@ -716,7 +784,7 @@ func applyPlan(plan *crontabPlan) bool {
 		}
 	}
 
-	return len(monitors) > 0
+	return len(monitors) > 0 || changed
 }
 
 func createNote(line *lib.Line, crontab *lib.Crontab) string {

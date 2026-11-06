@@ -514,7 +514,9 @@ func TestSyncNoStdoutRewritesShimLines(t *testing.T) {
 	if hasShimMarker(got) || strings.Contains(got, "CRONITOR_SHELL=") || strings.Contains(got, shimPath) {
 		t.Fatalf("shim left behind:\n%s", got)
 	}
-	if again := runSync(t, serverURL, path, "--no-stdout"); again != "" {
+	// The fake API lists no monitors, so a "no longer exists" warning is
+	// expected. Only the rewrite notice must not come back.
+	if again := runSync(t, serverURL, path, "--no-stdout"); strings.Contains(again, "--no-stdout") {
 		t.Fatalf("second --no-stdout still noticed:\n%s", again)
 	}
 	if second := readCron(t, path); second != got {
