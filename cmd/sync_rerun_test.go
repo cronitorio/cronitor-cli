@@ -399,3 +399,27 @@ func TestSyncNothingToChangeAsksNothing(t *testing.T) {
 		t.Fatalf("sent %v, output:\n%s", api.sent(), out)
 	}
 }
+
+func TestSyncSkipForGoodWritesIgnoreMarker(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	resetWithMonitored(t)
+	api, apiURL := newRerunAPI(t, backupMonitor)
+	asked := answerPrompts(t, func(int, string) promptResult { return promptResult{choice: choiceIgnore} })
+	answerConfirm(t, true)
+	path := writeCron(t, "0 5 * * * /usr/bin/noisy.sh\n")
+
+	out := runSyncStdout(t, apiURL, path)
+
+	if want := "# cronitor: ignore\n0 5 * * * /usr/bin/noisy.sh\n"; readCron(t, path) != want {
+		t.Fatalf("crontab:\n%s\nwant:\n%s", readCron(t, path), want)
+	}
+	if len(api.sent()) != 0 || !strings.Contains(out, "1 ignored") {
+		t.Fatalf("sent %v, output:\n%s", api.sent(), out)
+	}
+
+	runSyncArgs(t, apiURL, path)
+	if len(*asked) != 1 {
+		t.Fatalf("asked %v; the second sync must not ask about an ignored job", *asked)
+	}
+}

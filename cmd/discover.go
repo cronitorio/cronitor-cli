@@ -500,7 +500,7 @@ var confirm = func(question string, defaultYes bool) bool {
 
 // planCounts counts the planned actions of one crontab.
 type planCounts struct {
-	new, updated, unchanged, skipped, missing int
+	new, updated, unchanged, skipped, ignored, missing int
 }
 
 func (p *crontabPlan) counts() planCounts {
@@ -515,6 +515,8 @@ func (p *crontabPlan) counts() planCounts {
 			c.unchanged++
 		case actionSkip:
 			c.skipped++
+		case actionIgnore:
+			c.ignored++
 		case actionMissing:
 			c.missing++
 		}
@@ -525,7 +527,7 @@ func (p *crontabPlan) counts() planCounts {
 // hasChanges reports whether applying the plan sends or writes anything.
 func (p *crontabPlan) hasChanges() bool {
 	c := p.counts()
-	return c.new > 0 || c.updated > 0 || p.rewrites
+	return c.new > 0 || c.updated > 0 || c.ignored > 0 || p.rewrites
 }
 
 func (p *crontabPlan) summary() string {
@@ -540,9 +542,10 @@ func (p *crontabPlan) summary() string {
 	add(c.updated, "updated")
 	add(c.unchanged, "unchanged")
 	add(c.skipped, "skipped")
+	add(c.ignored, "ignored")
 	add(c.missing, "missing in Cronitor")
 	line := strings.Join(parts, " · ")
-	if p.rewrites && c.new == 0 {
+	if p.rewrites && c.new == 0 && c.ignored == 0 {
 		if line != "" {
 			line += " · "
 		}
@@ -609,6 +612,7 @@ const (
 	actionUnchanged                   // the monitor is up to date: send nothing
 	actionMissing                     // the line has a key but Cronitor has no monitor for it
 	actionSkip                        // the user skipped the line
+	actionIgnore                      // the user skipped the line for good
 )
 
 type plannedLine struct {
@@ -621,7 +625,7 @@ type plannedLine struct {
 // crontabPlan holds every decision for one crontab. planCrontab fills it
 // without calling the API or writing anything; applyPlan carries it out.
 type crontabPlan struct {
-	crontab *lib.Crontab
+	crontab  *lib.Crontab
 	lines    []plannedLine
 	aborted  bool // the user quit
 	rewrites bool // the crontab text changes even if no monitor does
@@ -632,6 +636,7 @@ type promptChoice int
 const (
 	choiceMonitor promptChoice = iota
 	choiceSkip
+	choiceIgnore // skip and write "# cronitor: ignore" so sync never asks again
 	choiceQuit
 )
 
@@ -654,6 +659,10 @@ var askAboutJob = func(line *lib.Line, name string, monitored bool) promptResult
 	if finalModel.exited {
 		printWarningText("Exiting", true)
 		return promptResult{choice: choiceQuit}
+	}
+	if finalModel.ignore {
+		printWarningText("Skipped. Sync will not ask about this job again.", true)
+		return promptResult{choice: choiceIgnore}
 	}
 	if !finalModel.done {
 		printWarningText("Skipped", true)
@@ -757,6 +766,11 @@ func planCrontab(crontab *lib.Crontab) *crontabPlan {
 				userAbortedSync = true
 				plan.aborted = true
 				break
+			}
+			if answer.choice == choiceIgnore {
+				line.Ignored = true
+				plan.lines = append(plan.lines, plannedLine{line: line, key: key, action: actionIgnore})
+				continue
 			}
 			if answer.choice == choiceSkip {
 				plan.lines = append(plan.lines, plannedLine{line: line, key: key, action: actionSkip})
@@ -1094,6 +1108,7 @@ type nameInputModel struct {
 	err         error
 	done        bool
 	exited      bool   // True if user pressed Ctrl+D to exit entirely
+	ignore      bool   // True if the user chose to skip the job for good
 	state       string // "choosing" or "naming"
 	width       int    // Add width field to store terminal width
 }
@@ -1103,7 +1118,8 @@ func initialNameInputModel(defaultName string) nameInputModel {
 	items := []list.Item{
 		item{title: UseDefaultName, desc: defaultName},
 		item{title: EnterCustomName, desc: "Add a friendly, unique name for this job"},
-		item{title: SkipJob, desc: fmt.Sprintf("Do not monitor this %s", getJobLabel())},
+		item{title: SkipJob, desc: fmt.Sprintf("Do not monitor this %s. Sync asks again next time.", getJobLabel())},
+		item{title: IgnoreJob, desc: "Adds # cronitor: ignore above the line. Delete that comment to undo."},
 	}
 
 	// Setup list with height of 3 to show all items
@@ -1170,6 +1186,9 @@ func (m nameInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case SkipJob:
 					m.done = false
 					return m, tea.Quit
+				case IgnoreJob:
+					m.ignore = true
+					return m, tea.Quit
 				}
 			} else if m.state == "naming" {
 				if err := validateName(m.textInput.Value()); err != nil {
@@ -1215,6 +1234,7 @@ const (
 	UseDefaultName  = "Monitor this job - Use this name:"
 	EnterCustomName = "Monitor this job - Change the name"
 	SkipJob         = "Skip this job"
+	IgnoreJob       = "Skip this job, don't ask again"
 )
 
 func init() {
