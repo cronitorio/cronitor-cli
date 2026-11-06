@@ -164,7 +164,7 @@ Example where you perform a dry-run without any crontab modifications:
       > Steps line by line, creates or updates monitors
       > Checks permissions to ensure integration can be applied later
 
-On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read). --format=short also converts cronitor exec lines without flags. --format=exec writes cronitor exec and restores SHELL. Windows stays exec.
+On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read). --format=short also converts cronitor exec lines; --no-stdout, --env, --api-key, --ping-api-key and --hostname become CRONITOR_* settings on the line. --format=exec writes cronitor exec and restores SHELL. Windows stays exec.
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
 
@@ -1013,7 +1013,7 @@ func init() {
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")
 	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Do not use an interactive shell. Write updated crontab to stdout.")
-	discoverCmd.Flags().StringVar(&syncFormat, "format", "", "Line format on Unix. short: write every line as CRONITOR=<key> <command>, converting cronitor exec lines (lines with exec flags stay as exec). exec: write every line as cronitor exec <key> <command> and restore the prior SHELL. Default: new lines short, existing lines unchanged.")
+	discoverCmd.Flags().StringVar(&syncFormat, "format", "", "Line format on Unix. short: write every line as CRONITOR=<key> <command>, converting cronitor exec lines (lines with other exec flags stay as exec). exec: write every line as cronitor exec <key> <command> and restore the prior SHELL. Default: new lines short, existing lines unchanged.")
 	discoverCmd.Flags().StringVar(&syncFile, "file", "", "Path to YAML or JSON file containing monitor definitions for bulk import")
 
 	discoverCmd.Flags().BoolVar(&isSilent, "silent", isSilent, "")
