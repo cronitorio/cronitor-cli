@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -214,47 +215,45 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 			if processWindowsTaskScheduler() {
 				importedCrontabs++
 			}
-		} else if len(args) > 0 {
-			// A supplied argument can be a specific file or a directory
-			if isPathToDirectory(args[0]) {
-				processingMultipleCrontabs = true
-				processDirectory(username, args[0])
-			} else {
-				if processCrontab(lib.CrontabFactory(username, args[0])) {
-					importedCrontabs++
-				}
-			}
 		} else {
-			// Without a supplied argument look at user crontabs, the system crontab and the system drop-in directory
-			processingMultipleCrontabs = true
-
-			// Process crontabs for all configured users
-			users := parseUsers()
-			if len(users) == 0 {
-				// Default to current user if no users configured
-				users = []string{username}
-			}
-
-			for _, user := range users {
-				if userAbortedSync {
-					break
+			var plans []*crontabPlan
+			if len(args) > 0 {
+				// A supplied argument can be a specific file or a directory
+				if isPathToDirectory(args[0]) {
+					processingMultipleCrontabs = true
+					collectDirectory(&plans, username, args[0])
+				} else {
+					collectCrontab(&plans, lib.CrontabFactory(username, args[0]))
 				}
-				if processCrontab(lib.CrontabFactory(user, fmt.Sprintf("user:%s", user))) {
-					importedCrontabs++
-				}
-			}
+			} else {
+				// Without a supplied argument look at user crontabs, the system crontab and the system drop-in directory
+				processingMultipleCrontabs = true
 
-			if !userAbortedSync {
-				if systemCrontab := lib.CrontabFactory(username, lib.SYSTEM_CRONTAB); systemCrontab.Exists() {
-					if processCrontab(systemCrontab) {
-						importedCrontabs++
+				// Process crontabs for all configured users
+				users := parseUsers()
+				if len(users) == 0 {
+					// Default to current user if no users configured
+					users = []string{username}
+				}
+
+				for _, user := range users {
+					if userAbortedSync {
+						break
+					}
+					collectCrontab(&plans, lib.CrontabFactory(user, fmt.Sprintf("user:%s", user)))
+				}
+
+				if !userAbortedSync {
+					if systemCrontab := lib.CrontabFactory(username, lib.SYSTEM_CRONTAB); systemCrontab.Exists() {
+						collectCrontab(&plans, systemCrontab)
 					}
 				}
-			}
 
-			if !userAbortedSync {
-				processDirectory(username, lib.DROP_IN_DIRECTORY)
+				if !userAbortedSync {
+					collectDirectory(&plans, username, lib.DROP_IN_DIRECTORY)
+				}
 			}
+			importedCrontabs += finishSync(plans)
 		}
 
 		if userAbortedSync {
@@ -276,29 +275,22 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 	},
 }
 
-func processDirectory(username, directory string) {
-	// Look for crontab files in the system drop-in directory but only prompt to import them
-	// if the directory is writable for this user.
+// collectDirectory plans every crontab in a directory, if this user can
+// write to it.
+func collectDirectory(plans *[]*crontabPlan, username, directory string) {
 	files := lib.EnumerateFiles(directory)
-	if len(files) > 0 {
-		testCrontab := lib.CrontabFactory(username, files[0])
-		if !testCrontab.IsWritable() {
-			printWarningText(fmt.Sprintf("Directory %s is not writable. Re-run command with sudo. Skipping", directory), false)
-			return
+	if len(files) == 0 {
+		return
+	}
+	if !lib.CrontabFactory(username, files[0]).IsWritable() {
+		printWarningText(fmt.Sprintf("Directory %s is not writable. Re-run command with sudo. Skipping", directory), false)
+		return
+	}
+	for _, crontabFile := range files {
+		if userAbortedSync {
+			break
 		}
-
-		for _, crontabFile := range files {
-			if userAbortedSync {
-				break
-			}
-			if importedCrontabs > 0 {
-				printLn()
-			}
-
-			if processCrontab(lib.CrontabFactory(username, crontabFile)) {
-				importedCrontabs++
-			}
-		}
+		collectCrontab(plans, lib.CrontabFactory(username, crontabFile))
 	}
 }
 
@@ -390,7 +382,10 @@ func parseSyncFormat(value string) (syncFormatMode, error) {
 	return formatDefault, fmt.Errorf("--format must be short or exec, not %q", value)
 }
 
-func configureShellShim(crontab *lib.Crontab) error {
+// configureShellShim picks how the crontab is written. While planning, it
+// prints the shim notices and installs nothing, so sync can see in advance
+// whether the text changes. When applying, it installs the shim if needed.
+func configureShellShim(crontab *lib.Crontab, planning bool) error {
 	if runtime.GOOS == "windows" {
 		crontab.WriteMode = lib.WriteModeLegacy
 		return nil
@@ -408,7 +403,9 @@ func configureShellShim(crontab *lib.Crontab) error {
 	}
 	stop, notices := crontab.ShimNotices()
 	for _, notice := range notices {
-		fmt.Fprintln(os.Stderr, notice)
+		if planning {
+			fmt.Fprintln(os.Stderr, notice)
+		}
 	}
 	if stop {
 		crontab.WriteMode = lib.WriteModeLegacy
@@ -425,7 +422,7 @@ func configureShellShim(crontab *lib.Crontab) error {
 	}
 	path := lib.ResolveShimInstallPath()
 	crontab.ShimShellPath = path
-	if dryRun {
+	if dryRun || planning {
 		return nil
 	}
 	if _, err := lib.InstallShimWrapper(path, cronitorExecutable()); err != nil {
@@ -465,13 +462,142 @@ func invokedExecutable(arg0 string, lookPath func(string) (string, error), getwd
 	return arg0
 }
 
+// processCrontab plans one crontab and finishes the sync for it.
 func processCrontab(crontab *lib.Crontab) bool {
 	defer printLn()
 	plan := planCrontab(crontab)
-	if plan == nil || plan.aborted {
+	if plan == nil {
 		return false
 	}
-	return applyPlan(plan)
+	return finishSync([]*crontabPlan{plan}) > 0
+}
+
+// collectCrontab plans a crontab and keeps the plan for finishSync.
+func collectCrontab(plans *[]*crontabPlan, crontab *lib.Crontab) {
+	if plan := planCrontab(crontab); plan != nil {
+		*plans = append(*plans, plan)
+	}
+}
+
+// confirm asks a yes or no question on the terminal. Tests replace it.
+var confirm = func(question string, defaultYes bool) bool {
+	hint := "[y/N]"
+	if defaultYes {
+		hint = "[Y/n]"
+	}
+	fmt.Printf("%s %s ", question, hint)
+	answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && answer == "" {
+		fmt.Println()
+		return false
+	}
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	if answer == "" {
+		return defaultYes
+	}
+	return answer == "y" || answer == "yes"
+}
+
+// planCounts counts the planned actions of one crontab.
+type planCounts struct {
+	new, updated, unchanged, skipped, missing int
+}
+
+func (p *crontabPlan) counts() planCounts {
+	var c planCounts
+	for _, l := range p.lines {
+		switch l.action {
+		case actionNew:
+			c.new++
+		case actionUpdate:
+			c.updated++
+		case actionUnchanged:
+			c.unchanged++
+		case actionSkip:
+			c.skipped++
+		case actionMissing:
+			c.missing++
+		}
+	}
+	return c
+}
+
+// hasChanges reports whether applying the plan sends or writes anything.
+func (p *crontabPlan) hasChanges() bool {
+	c := p.counts()
+	return c.new > 0 || c.updated > 0 || p.rewrites
+}
+
+func (p *crontabPlan) summary() string {
+	c := p.counts()
+	var parts []string
+	add := func(n int, label string) {
+		if n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, label))
+		}
+	}
+	add(c.new, "new")
+	add(c.updated, "updated")
+	add(c.unchanged, "unchanged")
+	add(c.skipped, "skipped")
+	add(c.missing, "missing in Cronitor")
+	line := strings.Join(parts, " · ")
+	if p.rewrites && c.new == 0 {
+		if line != "" {
+			line += " · "
+		}
+		line += "crontab lines rewritten"
+	}
+	return line
+}
+
+// finishSync shows one summary for all planned crontabs, asks once, then
+// applies the plans. It returns the number of crontabs that changed.
+func finishSync(plans []*crontabPlan) int {
+	var todo []*crontabPlan
+	for _, p := range plans {
+		if !p.aborted && p.hasChanges() {
+			todo = append(todo, p)
+		}
+	}
+	if userAbortedSync {
+		return 0
+	}
+	interactive := !isAutoDiscover && !isSilent
+	if len(todo) == 0 {
+		if interactive {
+			printDoneText("Nothing to change", false)
+		}
+		return 0
+	}
+
+	if interactive {
+		fmt.Println()
+		for _, p := range plans {
+			if p.aborted {
+				continue
+			}
+			fmt.Println("  " + p.crontab.DisplayName())
+			fmt.Println("    " + p.summary())
+		}
+		fmt.Println()
+		question := "Apply these changes?"
+		if dryRun {
+			question = "Send these changes to Cronitor? This is a dry run: the crontab is not written."
+		}
+		if !confirm(question, true) {
+			printWarningText("Nothing was changed", false)
+			return 0
+		}
+	}
+
+	changed := 0
+	for _, p := range todo {
+		if applyPlan(p) {
+			changed++
+		}
+	}
+	return changed
 }
 
 // syncAction is what sync does with one crontab line.
@@ -496,8 +622,9 @@ type plannedLine struct {
 // without calling the API or writing anything; applyPlan carries it out.
 type crontabPlan struct {
 	crontab *lib.Crontab
-	lines   []plannedLine
-	aborted bool // the user quit
+	lines    []plannedLine
+	aborted  bool // the user quit
+	rewrites bool // the crontab text changes even if no monitor does
 }
 
 type promptChoice int
@@ -668,6 +795,11 @@ func planCrontab(crontab *lib.Crontab) *crontabPlan {
 		plan.lines = append(plan.lines, plannedLine{line: line, key: key, action: actionNew, payload: &line.Mon})
 	}
 
+	preview := *crontab
+	if configureShellShim(&preview, true) == nil {
+		plan.rewrites = preview.Write() != crontab.Original()
+	}
+
 	printLn()
 	return plan
 }
@@ -760,7 +892,7 @@ func applyPlan(plan *crontabPlan) bool {
 		}
 	}
 
-	if err := configureShellShim(crontab); err != nil {
+	if err := configureShellShim(crontab, false); err != nil {
 		if !isSilent {
 			printErrorText(err.Error(), true)
 		} else {

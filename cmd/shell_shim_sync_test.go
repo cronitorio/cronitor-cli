@@ -25,6 +25,9 @@ func runSync(t *testing.T, serverURL, path string, extra ...string) string {
 	return runSyncArgs(t, serverURL, path, append([]string{"--auto", "--silent"}, extra...)...)
 }
 
+// lastSyncStdout is what the last runSyncArgs printed on stdout.
+var lastSyncStdout string
+
 // runSyncArgs is runSync without --auto --silent, for the interactive path.
 func runSyncArgs(t *testing.T, serverURL, path string, extra ...string) string {
 	t.Helper()
@@ -77,6 +80,7 @@ func runSyncArgs(t *testing.T, serverURL, path string, extra ...string) string {
 	os.Stderr, os.Stdout = oldStderr, oldStdout
 	errText, _ := io.ReadAll(stderrR)
 	outText, _ := io.ReadAll(stdoutR)
+	lastSyncStdout = string(outText)
 	stderrR.Close()
 	stdoutR.Close()
 	if execErr != nil {

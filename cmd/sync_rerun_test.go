@@ -267,6 +267,7 @@ func TestSyncAsksOnlyAboutNewJobs(t *testing.T) {
 	resetWithMonitored(t)
 	_, apiURL := newRerunAPI(t, backupMonitor)
 	asked := answerPrompts(t, keepName)
+	answerConfirm(t, true)
 	path := writeCron(t, "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n0 5 * * * /usr/bin/new-job.sh\n")
 
 	runSyncArgs(t, apiURL, path)
@@ -284,6 +285,7 @@ func TestSyncWithMonitoredShowsMonitorNameAndRenames(t *testing.T) {
 	asked := answerPrompts(t, func(_ int, _ string) promptResult {
 		return promptResult{choice: choiceMonitor, name: "Prune old events"}
 	})
+	answerConfirm(t, true)
 	path := writeCron(t, "0 1 * * * CRONITOR=prune-events /usr/bin/prune\n")
 
 	runSyncArgs(t, apiURL, path, "--with-monitored")
@@ -313,5 +315,87 @@ func TestSyncWithMonitoredIgnoredByAuto(t *testing.T) {
 
 	if len(*asked) != 0 || len(api.sent()) != 0 {
 		t.Fatalf("asked %v, sent %v; --auto must ignore --with-monitored", *asked, api.sent())
+	}
+}
+
+// answerConfirm replaces the final "Apply?" prompt and records each question.
+func answerConfirm(t *testing.T, yes bool) *[]string {
+	t.Helper()
+	old := confirm
+	t.Cleanup(func() { confirm = old })
+	var asked []string
+	confirm = func(question string, defaultYes bool) bool {
+		asked = append(asked, question)
+		return yes
+	}
+	return &asked
+}
+
+func runSyncStdout(t *testing.T, serverURL, path string, extra ...string) string {
+	t.Helper()
+	runSyncArgs(t, serverURL, path, extra...)
+	return lastSyncStdout
+}
+
+func TestSyncSummaryThenOnePrompt(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	resetWithMonitored(t)
+	api, apiURL := newRerunAPI(t, backupMonitor)
+	answerPrompts(t, keepName)
+	questions := answerConfirm(t, true)
+	path := writeCron(t, "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n0 5 * * * /usr/bin/new-job.sh\n0 6 * * * /usr/bin/other.sh\n")
+
+	out := runSyncStdout(t, apiURL, path)
+
+	if len(*questions) != 1 {
+		t.Fatalf("asked %v; want one final question", *questions)
+	}
+	if !strings.Contains(out, "2 new · 1 unchanged") {
+		t.Fatalf("summary missing from output:\n%s", out)
+	}
+	if len(api.sent()) != 1 || len(api.sent()[0]) != 2 {
+		t.Fatalf("sent %v; want both new monitors in one request", api.sent())
+	}
+}
+
+func TestSyncAnswerNoChangesNothing(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	resetWithMonitored(t)
+	api, apiURL := newRerunAPI(t, backupMonitor)
+	answerPrompts(t, keepName)
+	answerConfirm(t, false)
+	body := "0 5 * * * /usr/bin/new-job.sh\n"
+	path := writeCron(t, body)
+
+	runSyncStdout(t, apiURL, path)
+
+	if len(api.sent()) != 0 {
+		t.Fatalf("sent %v after answering no", api.sent())
+	}
+	if got := readCron(t, path); got != body {
+		t.Fatalf("crontab written after answering no:\n%s", got)
+	}
+}
+
+func TestSyncNothingToChangeAsksNothing(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	resetWithMonitored(t)
+	api, apiURL := newRerunAPI(t, backupMonitor)
+	asked := answerPrompts(t, keepName)
+	questions := answerConfirm(t, true)
+	path := writeCron(t, "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n")
+
+	out := runSyncStdout(t, apiURL, path)
+
+	if len(*asked)+len(*questions) != 0 {
+		t.Fatalf("asked %v and %v; want no questions", *asked, *questions)
+	}
+	// "Nothing to change" goes through the color package, which writes to
+	// the real stdout. Check that no summary was printed instead.
+	if len(api.sent()) != 0 || strings.Contains(out, "unchanged") {
+		t.Fatalf("sent %v, output:\n%s", api.sent(), out)
 	}
 }
