@@ -111,6 +111,7 @@ var processingMultipleCrontabs = false
 var userAbortedSync = false // Set to true when user presses Ctrl+D to abort sync entirely
 var syncFile string         // Path to YAML/JSON file for bulk monitor import
 var syncFormat string       // --format: "", "short" or "exec"
+var withMonitored bool      // --with-monitored: also ask about jobs that are already monitored
 
 // To deprecate this feature we are hijacking this flag that will trigger removal of auto-discover lines from existing user's crontabs.
 var noAutoDiscover = true
@@ -205,6 +206,9 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 		monitors, err := getCronitorApi().GetMonitors()
 		existingMonitors.Monitors = monitors
 		existingMonitors.Loaded = err == nil
+		if err != nil {
+			syncWarning(fmt.Sprintf("Could not load your monitors from Cronitor: %v. Sync cannot tell which jobs changed, so it asks about every job and sends each schedule.", err))
+		}
 
 		if runtime.GOOS == "windows" {
 			if processWindowsTaskScheduler() {
@@ -617,7 +621,10 @@ func planCrontab(crontab *lib.Crontab) *crontabPlan {
 			name = defaultName
 		}
 
-		if !isAutoDiscover && !line.IsAutoDiscoverCommand() {
+		// Ask about new jobs. Monitored jobs are asked about only with
+		// --with-monitored, or when sync cannot load the monitor list.
+		ask := !monitored || withMonitored || !existingMonitors.Loaded
+		if ask && !isAutoDiscover && !line.IsAutoDiscoverCommand() {
 			answer := askAboutJob(line, name, monitored)
 			if answer.choice == choiceQuit {
 				userAbortedSync = true
@@ -1089,6 +1096,7 @@ func init() {
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")
 	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Do not use an interactive shell. Write updated crontab to stdout.")
 	discoverCmd.Flags().StringVar(&syncFormat, "format", "", "Line format on Unix. short: write every line as CRONITOR=<key> <command>, converting cronitor exec lines (lines with other exec flags stay as exec). exec: write every line as cronitor exec <key> <command> and restore the prior SHELL. Default: new lines short, existing lines unchanged.")
+	discoverCmd.Flags().BoolVar(&withMonitored, "with-monitored", false, "Also ask about jobs that are already monitored, for example to rename them. Ignored with --auto.")
 	discoverCmd.Flags().StringVar(&syncFile, "file", "", "Path to YAML or JSON file containing monitor definitions for bulk import")
 
 	discoverCmd.Flags().BoolVar(&isSilent, "silent", isSilent, "")

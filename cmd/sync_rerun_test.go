@@ -4,6 +4,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/cronitorio/cronitor-cli/lib"
 )
 
 // rerunAPI is a fake Cronitor API. GET returns the given monitors. Each PUT
@@ -201,5 +204,114 @@ func TestSyncRerunKeepsHandWrittenKey(t *testing.T) {
 	}
 	if got := readCron(t, path); !strings.Contains(got, "0 6 * * * CRONITOR=prune-events /usr/bin/prune") {
 		t.Fatalf("hand-written key was replaced:\n%s", got)
+	}
+}
+
+func TestSyncWarnsWhenMonitorListFails(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	var puts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		puts++
+		io.WriteString(w, `[]`)
+	}))
+	t.Cleanup(srv.Close)
+	path := writeCron(t, "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n")
+
+	stderr := runSync(t, srv.URL, path)
+
+	if !strings.Contains(stderr, "Could not load your monitors") {
+		t.Fatalf("stderr = %q; want a warning that the monitor list failed", stderr)
+	}
+	// Sync cannot compare, so it sends the schedule. It must not warn that
+	// the monitor was deleted.
+	if puts != 1 || strings.Contains(stderr, "no longer exists") {
+		t.Fatalf("puts = %d, stderr = %q", puts, stderr)
+	}
+}
+
+// answerPrompts replaces the job prompt. It records the name shown for each
+// line and answers with answer(line number).
+func answerPrompts(t *testing.T, answer func(lineNumber int, shown string) promptResult) *[]string {
+	t.Helper()
+	old := askAboutJob
+	t.Cleanup(func() { askAboutJob = old })
+	var asked []string
+	askAboutJob = func(line *lib.Line, name string, monitored bool) promptResult {
+		asked = append(asked, fmt.Sprintf("L%d %s", line.LineNumber, name))
+		return answer(line.LineNumber, name)
+	}
+	return &asked
+}
+
+func keepName(_ int, shown string) promptResult {
+	return promptResult{choice: choiceMonitor, name: shown}
+}
+
+func resetWithMonitored(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		withMonitored = false
+		_ = discoverCmd.Flags().Set("with-monitored", "false")
+		discoverCmd.Flags().Lookup("with-monitored").Changed = false
+	})
+}
+
+func TestSyncAsksOnlyAboutNewJobs(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	resetWithMonitored(t)
+	_, apiURL := newRerunAPI(t, backupMonitor)
+	asked := answerPrompts(t, keepName)
+	path := writeCron(t, "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n0 5 * * * /usr/bin/new-job.sh\n")
+
+	runSyncArgs(t, apiURL, path)
+
+	if len(*asked) != 1 || !strings.HasPrefix((*asked)[0], "L2 ") {
+		t.Fatalf("asked about %v; want only the new job on line 2", *asked)
+	}
+}
+
+func TestSyncWithMonitoredShowsMonitorNameAndRenames(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	resetWithMonitored(t)
+	api, apiURL := newRerunAPI(t, `{"name":"Prune events","key":"prune-events","schedules":["0 1 * * *"],"attributes":{"key":"prune-events","code":"xyz789"}}`)
+	asked := answerPrompts(t, func(_ int, _ string) promptResult {
+		return promptResult{choice: choiceMonitor, name: "Prune old events"}
+	})
+	path := writeCron(t, "0 1 * * * CRONITOR=prune-events /usr/bin/prune\n")
+
+	runSyncArgs(t, apiURL, path, "--with-monitored")
+
+	if len(*asked) != 1 || (*asked)[0] != "L1 Prune events" {
+		t.Fatalf("asked %v; want the monitor's name from Cronitor", *asked)
+	}
+	puts := api.sent()
+	if len(puts) != 1 {
+		t.Fatalf("sync sent %v; want one rename", puts)
+	}
+	got := puts[0][0]
+	if names := fieldNames(got); !reflect.DeepEqual(names, []string{"key", "name", "type"}) || got["name"] != "Prune old events" {
+		t.Fatalf("payload = %v; want key, name and type only", got)
+	}
+}
+
+func TestSyncWithMonitoredIgnoredByAuto(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	resetWithMonitored(t)
+	api, apiURL := newRerunAPI(t, backupMonitor)
+	asked := answerPrompts(t, keepName)
+	path := writeCron(t, "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n")
+
+	runSync(t, apiURL, path, "--with-monitored")
+
+	if len(*asked) != 0 || len(api.sent()) != 0 {
+		t.Fatalf("asked %v, sent %v; --auto must ignore --with-monitored", *asked, api.sent())
 	}
 }

@@ -22,6 +22,12 @@ import (
 // call Write; that skips the flag handling and the API round trip.
 func runSync(t *testing.T, serverURL, path string, extra ...string) string {
 	t.Helper()
+	return runSyncArgs(t, serverURL, path, append([]string{"--auto", "--silent"}, extra...)...)
+}
+
+// runSyncArgs is runSync without --auto --silent, for the interactive path.
+func runSyncArgs(t *testing.T, serverURL, path string, extra ...string) string {
+	t.Helper()
 	lib.BaseURLOverride = serverURL + "/api"
 	viper.Set(varApiKey, "test-api-key-1234567890")
 	existingMonitors = ExistingMonitors{}
@@ -50,7 +56,7 @@ func runSync(t *testing.T, serverURL, path string, extra ...string) string {
 	}
 
 	// Execute on the subcommand is ignored: cobra always runs from the root.
-	args := []string{"--config", cfg, "sync", "--auto", "--silent"}
+	args := []string{"--config", cfg, "sync"}
 	args = append(args, extra...)
 	args = append(args, path)
 	RootCmd.SetArgs(args)
