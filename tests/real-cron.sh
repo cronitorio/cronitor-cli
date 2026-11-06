@@ -61,7 +61,7 @@ HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
 PY
 python3 "$work/mock.py" "$port" "$work/requests.log" &
 mock=$!
-trap 'kill $mock 2>/dev/null; crontab -r 2>/dev/null || true; rm -f /etc/cronitor/cronitor-shell' EXIT
+trap 'kill $mock 2>/dev/null; crontab -r 2>/dev/null || true; rm -f /etc/cronitor/shell-wrapper' EXIT
 sleep 1
 
 # 3. Fixture crontab, then sync it with the real binary.
@@ -84,7 +84,8 @@ echo '{}' > "$work/other.json"
 echo "* * * * * echo raw >> $out/raw.log" >> "$work/crontab"
 echo "--- synced crontab"
 cat "$work/crontab"
-grep -q '^SHELL=.*cronitor-shell$' "$work/crontab"
+grep -q '^SHELL=/etc/cronitor/shell-wrapper$' "$work/crontab"
+grep -q '^CRONITOR_SHELL=/bin/sh$' "$work/crontab"
 grep -q 'CRONITOR=conv01 cd ' "$work/crontab"
 grep -q 'CRONITOR=nostd01 CRONITOR_NO_STDOUT=1 echo no-stdout-job' "$work/crontab"
 grep -q 'CRONITOR=env01 CRONITOR_ENV=staging echo env-job' "$work/crontab"
