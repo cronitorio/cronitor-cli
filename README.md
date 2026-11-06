@@ -94,7 +94,6 @@ SHELL=/etc/cronitor/shell
   ```
 - A `CRONITOR=<key>` line works only in a crontab that sync has changed. To add monitoring by hand to any other crontab, script or task, use `cronitor exec <key> <cmd>`.
 - To go back, run `cronitor sync --format=exec`.
-
 - Windows scheduled tasks always use `cronitor exec`.
 
 #### Running `cronitor sync` again
