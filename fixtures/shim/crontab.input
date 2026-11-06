@@ -34,6 +34,8 @@ PATH=/usr/local/bin:/usr/bin:/bin
 0 16 * * * monicli exec keep7 echo monicli-exec
 0 18 * * * cronitor --env staging exec keep8 echo exec-env
 0 20 * * * cronitor -p pk12345 exec keep11 echo exec-ping-key
+0 21 * * * cronitor exec keep12 'echo quoted  words'
+0 22 * * * cronitor exec keep13 'printf "\%s|" a b'
 0 19 * * * cronitor --config /etc/cronitor/other.json exec keep9 echo exec-config
 
 # --- comments and disabled jobs stay as written ---

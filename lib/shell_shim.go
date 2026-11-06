@@ -122,8 +122,12 @@ func shimJob(line Line) string {
 			_, raw = SplitShimSettings(raw)
 		}
 		if line.Integration == IntegrationExec {
-			if words, err := shellquote.Split(raw); err == nil && len(words) == 1 && words[0] == line.CommandToRun {
-				return line.CommandToRun
+			// cronitor exec runs a single argument as shell code. Cron turns \% into %
+			// before the outer shell removes the quotes, so do the same, then escape
+			// % again for the crontab.
+			body, stdin := splitCronStdin(raw)
+			if words, err := shellquote.Split(strings.ReplaceAll(body, `\%`, "%")); err == nil && len(words) == 1 {
+				return strings.ReplaceAll(words[0], "%", `\%`) + stdin
 			}
 		}
 		if raw != "" {
@@ -163,7 +167,7 @@ func (l Line) renderIntegration(c Crontab) string {
 		return IntegrationExec
 	case WriteModeShim:
 		if l.Integration == IntegrationExec {
-			if _, ok := l.execSettings(); ok && c.ConvertExec {
+			if _, ok := l.execSettings(); ok && c.ConvertExec && c.ShellChange.accepts(l) {
 				return IntegrationShim
 			}
 			return IntegrationExec
@@ -226,11 +230,29 @@ func (c Crontab) ShimNotices() (stop bool, notices []string) {
 		}
 	}
 	if c.ConvertExec && c.WriteMode == WriteModeShim {
+		var converted []string
 		for _, line := range c.Lines {
-			if _, ok := line.execSettings(); line.Integration == IntegrationExec && line.GetCode() != "" && !ok {
+			if line.Integration != IntegrationExec || line.GetCode() == "" {
+				continue
+			}
+			if _, ok := line.execSettings(); !ok {
 				notices = append(notices, fmt.Sprintf(
 					"notice: monitor %s: kept as cronitor exec because the line has flags a CRONITOR= line cannot carry", line.GetCode()))
+				continue
 			}
+			if !c.ShellChange.accepts(*line) {
+				notices = append(notices, fmt.Sprintf(
+					"notice: monitor %s: kept as cronitor exec because %s cannot parse the command (cronitor exec ran it in %s)",
+					line.GetCode(), c.ShellChange.To, c.ShellChange.From))
+				continue
+			}
+			converted = append(converted, line.GetCode())
+		}
+		if c.ShellChange != nil && len(converted) > 0 {
+			notices = append(notices, fmt.Sprintf(
+				"warning: %d converted %s in %s ran in %s and will now run in %s: %s. To keep %s for this crontab, add SHELL=%s at the top. To undo, run cronitor sync --format=exec.",
+				len(converted), plural(len(converted), "job", "jobs"), c.DisplayName(), c.ShellChange.From, c.ShellChange.To, strings.Join(converted, ", "),
+				c.ShellChange.From, c.ShellChange.From))
 		}
 	}
 	if c.RewriteShimToExec {
@@ -445,3 +467,10 @@ if [ -x "$CRONITOR_BIN" ]; then
 fi
 exec "$REAL_SHELL" -c "$after"
 `
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}

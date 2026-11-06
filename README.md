@@ -90,6 +90,7 @@ SHELL=/etc/cronitor/cronitor-shell
   ```
   0 1 * * * CRONITOR=abc123 CRONITOR_ENV=staging CRONITOR_NO_STDOUT=1 /usr/local/bin/backup.sh
   ```
+- A `CRONITOR=<key>` line runs in the crontab's shell, the same as cron. `cronitor exec` uses bash when the crontab's shell is `/bin/sh`. When `--format=short` would move jobs from bash to `/bin/sh`, sync prints a warning that lists them, and a command that `/bin/sh` cannot parse stays `cronitor exec`. To keep bash, add `SHELL=/bin/bash` to the crontab.
 - A `CRONITOR=<key>` line works only in a crontab that sync has changed. To add monitoring by hand to any other crontab, script or task, use `cronitor exec <key> <cmd>`.
 - To go back, run `cronitor sync --format=exec`.
 - Windows scheduled tasks always use `cronitor exec`.

@@ -388,6 +388,27 @@ func parseSyncFormat(value string) (syncFormatMode, error) {
 	return formatDefault, fmt.Errorf("--format must be short or exec, not %q", value)
 }
 
+// convertShellChange reports whether --format=short moves exec jobs to another
+// shell. cronitor exec picks the job shell with interpreterForExec; a
+// CRONITOR= line runs in the crontab's shell. from is the shell exec used.
+func convertShellChange(goos, crontabShell string, stat func(string) (os.FileInfo, error)) (from string, changed bool) {
+	if goos == "windows" {
+		return "", false
+	}
+	real := cleanShellPath(lib.ResolveRealShell(crontabShell))
+	name, _ := interpreterForExec(goos, real, stat)
+	switch name {
+	case "bash":
+		name = "/bin/bash" // interpreterForExec picks bash only when /bin/bash exists
+	case "sh":
+		name = "/bin/sh"
+	}
+	if name == real {
+		return "", false
+	}
+	return name, true
+}
+
 func configureShellShim(crontab *lib.Crontab) error {
 	if runtime.GOOS == "windows" {
 		crontab.WriteMode = lib.WriteModeLegacy
@@ -400,6 +421,14 @@ func configureShellShim(crontab *lib.Crontab) error {
 	default:
 		crontab.WriteMode = lib.WriteModeShim
 		crontab.ConvertExec = format == formatShort
+	}
+	if crontab.ConvertExec {
+		realShell := lib.ResolveRealShell(crontab.Shell)
+		if from, changed := convertShellChange(runtime.GOOS, realShell, os.Stat); changed {
+			crontab.ShellChange = &lib.ShellChange{From: from, To: realShell, Parses: func(command string) bool {
+				return exec.Command(realShell, "-n", "-c", command).Run() == nil
+			}}
+		}
 	}
 	if noStdoutPassthru {
 		crontab.RewriteShimToExec = true

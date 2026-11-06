@@ -369,3 +369,53 @@ func TestShimSettingsOnMarkerLines(t *testing.T) {
 		t.Fatalf("--format=exec did not turn settings into flags:\n%s", got)
 	}
 }
+
+func TestConvertWithShellChange(t *testing.T) {
+	input := strings.Join([]string{
+		"0 1 * * * cronitor exec k1 echo hi",
+		"0 2 * * * cronitor exec k2 'diff <(ls a) <(ls b)'",
+		"0 3 * * * cronitor exec --no-stdout k3 echo quiet",
+	}, "\n")
+	write := func(change *ShellChange) (string, []string) {
+		ct := parseContent(t, input)
+		ct.WriteMode = WriteModeShim
+		ct.ConvertExec = true
+		ct.ShellChange = change
+		ct.ShimShellPath = "/etc/cronitor/cronitor-shell"
+		_, notices := ct.ShimNotices()
+		return ct.Write(), notices
+	}
+
+	var checked []string
+	change := &ShellChange{From: "/bin/bash", To: "/bin/sh", Parses: func(cmd string) bool {
+		checked = append(checked, cmd)
+		return !strings.Contains(cmd, "<(")
+	}}
+	got, notices := write(change)
+	for _, want := range []string{
+		"0 1 * * * CRONITOR=k1 echo hi\n",
+		"0 2 * * * cronitor exec k2 'diff <(ls a) <(ls b)'\n",
+		"0 3 * * * CRONITOR=k3 CRONITOR_NO_STDOUT=1 echo quiet\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+	if !containsString(checked, "diff <(ls a) <(ls b)") {
+		t.Fatalf("parse check did not get the unquoted command, got %q", checked)
+	}
+	joined := strings.Join(notices, "\n")
+	for _, want := range []string{"k2", "/bin/sh cannot parse", "2 converted jobs", "k1, k3", "ran in /bin/bash", "SHELL=/bin/bash", "--format=exec"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("notices miss %q:\n%s", want, joined)
+		}
+	}
+
+	got, notices = write(nil)
+	if !strings.Contains(got, "0 2 * * * CRONITOR=k2 diff <(ls a) <(ls b)\n") {
+		t.Fatalf("without a shell change every flag-free line converts:\n%s", got)
+	}
+	if joined := strings.Join(notices, "\n"); strings.Contains(joined, "will now run in") || strings.Contains(joined, "cannot parse") {
+		t.Fatalf("no shell change, but notices say so:\n%s", joined)
+	}
+}

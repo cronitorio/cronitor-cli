@@ -36,6 +36,8 @@ PATH=/usr/local/bin:/usr/bin:/bin
 0 16 * * * CRONITOR=keep7 echo monicli-exec
 0 18 * * * CRONITOR=keep8 CRONITOR_ENV=staging echo exec-env
 0 20 * * * CRONITOR=keep11 CRONITOR_PING_API_KEY=pk12345 echo exec-ping-key
+0 21 * * * CRONITOR=keep12 echo quoted  words
+0 22 * * * CRONITOR=keep13 printf "\%s|" a b
 0 19 * * * cronitor --config /etc/cronitor/other.json exec keep9 echo exec-config
 
 # --- comments and disabled jobs stay as written ---
