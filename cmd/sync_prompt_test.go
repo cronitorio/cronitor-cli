@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // press sends one key to the prompt model and returns the new model and
@@ -104,6 +105,33 @@ func TestPromptShowsEveryItemAndFooter(t *testing.T) {
 	for _, want := range []string{UseDefaultName, EnterCustomName, SkipJob, IgnoreJob, "enter select · s skip · q quit"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view is missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestJobInfoBoxFitsTerminal(t *testing.T) {
+	command := "/var/cronitor/src/cronitor/manage.py prune_events --days 30 --batch-size 5000 >> /var/log/cronitor/prune.log 2>&1"
+	for _, width := range []int{60, 120} {
+		box := renderJobInfoBox("Prune events", "0 1 * * *", command, true, width)
+		lines := strings.Split(box, "\n")
+		for i, l := range lines {
+			if w := lipgloss.Width(l); w > width {
+				t.Fatalf("width %d: line %d is %d wide:\n%s", width, i, w, box)
+			}
+			trimmed := strings.TrimLeft(l, " ")
+			first := []rune(trimmed)[0]
+			switch {
+			case i == 0 && first != '╭', i == len(lines)-1 && first != '╰', i > 0 && i < len(lines)-1 && first != '│':
+				t.Fatalf("width %d: border broken at line %d:\n%s", width, i, box)
+			}
+		}
+		// The whole command is in the box, wrapped but not cut.
+		var text strings.Builder
+		for _, l := range lines {
+			text.WriteString(strings.Trim(l, " │╭╮╰╯─"))
+		}
+		if !strings.Contains(strings.ReplaceAll(text.String(), " ", ""), strings.ReplaceAll(command, " ", "")) {
+			t.Fatalf("width %d: command was cut:\n%s", width, box)
 		}
 	}
 }

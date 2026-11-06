@@ -20,6 +20,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
 
@@ -662,7 +663,7 @@ type promptResult struct {
 // askAboutJob shows one job and asks what to do with it. Tests replace it.
 var askAboutJob = func(line *lib.Line, name string, monitored bool) promptResult {
 	printSuccessText(fmt.Sprintf("Line %d:", line.LineNumber), true)
-	fmt.Println(renderJobInfoBox(name, line.CronExpression, line.CommandToRun, monitored))
+	fmt.Println(renderJobInfoBox(name, line.CronExpression, line.CommandToRun, monitored, terminalWidth()))
 
 	result, err := tea.NewProgram(initialNameInputModel(name)).Run()
 	if err != nil {
@@ -1076,23 +1077,52 @@ func (i item) Title() string       { return i.title }
 func (i item) Description() string { return i.desc }
 func (i item) FilterValue() string { return i.title }
 
-// renderJobInfoBox renders job information in a styled box for interactive sync mode
-func renderJobInfoBox(name string, schedule string, command string, monitored bool) string {
-	// Define styles - use full terminal width minus margin
+// terminalWidth is the width of the terminal on stdout, or 100 when it is
+// not a terminal.
+func terminalWidth() int {
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		return w
+	}
+	return 100
+}
+
+// renderJobInfoBox renders job information in a styled box for interactive
+// sync mode. The box fits a terminal of the given width, up to 100 columns;
+// long values wrap inside the box.
+func renderJobInfoBox(name string, schedule string, command string, monitored bool, width int) string {
+	const margin, labelWidth = 2, 12
+	boxWidth := width - margin - 1
+	if boxWidth > 100 {
+		boxWidth = 100
+	}
+	if boxWidth < 40 {
+		boxWidth = 40
+	}
+	// The border takes 2 columns and the padding 2 more.
+	inner := boxWidth - 4
+	valueWidth := inner - labelWidth - 2
+
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Padding(0, 1).
-		MarginLeft(2).
-		Width(100)
+		MarginLeft(margin).
+		Width(boxWidth - 2)
 
 	nameStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("15")) // Bright white - readable on blue PowerShell backgrounds
+		Foreground(lipgloss.Color("15")). // Bright white - readable on blue PowerShell backgrounds
+		Width(inner)
 
 	labelStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("245")).
-		Width(12)
+		Width(labelWidth)
+
+	valueStyle := lipgloss.NewStyle().Width(valueWidth)
+
+	row := func(label, value string) string {
+		return lipgloss.JoinHorizontal(lipgloss.Top, labelStyle.Render(label), "  ", valueStyle.Render(value))
+	}
 
 	yesStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("10")) // Green
@@ -1100,28 +1130,21 @@ func renderJobInfoBox(name string, schedule string, command string, monitored bo
 	noStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("245")) // Gray
 
-	// Build content lines
 	var lines []string
-
 	lines = append(lines, nameStyle.Render(name))
 	lines = append(lines, "")
-
 	if schedule != "" {
-		lines = append(lines, labelStyle.Render("Schedule:")+"  "+schedule)
+		lines = append(lines, row("Schedule:", schedule))
 	}
+	lines = append(lines, row("Command:", command))
 
-	// Show full command - box width will accommodate long names/commands
-	lines = append(lines, labelStyle.Render("Command:")+"  "+command)
-
-	// Show monitoring status
 	monitoredStr := noStyle.Render("No")
 	if monitored {
 		monitoredStr = yesStyle.Render("Yes")
 	}
-	lines = append(lines, labelStyle.Render("Monitored:")+"  "+monitoredStr)
+	lines = append(lines, row("Monitored:", monitoredStr))
 
-	content := strings.Join(lines, "\n")
-	return boxStyle.Render(content)
+	return boxStyle.Render(strings.Join(lines, "\n"))
 }
 
 type nameInputModel struct {
