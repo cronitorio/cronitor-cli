@@ -265,7 +265,7 @@ Put `crontab-dashboard` in the same folder as `cronitor` (Linux and macOS shown;
 curl -fsSL https://github.com/cronitorio/cronitor-cli/releases/latest/download/crontab-dashboard_linux_amd64.tar.gz | sudo tar -xz -C /usr/local/bin
 ```
 
-On Windows, extract `crontab-dashboard.exe` from `crontab-dashboard_windows_amd64.zip` into the folder that holds `cronitor.exe`. `cronitor update` updates both programs when they are in the same folder.
+On Windows, extract `crontab-dashboard.exe` from `crontab-dashboard_windows_amd64.zip` into the folder that holds `cronitor.exe`. `cronitor update` updates both programs when they are in the same folder. `crontab-dashboard configure` and `crontab-dashboard update` work the same as the `cronitor` commands, so a dashboard-only install never needs to call `cronitor`.
 
 Start locally
 

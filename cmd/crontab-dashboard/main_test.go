@@ -12,6 +12,9 @@ func TestDashboardArgsRunDash(t *testing.T) {
 		{[]string{"crontab-dashboard"}, []string{"crontab-dashboard", "dash"}},
 		{[]string{"crontab-dashboard", "--port", "9100"}, []string{"crontab-dashboard", "dash", "--port", "9100"}},
 		{[]string{"crontab-dashboard", "dash", "--safe-mode"}, []string{"crontab-dashboard", "dash", "--safe-mode"}},
+		// Settings and updates work without knowing about cronitor.
+		{[]string{"crontab-dashboard", "configure", "--users", "a,b"}, []string{"crontab-dashboard", "configure", "--users", "a,b"}},
+		{[]string{"crontab-dashboard", "update"}, []string{"crontab-dashboard", "update"}},
 	} {
 		if got := dashboardArgs(tc.in); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("dashboardArgs(%q) = %q, want %q", tc.in, got, tc.want)

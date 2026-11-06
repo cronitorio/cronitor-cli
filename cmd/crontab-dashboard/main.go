@@ -21,10 +21,15 @@ func setup() {
 	dashboard.Register(cmd.RootCmd)
 }
 
-// dashboardArgs runs the dash command unless it is already named, so
-// `crontab-dashboard --port 9100` and `cronitor dash --port 9100` match.
+// passThrough are the CLI commands crontab-dashboard runs as named, so a
+// standalone install needs no `cronitor` command for settings and updates.
+var passThrough = map[string]bool{"dash": true, "configure": true, "update": true}
+
+// dashboardArgs runs the dash command unless the first argument names a
+// pass-through command, so `crontab-dashboard --port 9100` and
+// `cronitor dash --port 9100` match.
 func dashboardArgs(args []string) []string {
-	if len(args) > 1 && args[1] == "dash" {
+	if len(args) > 1 && passThrough[args[1]] {
 		return args
 	}
 	return append([]string{args[0], "dash"}, args[1:]...)

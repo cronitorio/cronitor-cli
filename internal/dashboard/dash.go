@@ -703,7 +703,7 @@ not start a web server but instead communicates via stdio protocol.`,
 			}
 
 			fmt.Printf("\nCredentials saved to: %s\n", configPath)
-			fmt.Println("Please run 'cronitor dash' again to start the dashboard.")
+			fmt.Println("Please run 'crontab-dashboard' again to start the dashboard.")
 			os.Exit(0)
 		}
 
