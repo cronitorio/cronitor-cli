@@ -666,3 +666,17 @@ func TestParseSyncFormat(t *testing.T) {
 		t.Fatalf("bad value error = %v; want one that lists short and exec", err)
 	}
 }
+
+func TestSyncFormatExecKeepsSettings(t *testing.T) {
+	serverURL, shimPath := withSyncFixture(t)
+	path := writeCron(t, strings.Join([]string{
+		"CRONITOR_REAL_SHELL=/bin/sh",
+		"SHELL=" + shimPath,
+		"0 1 * * * CRONITOR=k1 CRONITOR_ENV=staging CRONITOR_NO_STDOUT=1 echo hi",
+	}, "\n"))
+
+	runSync(t, serverURL, path, "--format=exec")
+	if got, want := readCron(t, path), "0 1 * * * cronitor --env staging exec --no-stdout k1 echo hi\n"; !strings.Contains(got, want) {
+		t.Fatalf("missing %q in:\n%s", want, got)
+	}
+}

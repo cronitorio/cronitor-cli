@@ -584,7 +584,8 @@ func (l Line) writeUsing(c Crontab) string {
 			lineParts = append(lineParts, env)
 		}
 		lineParts = append(lineParts, "exec")
-		if l.Mon.NoStdoutPassthru {
+		// Sync replaces Mon, so a marker line's own setting must count too.
+		if l.Mon.NoStdoutPassthru || containsString(l.shimSettings, "CRONITOR_NO_STDOUT=1") {
 			lineParts = append(lineParts, "--no-stdout")
 		}
 		lineParts = append(lineParts, code)
