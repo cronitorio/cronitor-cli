@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/cronitorio/cronitor-cli/cmd"
+	"github.com/cronitorio/cronitor-cli/internal/dashboard"
 )
 
 //go:embed web/static
@@ -37,6 +38,12 @@ func main() {
 		os.Args[commandIndex] = "--"
 	}
 
-	cmd.SetWebAssets(WebAssets)
+	registerCommands()
 	cmd.Execute()
+}
+
+// registerCommands adds commands that live outside the cmd package.
+func registerCommands() {
+	dashboard.SetWebAssets(WebAssets)
+	dashboard.Register(cmd.RootCmd)
 }

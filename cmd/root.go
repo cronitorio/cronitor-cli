@@ -71,6 +71,7 @@ var varDashUsername = "CRONITOR_DASH_USER"
 var varDashPassword = "CRONITOR_DASH_PASS"
 var varAllowedIPs = "CRONITOR_ALLOWED_IPS"
 var varUsers = "CRONITOR_USERS"
+var varMCPEnabled = "CRONITOR_MCP_ENABLED"
 var varApiVersion = "CRONITOR_API_VERSION"
 
 func init() {

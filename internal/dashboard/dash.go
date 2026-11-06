@@ -1,4 +1,4 @@
-package cmd
+package dashboard
 
 import (
 	"bufio"
@@ -577,7 +577,6 @@ var cronCache = &crontabCache{}
 
 // Add new configuration variables
 const (
-	varMCPEnabled  = "CRONITOR_MCP_ENABLED"
 	varMCPMode     = "CRONITOR_MCP_MODE"
 	varMCPInstance = "CRONITOR_MCP_INSTANCE"
 )
@@ -1020,7 +1019,7 @@ func runMCPServer(instanceName string) {
 	)
 
 	// Create and register the Cronitor MCP handler
-	handler := lib.NewCronitorMCPHandler(instanceName)
+	handler := NewCronitorMCPHandler(instanceName)
 
 	// Register tools
 	if err := handler.RegisterTools(s); err != nil {
@@ -1076,8 +1075,12 @@ func addLineToCrontab(file string, line string) error {
 	return nil
 }
 
+// Register adds the dash command to a root command.
+func Register(root *cobra.Command) {
+	root.AddCommand(dashCmd)
+}
+
 func init() {
-	RootCmd.AddCommand(dashCmd)
 	dashCmd.Flags().Int("port", 9000, "Port to run the dashboard on")
 	dashCmd.Flags().Bool("safe-mode", false, "Limit the ability to edit jobs, crontabs, and settings")
 	dashCmd.Flags().Bool("mcp", false, "Enable MCP server mode for Cursor integration (deprecated: use --mcp-instance instead)")
@@ -2076,7 +2079,7 @@ func handleKillInstances(w http.ResponseWriter, r *http.Request) {
 	var killed []int
 
 	// Create process validator for comprehensive PID validation
-	processValidator := lib.NewProcessValidator()
+	processValidator := NewProcessValidator()
 
 	for _, pid := range request.PIDs {
 		// Perform comprehensive PID validation including ownership checks
