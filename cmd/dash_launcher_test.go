@@ -11,7 +11,12 @@ import (
 
 func TestDashLauncherForwardsArgumentsAndEnvironment(t *testing.T) {
 	RegisterDashLauncher()
-	bin := filepath.Join(t.TempDir(), DashboardBinaryName)
+	name := DashboardBinaryName
+	if runtime.GOOS == "windows" {
+		// exec.LookPath on Windows only accepts executable extensions.
+		name += ".exe"
+	}
+	bin := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
