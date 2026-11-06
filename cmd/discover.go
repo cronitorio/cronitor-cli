@@ -181,6 +181,7 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 		// Reset the flags for each command execution
 		processingMultipleCrontabs = false
 		userAbortedSync = false
+		jobsNeedingSudo = 0
 
 		if len(viper.GetString(varApiKey)) < 10 {
 			fatal(discoverMissingAPIKeyGuidance(), 1)
@@ -256,6 +257,9 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 				}
 			}
 			importedCrontabs += finishSync(plans)
+			if hint := sudoHint(jobsNeedingSudo); hint != "" {
+				syncWarning(hint)
+			}
 		}
 
 		if userAbortedSync {
@@ -277,18 +281,37 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 	},
 }
 
-// collectDirectory plans every crontab in a directory, if this user can
-// write to it.
+// crontabWritable reports whether sync can write a crontab. Tests replace it.
+var crontabWritable = func(c *lib.Crontab) bool { return c.IsWritable() }
+
+// jobsNeedingSudo counts jobs in crontabs this user cannot write.
+var jobsNeedingSudo int
+
+// countJobs counts the jobs sync would look at in a parsed crontab.
+func countJobs(c *lib.Crontab) int {
+	n := 0
+	for _, l := range c.Lines {
+		if l.IsMonitorable() && !l.Ignored && !l.IsComment && !l.IsAutoDiscoverCommand() {
+			n++
+		}
+	}
+	return n
+}
+
+// sudoHint is the one hint about crontabs sync could not write, or "".
+func sudoHint(jobs int) string {
+	switch jobs {
+	case 0:
+		return ""
+	case 1:
+		return "1 job in system crontabs was not checked. Run sync with sudo to include it."
+	}
+	return fmt.Sprintf("%d jobs in system crontabs were not checked. Run sync with sudo to include them.", jobs)
+}
+
+// collectDirectory plans every crontab in a directory.
 func collectDirectory(plans *[]*crontabPlan, username, directory string) {
-	files := lib.EnumerateFiles(directory)
-	if len(files) == 0 {
-		return
-	}
-	if !lib.CrontabFactory(username, files[0]).IsWritable() {
-		printWarningText(fmt.Sprintf("Directory %s is not writable. Re-run command with sudo. Skipping", directory), false)
-		return
-	}
-	for _, crontabFile := range files {
+	for _, crontabFile := range lib.EnumerateFiles(directory) {
 		if userAbortedSync {
 			break
 		}
@@ -696,14 +719,22 @@ func planCrontab(crontab *lib.Crontab) *crontabPlan {
 
 	// This will mostly happen when the crontab is empty
 	if err, _ := crontab.Parse(noAutoDiscover); err != nil {
-		printWarningText("This crontab is empty. Skipping.", true)
+		// While scanning, an empty or unreadable system crontab is only logged.
+		if !processingMultipleCrontabs || crontab.IsUserCrontab {
+			printWarningText("This crontab is empty. Skipping.", true)
+		}
 		log(fmt.Sprintf("Skipping %s: %s", crontab.DisplayName(), err.Error()))
 		return nil
 	}
 
-	// Before going further, ensure we aren't going to run into permissions problems writing the crontab later
-	if !crontab.IsWritable() {
-		printWarningText(fmt.Sprintf("This crontab is not writeable. Re-run command with sudo. Skipping"), true)
+	// Before going further, ensure we aren't going to run into permissions problems writing the crontab later.
+	// While scanning many crontabs, count the jobs and give one hint at the end.
+	if !crontabWritable(crontab) {
+		if processingMultipleCrontabs {
+			jobsNeedingSudo += countJobs(crontab)
+		} else {
+			printWarningText("This crontab is not writable. Run sync with sudo.", true)
+		}
 		return nil
 	}
 

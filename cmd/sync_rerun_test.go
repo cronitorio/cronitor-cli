@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -547,5 +549,24 @@ func TestSyncQuitWithoutSavingChangesNothing(t *testing.T) {
 
 	if len(api.sent()) != 0 || readCron(t, path) != body {
 		t.Fatalf("sent %v, crontab:\n%s", api.sent(), readCron(t, path))
+	}
+}
+
+func TestSyncOneSudoHintForUnwritableCrontabs(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	_, apiURL := newRerunAPI(t, backupMonitor)
+	dir := t.TempDir()
+	locked := filepath.Join(dir, "locked")
+	os.WriteFile(locked, []byte("0 1 * * * root /usr/bin/a.sh\n0 2 * * * root /usr/bin/b.sh\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "open"), []byte("0 3 * * * root /usr/bin/c.sh\n"), 0644)
+	old := crontabWritable
+	t.Cleanup(func() { crontabWritable = old })
+	crontabWritable = func(c *lib.Crontab) bool { return c.Filename != locked }
+
+	stderr := runSync(t, apiURL, dir)
+
+	if strings.Count(stderr, "sudo") != 1 || !strings.Contains(stderr, "2 jobs in system crontabs were not checked") {
+		t.Fatalf("stderr = %q; want one hint that counts the 2 jobs", stderr)
 	}
 }

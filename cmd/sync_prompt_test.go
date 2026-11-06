@@ -135,3 +135,12 @@ func TestJobInfoBoxFitsTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestSudoHint(t *testing.T) {
+	if got := sudoHint(0); got != "" {
+		t.Fatalf("sudoHint(0) = %q", got)
+	}
+	if got := sudoHint(1); got != "1 job in system crontabs was not checked. Run sync with sudo to include it." {
+		t.Fatalf("sudoHint(1) = %q", got)
+	}
+}
