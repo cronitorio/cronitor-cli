@@ -95,6 +95,8 @@ SHELL=/etc/cronitor/shell
 - A `CRONITOR=<key>` line works only in a crontab that sync has changed. To add monitoring by hand to any other crontab, script or task, use `cronitor exec <key> <cmd>`.
 - To go back, run `cronitor sync --format=exec`.
 
+- Windows scheduled tasks always use `cronitor exec`.
+
 #### Running `cronitor sync` again
 
 - Sync asks only about jobs that are not monitored yet. `--with-monitored` asks about every job.
@@ -102,7 +104,6 @@ SHELL=/etc/cronitor/shell
 - If a monitor was deleted in Cronitor, sync warns and does not create it again.
 - Sync shows one summary and asks once before it sends or writes anything. If nothing changed, it asks nothing.
 - In the menu: enter selects, `s` skips, `q` quits. "Skip this job, don't ask again" adds `# cronitor: ignore` above the line.
-- Windows scheduled tasks always use `cronitor exec`.
 
 ### API Resources
 
