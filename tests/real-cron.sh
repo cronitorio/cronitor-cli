@@ -5,8 +5,10 @@
 #
 #   sudo tests/real-cron.sh
 #
-# It builds cronitor with the API pointed at a local mock, syncs a fixture
-# crontab with --format=short, installs it, and checks three cron ticks:
+# It builds cronitor with the API pointed at a local mock, syncs a crontab
+# with --format=short, installs it, and checks three cron ticks. The crontab
+# also holds every job shape from fixtures/shim/crontab.input; their pings
+# are checked against fixtures/shim/crontab.outputs.
 #   1. healthy binary: every job runs once and sends run + final pings
 #   2. binary missing: marked jobs still run, no pings
 #   3. binary truncated: marked jobs do not run (same as cronitor exec);
@@ -64,10 +66,15 @@ mock=$!
 trap 'kill $mock 2>/dev/null; crontab -r 2>/dev/null || true; rm -f /etc/cronitor/shell' EXIT
 sleep 1
 
-# 3. Fixture crontab, then sync it with the real binary.
+# 3. Fixture crontab, then sync it with the real binary. Every job shape in
+# fixtures/shim/crontab.input is added too, running every minute.
+mkdir -p "$work/fixture/my app"
+printf '#!/bin/sh\nprintf "[%%s]" "$@"; echo\n' > "$work/fixture/my app/run.sh"
+chmod 755 "$work/fixture/my app/run.sh"
 cat > "$work/crontab" <<EOF
 CRONITOR_PING_API_HOST=http://127.0.0.1:$port
 PATH=$work/bin:/usr/bin:/bin
+FIXTURE=$work/fixture
 * * * * * echo plain >> $out/plain.log
 * * * * * cat >> $out/stdin.log%line-one%line-two
 * * * * * echo "a  b" | tr a A >> $out/pipe.log
@@ -77,6 +84,7 @@ PATH=$work/bin:/usr/bin:/bin
 * * * * * cronitor --env staging exec env01 echo env-job
 * * * * * cronitor --config $work/other.json exec keep01 echo kept-exec
 EOF
+python3 -I "$repo/tests/real-cron-fixture.py" lines "$repo/fixtures/shim/crontab.input" >> "$work/crontab"
 echo '{"CRONITOR_API_KEY":"real-cron-test-key-0000"}' > "$work/cronitor.json"
 echo '{}' > "$work/other.json"
 "$work/bin/cronitor" --config "$work/cronitor.json" sync --auto --silent --format=short "$work/crontab"
@@ -113,15 +121,19 @@ check "stdin from %" "$(cat $out/stdin.log 2>/dev/null | tr '\n' ' ')" "line-one
 check "pipe kept spaces" "$(cat $out/pipe.log 2>/dev/null)" "A  b"
 check "converted exec ran" "$(count $out/conv.log)" 1
 check "raw line ran" "$(count $out/raw.log)" 1
-for path in $(grep -o 'CRONITOR=[A-Za-z0-9]*' "$work/crontab" | cut -d= -f2); do
+# This script's own jobs. The fixture jobs are checked below.
+for path in $(grep -E "$out|nostd01|env01" "$work/crontab" | grep -o 'CRONITOR=[A-Za-z0-9]*' | cut -d= -f2); do
 	check "run ping $path" "$(count $work/requests.log "/$path/run?")" 1
 	final=$(( $(count $work/requests.log "/$path/complete?") + $(count $work/requests.log "/$path/fail?") ))
 	check "final ping $path" "$final" 1
 done
-check "fail ping carries exit 3" "$(count $work/requests.log 'status_code=3')" 1
+failing=$(grep 'echo failing' "$work/crontab" | grep -o 'CRONITOR=[A-Za-z0-9]*' | cut -d= -f2)
+check "fail ping carries exit 3" "$(grep "/$failing/fail?" $work/requests.log | grep -c 'status_code=3' || true)" 1
 check "exec line pinged" "$(count $work/requests.log '/keep01/run?')" 1
 check "env setting reached pings" "$(count $work/requests.log '/env01/run?' )-$(grep '/env01/' $work/requests.log | grep -c 'env=staging' || true)" "1-2"
 check "no-stdout keeps output out of the ping" "$(grep '/nostd01/complete?' $work/requests.log | grep -c 'msg=no-stdout-job' || true)" 0
+echo "--- tick 1: every fixture job shape (output and exit code from the original line)"
+python3 -I "$repo/tests/real-cron-fixture.py" check "$work/crontab" "$work/requests.log" "$repo/fixtures/shim/crontab.outputs" || failed=1
 
 # Tick 2: binary missing. Marked jobs run without monitoring.
 mv "$work/bin/cronitor" "$work/bin/cronitor.real"
