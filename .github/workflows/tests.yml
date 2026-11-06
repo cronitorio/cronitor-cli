@@ -24,29 +24,6 @@ jobs:
           echo ::add-path::C:\msys64\usr\bin
           dir C:\msys64\usr\bin
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install web dependencies
-        shell: bash
-        run: |
-          cd web
-          npm ci
-
-      - name: Test dependency fixes
-        shell: bash
-        run: cd web && npm run test:dependencies
-
-      - name: Build web assets
-        shell: bash
-        run: |
-          cd web
-          npm run build
-
       - name: Setup BATS
         uses: mig4/setup-bats@v1
         with:
@@ -90,26 +67,6 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: '${{ github.workspace }}/go.mod'
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install web dependencies
-        run: |
-          cd web
-          npm ci
-
-      - name: Test dependency fixes
-        run: cd web && npm run test:dependencies
-
-      - name: Build web assets
-        run: |
-          cd web
-          npm run build
 
       - name: Setup BATS
         uses: mig4/setup-bats@v1
@@ -161,6 +118,25 @@ jobs:
           go-version: 'stable'
           check-latest: true
 
+      - name: Build binary
+        run: go build -o cronitor main.go
+
+      - name: Run Go tests
+        run: go test ./...
+
+  # The dashboard frontend is the only npm build. It runs here, with no
+  # secrets; the CLI jobs above need no Node.
+  dashboard:
+    name: Build and smoke-test the dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: '${{ github.workspace }}/go.mod'
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -169,17 +145,19 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install web dependencies
-        run: |
-          cd web
-          npm ci
+        working-directory: web
+        run: npm ci
+
+      - name: Test dependency fixes
+        working-directory: web
+        run: npm run test:dependencies
 
       - name: Build web assets
-        run: |
-          cd web
-          npm run build
+        working-directory: web
+        run: npm run build
 
-      - name: Build binary
-        run: go build -o cronitor main.go
+      - name: Smoke-test cronitor dash and crontab-dashboard
+        run: tests/dashboard-smoke.sh
 
-      - name: Run Go tests
-        run: go test ./...
+      - name: Package one release archive
+        run: scripts/package-dashboard.sh linux amd64 dist

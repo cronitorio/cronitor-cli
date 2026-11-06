@@ -36,34 +36,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install web dependencies
-        run: |
-          cd web
-          npm ci
-
-      - name: Ensure static directory exists
-        run: |
-          mkdir -p web/static
-          ls -la web/
-
-      - name: Build web assets
-        run: |
-          cd web
-          echo "Starting web build..."
-          npm run build
-          echo "Web build completed"
-
-      - name: Verify web assets were built
-        run: |
-          test -s web/static/index.html
-
       - name: Go Release Binaries Normal Volume Size
         uses: wangyoucao577/go-release-action@v1.53
         with:
@@ -98,10 +70,76 @@ jobs:
           path: ${{ matrix.goos }}_${{ matrix.goarch }}.*
           if-no-files-found: error
 
+  build-web:
+    name: Build dashboard frontend
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web assets
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+          test -s static/index.html
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-static
+          path: web/static/
+          if-no-files-found: error
+
+  build-dashboard:
+    name: Create dashboard assets
+    needs: [build-web]
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 2
+      matrix:
+        goos: [linux, windows, darwin, freebsd]
+        goarch: [amd64, arm, arm64]
+        exclude:
+          - goarch: arm
+            goos: darwin
+          - goarch: arm
+            goos: windows
+          - goarch: arm64
+            goos: windows
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-static
+          path: web/static
+
+      - name: Build and package crontab-dashboard
+        run: scripts/package-dashboard.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" .
+
+      - name: Stage release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-crontab-dashboard_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: crontab-dashboard_${{ matrix.goos }}_${{ matrix.goarch }}.*
+          if-no-files-found: error
+
   publish:
     name: Publish complete release
     runs-on: ubuntu-latest
-    needs: [build-binaries]
+    needs: [build-binaries, build-dashboard]
     permissions:
       contents: write
     steps:
@@ -114,9 +152,13 @@ jobs:
       - name: Verify complete asset set and checksums
         working-directory: release-assets
         run: |
-          for target in linux_amd64 linux_arm linux_arm64 darwin_amd64 darwin_arm64 freebsd_amd64 freebsd_arm freebsd_arm64 windows_amd64; do
+          for target in linux_amd64 linux_arm linux_arm64 darwin_amd64 darwin_arm64 freebsd_amd64 freebsd_arm freebsd_arm64 windows_amd64 \
+            crontab-dashboard_linux_amd64 crontab-dashboard_linux_arm crontab-dashboard_linux_arm64 \
+            crontab-dashboard_darwin_amd64 crontab-dashboard_darwin_arm64 \
+            crontab-dashboard_freebsd_amd64 crontab-dashboard_freebsd_arm crontab-dashboard_freebsd_arm64 \
+            crontab-dashboard_windows_amd64; do
             extension=tar.gz
-            if [ "$target" = windows_amd64 ]; then extension=zip; fi
+            case "$target" in *windows_amd64) extension=zip ;; esac
             archive="$target.$extension"
             test -s "$archive"
             test -s "$archive.sha256"
