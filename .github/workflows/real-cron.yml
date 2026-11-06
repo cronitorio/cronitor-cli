@@ -1,0 +1,32 @@
+name: "Real cron"
+
+# Runs tests/real-cron.sh: syncs a crontab with the shell shim, installs it
+# for root, and checks three real cron ticks (about 4 minutes).
+# Runs on a pull request that has the `e2e` label (and on each push while it
+# has it), or by hand from the Actions tab.
+on:
+  pull_request:
+    types: [labeled, opened, reopened, synchronize]
+  workflow_dispatch:
+
+jobs:
+  real-cron:
+    name: Real cron end-to-end
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: '${{ github.workspace }}/go.mod'
+
+      - name: Install cron
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q cron
+
+      - name: Run real cron check
+        run: sudo env "PATH=$PATH" "GOCACHE=$(go env GOCACHE)" "GOMODCACHE=$(go env GOMODCACHE)" tests/real-cron.sh

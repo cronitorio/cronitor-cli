@@ -64,10 +64,36 @@ Logout revokes this installation's credential and removes it locally. **Schedule
 | Command | Description |
 |---------|-------------|
 | `cronitor sync` | Sync cron jobs to Cronitor |
+| `cronitor sync --format=short` | Also convert `cronitor exec` lines to `CRONITOR=<key>` lines |
+| `cronitor sync --format=exec` | Write all lines as `cronitor exec` and restore your `SHELL` |
 | `cronitor exec <key> <cmd>` | Run a command with monitoring |
 | `cronitor list` | List all cron jobs |
 | `cronitor status` | View monitor status |
 | `cronitor dash` | Start the web dashboard |
+
+#### How `cronitor sync` changes a crontab
+
+On Linux and macOS, sync puts the monitor key in front of each job you monitor:
+
+```
+CRONITOR_REAL_SHELL=/bin/sh
+SHELL=/etc/cronitor/cronitor-shell
+0 1 * * * CRONITOR=abc123 /usr/local/bin/backup.sh
+```
+
+- `cronitor-shell` is a small script. For a line that starts with `CRONITOR=<key>`, it runs the job through `cronitor`. Every other line runs in your real shell (`CRONITOR_REAL_SHELL`), as before. The job runs in that shell too.
+- Sync installs the script in `/etc/cronitor/` as root, or in `~/.cronitor/` otherwise.
+- If the `cronitor` binary is missing, marked jobs still run, without monitoring.
+- `MONITORIO=<key>` works the same as `CRONITOR=<key>`.
+- Sync leaves existing `cronitor exec` lines as they are. `--format=short` converts them. These flags move to settings on the line: `--no-stdout` (`CRONITOR_NO_STDOUT=1`), `--env` (`CRONITOR_ENV`), `--api-key` (`CRONITOR_API_KEY`), `--ping-api-key` (`CRONITOR_PING_API_KEY`) and `--hostname` (`CRONITOR_HOSTNAME`). A line with any other flag stays `cronitor exec`.
+
+  ```
+  0 1 * * * CRONITOR=abc123 CRONITOR_ENV=staging CRONITOR_NO_STDOUT=1 /usr/local/bin/backup.sh
+  ```
+- A `CRONITOR=<key>` line runs in the crontab's shell, the same as cron. `cronitor exec` uses bash when the crontab's shell is `/bin/sh`. When `--format=short` would move jobs from bash to `/bin/sh`, sync prints a warning that lists them, and a command that `/bin/sh` cannot parse stays `cronitor exec`. To keep bash, add `SHELL=/bin/bash` to the crontab.
+- A `CRONITOR=<key>` line works only in a crontab that sync has changed. To add monitoring by hand to any other crontab, script or task, use `cronitor exec <key> <cmd>`.
+- To go back, run `cronitor sync --format=exec`.
+- Windows scheduled tasks always use `cronitor exec`.
 
 ### API Resources
 
@@ -337,6 +363,10 @@ The Cronitor CLI includes a built-in [Model Context Protocol (MCP)](https://mode
 For setup instructions, available tools, and configuration options, see the [MCP Integration Guide](docs/MCP_INTEGRATION.md).
 
 ## Uninstall CronitorCLI
-First, you will need to update any crontab files that were edited to include Cronitor to remove the reference to `cronitor exec MONITOR_KEY` that were added when you created monitors.
+First, run `cronitor sync --format=exec` for each crontab that sync changed. This removes the `SHELL=.../cronitor-shell` and `CRONITOR_REAL_SHELL=` lines, restores your previous `SHELL`, and writes monitored jobs as `cronitor exec MONITOR_KEY ...`.
 
-Then, remove the cronitor executable from wherever it was installed. If you followed our default instructions it can be removed with `rm /usr/bin/cronitor`
+**Do not delete `cronitor-shell` while a crontab still has `SHELL=.../cronitor-shell`. If you do, no job in that crontab runs, including jobs without monitoring.**
+
+Then, update any crontab files that were edited to include Cronitor to remove the reference to `cronitor exec MONITOR_KEY` that were added when you created monitors.
+
+Then, remove `/etc/cronitor/cronitor-shell` or `~/.cronitor/cronitor-shell`, and remove the cronitor executable from wherever it was installed. If you followed our default instructions it can be removed with `rm /usr/bin/cronitor`

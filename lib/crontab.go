@@ -33,6 +33,13 @@ type Crontab struct {
 	TimezoneLocationName    *TimezoneLocationName `json:"timezone,omitempty"`
 	Shell                   string                `json:"-"`
 	UsesSixFieldExpressions bool                  `json:"-"`
+	WriteMode               WriteMode             `json:"-"`
+	ShimShellPath           string                `json:"-"`
+	RealShell               string                `json:"-"`
+	BlockNewShim            bool                  `json:"-"`
+	RewriteShimToExec       bool                  `json:"-"`
+	ConvertExec             bool                  `json:"-"` // sync --format=short
+	ShellChange             *ShellChange          `json:"-"` // set when conversion changes the job shell
 }
 
 // isExampleCronLine checks if a line contains obvious placeholder/example text
@@ -177,6 +184,8 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 				c.TimezoneLocationName = &TimezoneLocationName{splitExport[1]}
 			} else if splitExport[0] == "SHELL" {
 				c.Shell = splitExport[1]
+			} else if key, val, ok := strings.Cut(splitLine[0], "="); ok && key == RealShellEnv {
+				c.RealShell = val
 			}
 		} else if splitLineLen > 0 && strings.HasPrefix(splitLine[0], "@") {
 			// Handling for special cron @keyword
@@ -228,17 +237,31 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			Crontab:        c.lightweightCopy(),
 		}
 
-		// If this job is already wrapped, peel off `cronitor [flags...] exec <key>`.
-		// The original prefix is kept so Write does not rebuild flags or the binary path.
 		if code, unwrapped, prefix, noStdout, ok := unwrapCronitorExec(rawCommand); ok {
 			line.Code = code
 			line.CommandToRun = unwrapped
 			line.wrapPrefix = prefix
+			line.Integration = IntegrationExec
+			if strings.HasPrefix(rawCommand, prefix) {
+				line.rawTail = strings.TrimLeft(rawCommand[len(prefix):], " \t")
+			}
 			if noStdout {
 				line.Mon.NoStdoutPassthru = true
 			}
+		} else if key, rest, ok := ParseMonitorMarker(rawCommand); ok {
+			line.Code = key
+			line.shimSettings, line.CommandToRun = SplitShimSettings(rest)
+			for _, s := range line.shimSettings {
+				if s == "CRONITOR_NO_STDOUT=1" {
+					line.Mon.NoStdoutPassthru = true
+				}
+			}
+			line.marker = markerPrefix(rawCommand)
+			line.rawTail = rawCommand[len(line.marker)+len(key):]
+			line.Integration = IntegrationShim
 		} else {
 			line.CommandToRun = strings.Join(command, " ")
+			line.rawTail = rawCommand
 
 			// If the command appears to be quoted (starts and ends with quotes), unquote it
 			if strings.HasPrefix(line.CommandToRun, "\"") && strings.HasSuffix(line.CommandToRun, "\"") {
@@ -271,13 +294,17 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 		c.Lines = append(c.Lines, createAutoDiscoverLine(c))
 	}
 
+	if IsShimShellPath(c.Shell) && c.RealShell != "" {
+		c.Shell = c.RealShell
+	}
+
 	return nil, 0
 }
 
 func (c Crontab) Write() string {
 	var cl []string
-	for _, line := range c.Lines {
-		cl = append(cl, line.Write())
+	for _, line := range c.linesForWrite() {
+		cl = append(cl, line.writeUsing(c))
 	}
 
 	result := strings.Join(cl, "\n")
@@ -438,9 +465,13 @@ type Line struct {
 	Ignored        bool
 	Mon            Monitor
 	Crontab        Crontab
-	wrapPrefix     string // cronitor prefix through the key, from parse
-	rawCommand     string // exact command field from the file, after any run-as user
-	parsedCommand  string // CommandToRun as parsed; a different value means it was edited
+	wrapPrefix     string   // cronitor prefix through the key, from parse
+	rawCommand     string   // exact command field from the file, after any run-as user
+	parsedCommand  string   // CommandToRun as parsed; a different value means it was edited
+	rawTail        string   // shim: bytes after the key, including the separator; otherwise the job text
+	marker         string   // shim: CRONITOR= or MONITORIO=, as parsed
+	shimSettings   []string // shim: CRONITOR_ENV=... words after the key
+	Integration    string   `json:"-"`
 }
 
 func (l Line) IsMonitorable() bool {
@@ -475,6 +506,10 @@ func (l Line) CommandIsComplex() bool {
 }
 
 func (l Line) Write() string {
+	return l.writeUsing(l.Crontab)
+}
+
+func (l Line) writeUsing(c Crontab) string {
 	var outputLines []string
 	var lineParts []string
 
@@ -506,14 +541,16 @@ func (l Line) Write() string {
 
 	lineParts = append(lineParts, l.CronExpression)
 
-	if !l.Crontab.IsUserCrontab && l.RunAs != "" {
+	if !c.IsUserCrontab && l.RunAs != "" {
 		lineParts = append(lineParts, l.RunAs)
 	}
 
-	// Reuse the saved prefix while a code is still known. Discover clears
-	// Line.Code and leaves the code on Mon, so this must use GetCode.
-	// Dashboard disable clears both, and the bare command is written below.
-	if code := l.GetCode(); l.wrapPrefix != "" && code != "" {
+	code := l.GetCode()
+	style := ""
+	if code != "" {
+		style = l.renderIntegration(c)
+	}
+	if l.wrapPrefix != "" && code != "" && style != IntegrationShim {
 		prefix := insertSyncFlags(replacePrefixKey(l.wrapPrefix, code), l.Mon.NoStdoutPassthru)
 		lineParts = append(lineParts, prefix)
 		if raw, ok := l.rawJob(); ok {
@@ -525,28 +562,49 @@ func (l Line) Write() string {
 		return strings.Join(outputLines, "\n")
 	}
 
-	if code := l.GetCode(); code != "" {
+	if l.Integration == IntegrationShim && code == "" {
+		lineParts = append(lineParts, shimJob(l))
+		outputLines = append(outputLines, strings.Join(lineParts, " "))
+		return strings.Join(outputLines, "\n")
+	}
+
+	if code != "" && style == IntegrationShim {
+		prefix := strings.Join(lineParts, " ")
+		outputLines = append(outputLines, strings.TrimSpace(prefix)+" "+formatShimCommand(l, code))
+		return strings.Join(outputLines, "\n")
+	}
+
+	if code != "" && style == IntegrationExec {
 		lineParts = append(lineParts, "cronitor")
 
 		// Root flags belong before the subcommand. --no-stdout is local to exec.
-		if env := viper.GetString("CRONITOR_ENV"); env != "" {
+		flags := settingFlags(l.shimSettings)
+		lineParts = append(lineParts, flags...)
+		if env := viper.GetString("CRONITOR_ENV"); env != "" && !containsString(flags, "--env") {
 			lineParts = append(lineParts, "--env")
 			lineParts = append(lineParts, env)
 		}
 		lineParts = append(lineParts, "exec")
-		if l.Mon.NoStdoutPassthru {
+		// Sync replaces Mon, so a marker line's own setting must count too.
+		if l.Mon.NoStdoutPassthru || containsString(l.shimSettings, "CRONITOR_NO_STDOUT=1") {
 			lineParts = append(lineParts, "--no-stdout")
 		}
 		lineParts = append(lineParts, code)
 
-		command := l.CommandToRun
-		if raw, ok := l.rawJob(); ok {
-			command = raw
-		}
-		if len(command) > 0 {
-			// Quoted as one shell word when complex, so the outer shell does not
-			// eat pipes and lists.
-			lineParts = append(lineParts, formatWrappedCommand(command))
+		if l.Integration == IntegrationShim {
+			if cmd := shimExecCommand(l); cmd != "" {
+				lineParts = append(lineParts, cmd)
+			}
+		} else {
+			command := l.CommandToRun
+			if raw, ok := l.rawJob(); ok {
+				command = raw
+			}
+			if len(command) > 0 {
+				// Quoted as one shell word when complex, so the outer shell does not
+				// eat pipes and lists.
+				lineParts = append(lineParts, formatWrappedCommand(command))
+			}
 		}
 		outputLines = append(outputLines, strings.TrimSpace(strings.Join(lineParts, " ")))
 		return strings.Join(outputLines, "\n")

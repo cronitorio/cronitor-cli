@@ -1,0 +1,42 @@
+# Fixture for `cronitor sync` with the shell shim.
+# lib/shell_shim_golden_test.go writes this with every job monitored and
+# compares the result to crontab.expected (run with -update to regenerate).
+# cmd/shell_shim_fixture_test.go runs each job line, before and after, and
+# checks that output and exit code match.
+# $FIXTURE is set by the test to a temp dir that holds "my app/run.sh".
+MAILTO=""
+PATH=/usr/local/bin:/usr/bin:/bin
+
+# --- plain commands (new lines get CRONITOR=<key>) ---
+0 1 * * * cronitor exec new10 echo plain
+0 2 * * * cronitor exec new11 'echo "two  spaces"   >  /dev/null; echo after-redirect'
+0 3 * * * cronitor exec new12 "$FIXTURE/my app/run.sh" --flag "x y"
+0 4 * * * cronitor exec new13 'date +\%Y > /dev/null && echo escaped-percent'
+0 5 * * * cronitor exec new14 cat%line-one%line-two
+0 6 * * * cronitor exec new15 'printf '\''\%s\n'\'' a b | tr a-z A-Z'
+0 7 * * * cronitor exec new16 'cd /tmp && pwd; exit 3'
+0 8 * * * cronitor exec new17 FOO=bar sh -c 'echo $FOO'
+@daily cronitor exec new18 echo at-daily
+@reboot cronitor exec new19 echo at-reboot
+*/5 9-17 * * 1-5 cronitor exec new20 echo ranges
+
+# --- already monitored with a marker (key kept, marker kept) ---
+0 10 * * * cronitor exec keep1 echo cronitor-marker
+0 11 * * * cronitor exec keep2 echo monitorio-marker
+0 12 * * * cronitor exec keep3 cat%stdin-a%stdin-b
+0 17 * * * cronitor --env staging exec keep10 echo marker-with-env
+
+# --- already wrapped with exec (left as exec; --format=short converts all
+# but the --config line, which a CRONITOR= line cannot carry) ---
+0 13 * * * cronitor exec keep4 echo exec-plain
+0 14 * * * /usr/local/bin/cronitor exec keep5 'cd /tmp && echo exec-compound'
+0 15 * * * cronitor exec --no-stdout keep6 echo exec-no-stdout
+0 16 * * * monicli exec keep7 echo monicli-exec
+0 18 * * * cronitor --env staging exec keep8 echo exec-env
+0 20 * * * cronitor -p pk12345 exec keep11 echo exec-ping-key
+0 21 * * * cronitor exec keep12 'echo quoted  words'
+0 22 * * * cronitor exec keep13 'printf "\%s|" a b'
+0 19 * * * cronitor --config /etc/cronitor/other.json exec keep9 echo exec-config
+
+# --- comments and disabled jobs stay as written ---
+# 0 17 * * * echo commented-out
