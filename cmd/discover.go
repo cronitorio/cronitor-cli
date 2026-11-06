@@ -894,6 +894,10 @@ func planUpdate(line *lib.Line, key string, existing lib.Monitor, found bool, cu
 		payload.Schedules = &[]string{line.CronExpression}
 		payload.Timezone = timezone.Name
 		changed = true
+	} else if existing.Timezone != "" && existing.Timezone != timezone.Name {
+		// Same schedule, but the crontab's timezone (CRON_TZ, TZ or the server's) changed.
+		payload.Timezone = timezone.Name
+		changed = true
 	}
 	if name != "" && name != currentName {
 		payload.Name = name

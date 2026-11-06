@@ -595,3 +595,34 @@ func TestSyncInteractiveRerunSendsScheduleChange(t *testing.T) {
 		t.Fatalf("summary:\n%s", out)
 	}
 }
+
+func TestSyncRerunTimezoneChangeSendsTimezone(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	api, apiURL := newRerunAPI(t, `{"name":"Nightly backup","key":"backup","schedules":["0 2 * * *"],"timezone":"UTC","attributes":{"key":"backup","code":"abc123"}}`)
+	path := writeCron(t, "CRON_TZ=America/New_York\n0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n")
+
+	runSync(t, apiURL, path)
+
+	puts := api.sent()
+	if len(puts) != 1 || len(puts[0]) != 1 {
+		t.Fatalf("sync sent %v; want one timezone update", puts)
+	}
+	got := puts[0][0]
+	if names := fieldNames(got); !reflect.DeepEqual(names, []string{"key", "timezone", "type"}) || got["timezone"] != "America/New_York" {
+		t.Fatalf("payload = %v; want key, timezone and type only", got)
+	}
+}
+
+func TestSyncRerunSameTimezoneSendsNothing(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	api, apiURL := newRerunAPI(t, `{"name":"Nightly backup","key":"backup","schedules":["0 2 * * *"],"timezone":"America/New_York","attributes":{"key":"backup","code":"abc123"}}`)
+	path := writeCron(t, "CRON_TZ=America/New_York\n0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n")
+
+	runSync(t, apiURL, path)
+
+	if puts := api.sent(); len(puts) != 0 {
+		t.Fatalf("sync sent %v; the timezone did not change", puts)
+	}
+}
