@@ -4,6 +4,7 @@ package lib
 
 import (
 	"context"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -427,6 +428,79 @@ func TestWrapperMapsSettingsToExecFlags(t *testing.T) {
 		_, job := SplitShimSettings(rest)
 		if !strings.HasSuffix(tc.want, "|"+job+"|") {
 			t.Errorf("%q: Go parser gives job %q, wrapper gives %s", tc.line, job, tc.want)
+		}
+	}
+}
+
+// TestWrapperMatchesGoParserFuzz builds random marker lines from tricky words
+// and checks that shell-wrapper hands cronitor exec the same flags, key and
+// command that lib.SplitShimSettings and the settings table give.
+func TestWrapperMatchesGoParserFuzz(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "seen")
+	bin := filepath.Join(dir, "cronitor")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s\\037' \"$@\" > \"$OUT\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	wrapper, err := InstallShimWrapper(filepath.Join(dir, ".cronitor", "shell-wrapper"), bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	words := []string{
+		"CRONITOR_ENV=staging", "CRONITOR_ENV=exec", "CRONITOR_ENV=a/b:c@d+e-f.g", "CRONITOR_ENV=",
+		"CRONITOR_ENV='x y'", "CRONITOR_ENV=$X", "CRONITOR_ENV==x", "CRONITOR_ENV=x=y",
+		"CRONITOR_NO_STDOUT=1", "CRONITOR_NO_STDOUT=0", "CRONITOR_API_KEY=abc123",
+		"CRONITOR_PING_API_KEY=p1", "CRONITOR_HOSTNAME=web-1.local", "CRONITOR_FOO=1", "FOO=1",
+		"echo", "hi", "'a b'", `"c  d"`, "--", "-x", "--no-stdout", "exec", "|", "&&", ";", `\%`, "*", "$HOME", "k2",
+	}
+	seps := []string{" ", "  ", "\t", " \t "}
+	flagFor := map[string]string{
+		"CRONITOR_ENV": "--env=", "CRONITOR_API_KEY": "--api-key=",
+		"CRONITOR_PING_API_KEY": "--ping-api-key=", "CRONITOR_HOSTNAME": "--hostname=",
+	}
+	rng := rand.New(rand.NewSource(66))
+	for i := 0; i < 400; i++ {
+		var b strings.Builder
+		b.WriteString("CRONITOR=k1")
+		for n := 1 + rng.Intn(6); n > 0; n-- {
+			b.WriteString(seps[rng.Intn(len(seps))])
+			b.WriteString(words[rng.Intn(len(words))])
+		}
+		if rng.Intn(4) == 0 {
+			b.WriteString(seps[rng.Intn(len(seps))])
+		}
+		line := b.String()
+
+		_, rest, ok := ParseMonitorMarker(line)
+		if !ok {
+			t.Fatalf("generator made an unparsed line %q", line)
+		}
+		settings, job := SplitShimSettings(rest)
+		var want []string
+		noStdout := false
+		for _, s := range settings {
+			name, value, _ := strings.Cut(s, "=")
+			if name == "CRONITOR_NO_STDOUT" {
+				noStdout = noStdout || value == "1"
+				continue
+			}
+			want = append(want, flagFor[name]+value)
+		}
+		want = append(want, "exec")
+		if noStdout {
+			want = append(want, "--no-stdout")
+		}
+		want = append(want, "k1", job)
+
+		os.Remove(out)
+		cmd := exec.Command(wrapper, "-c", line)
+		cmd.Env = append(os.Environ(), "CRONITOR_SHELL=/bin/sh", "OUT="+out)
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%q: %v\n%s", line, err, b)
+		}
+		got := strings.Split(strings.TrimSuffix(readFile(t, out), "\x1f"), "\x1f")
+		if strings.Join(got, "\x1f") != strings.Join(want, "\x1f") {
+			t.Fatalf("line %q\n got  %q\n want %q", line, got, want)
 		}
 	}
 }
