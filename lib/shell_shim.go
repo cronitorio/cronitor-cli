@@ -79,14 +79,6 @@ func isPOSIXSpace(b byte) bool {
 	}
 }
 
-func ResolveRealShell(envValue string) string {
-	shell := strings.TrimSpace(envValue)
-	if shell == "" || IsShimShellPath(shell) {
-		return DefaultRealShell
-	}
-	return shell
-}
-
 func formatShimCommand(line Line, code string) string {
 	prefix := line.marker
 	if prefix == "" {
@@ -174,7 +166,7 @@ func (l Line) renderIntegration(c Crontab) string {
 		return IntegrationExec
 	case WriteModeShim:
 		if l.Integration == IntegrationExec {
-			if _, ok := l.execSettings(); ok && c.ConvertExec && c.ShellChange.accepts(l) {
+			if _, ok := l.execSettings(); ok && c.ConvertExec {
 				return IntegrationShim
 			}
 			return IntegrationExec
@@ -237,7 +229,6 @@ func (c Crontab) ShimNotices() (stop bool, notices []string) {
 		}
 	}
 	if c.ConvertExec && c.WriteMode == WriteModeShim {
-		var converted []string
 		for _, line := range c.Lines {
 			if line.Integration != IntegrationExec || line.GetCode() == "" {
 				continue
@@ -245,21 +236,7 @@ func (c Crontab) ShimNotices() (stop bool, notices []string) {
 			if _, ok := line.execSettings(); !ok {
 				notices = append(notices, fmt.Sprintf(
 					"notice: monitor %s: kept as cronitor exec because the line has flags a CRONITOR= line cannot carry", line.GetCode()))
-				continue
 			}
-			if !c.ShellChange.accepts(*line) {
-				notices = append(notices, fmt.Sprintf(
-					"notice: monitor %s: kept as cronitor exec because %s cannot parse the command (cronitor exec ran it in %s)",
-					line.GetCode(), c.ShellChange.To, c.ShellChange.From))
-				continue
-			}
-			converted = append(converted, line.GetCode())
-		}
-		if c.ShellChange != nil && len(converted) > 0 {
-			notices = append(notices, fmt.Sprintf(
-				"warning: %d converted %s in %s ran in %s and will now run in %s: %s. To keep %s for this crontab, set %s=%s. To undo, run cronitor sync --format=exec.",
-				len(converted), plural(len(converted), "job", "jobs"), c.DisplayName(), c.ShellChange.From, c.ShellChange.To, strings.Join(converted, ", "),
-				c.ShellChange.From, RealShellEnv, c.ShellChange.From))
 		}
 	}
 	if c.RewriteShimToExec {
@@ -463,21 +440,42 @@ esac
 if [ -z "$key" ]; then
   exec "$REAL_SHELL" "$@"
 fi
+trim() {
+  t=$1
+  while :; do
+    case $t in
+      [[:space:]]*) t=${t#?} ;;
+      *) break ;;
+    esac
+  done
+}
+trim "$after"; after=$t
+# Settings after the key become cronitor exec flags. Value flags go before
+# exec, as --flag=value, because exec reads the first word after it as the key.
+set --
+nostdout=
 while :; do
-  case $after in
-    [[:space:]]*) after=${after#?} ;;
+  word=${after%%[[:space:]]*}
+  next=${after#"$word"}
+  case $next in [[:space:]]*) ;; *) break ;; esac
+  trim "$next"
+  [ -n "$t" ] || break
+  case $word in *=*) ;; *) break ;; esac
+  name=${word%%=*}
+  value=${word#*=}
+  case $value in ''|*[!A-Za-z0-9._:@/+-]*) break ;; esac
+  case $name in
+    CRONITOR_NO_STDOUT) [ "$value" = 1 ] && nostdout=1 ;;
+    CRONITOR_ENV) set -- "$@" "--env=$value" ;;
+    CRONITOR_API_KEY) set -- "$@" "--api-key=$value" ;;
+    CRONITOR_PING_API_KEY) set -- "$@" "--ping-api-key=$value" ;;
+    CRONITOR_HOSTNAME) set -- "$@" "--hostname=$value" ;;
     *) break ;;
   esac
+  after=$t
 done
 if [ -x "$CRONITOR_BIN" ]; then
-  exec "$CRONITOR_BIN" shell-shim -c "$cmd"
+  exec "$CRONITOR_BIN" "$@" exec ${nostdout:+--no-stdout} "$key" "$after"
 fi
 exec "$REAL_SHELL" -c "$after"
 `
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
-}

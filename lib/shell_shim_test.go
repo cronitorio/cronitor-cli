@@ -103,21 +103,6 @@ func TestExecFallbacksPlaceNoStdoutAfterExec(t *testing.T) {
 	}
 }
 
-func TestResolveRealShell(t *testing.T) {
-	if got := ResolveRealShell(""); got != "/bin/sh" {
-		t.Fatalf("empty=%s", got)
-	}
-	if got := ResolveRealShell("/bin/sh"); got != "/bin/sh" {
-		t.Fatalf("/bin/sh=%s", got)
-	}
-	if got := ResolveRealShell("/bin/bash"); got != "/bin/bash" {
-		t.Fatalf("bash=%s", got)
-	}
-	if got := ResolveRealShell("/etc/cronitor/shell-wrapper"); got != "/bin/sh" {
-		t.Fatalf("shim shell=%s, want /bin/sh", got)
-	}
-}
-
 func TestShimInstallPathRootUsesEtc(t *testing.T) {
 	old := shimEuid
 	t.Cleanup(func() { shimEuid = old })
