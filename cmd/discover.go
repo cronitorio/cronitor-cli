@@ -38,18 +38,21 @@ type ExistingMonitors struct {
 	CurrentCode string
 }
 
+// matches reports whether m is the monitor for a line. A line's code is the
+// monitor's generated code, or its key when the line was written by hand
+// (CRONITOR=prune-events). A line without a code matches by its hash key.
+func monitorMatches(m lib.Monitor, key, code string) bool {
+	if code != "" {
+		return m.Attributes.Code == code || m.Attributes.Key == code
+	}
+	return key != "" && m.Attributes.Key == key
+}
+
 func (em ExistingMonitors) HasMonitorByName(name string) bool {
 	for _, value := range em.Monitors {
-		if em.CurrentCode != "" {
-			if value.Attributes.Code == em.CurrentCode {
-				continue
-			}
-		} else {
-			if value.Attributes.Key == em.CurrentKey {
-				continue
-			}
+		if monitorMatches(value, em.CurrentKey, em.CurrentCode) {
+			continue
 		}
-
 		if value.Name == name {
 			return true
 		}
@@ -67,16 +70,8 @@ func (em ExistingMonitors) HasMonitorByName(name string) bool {
 
 func (em ExistingMonitors) Get(key string, code string) lib.Monitor {
 	for _, value := range em.Monitors {
-		if code != "" {
-			if value.Attributes.Code == code {
-				return value
-			}
-		}
-
-		if key != "" {
-			if value.Attributes.Key == key {
-				return value
-			}
+		if monitorMatches(value, key, code) {
+			return value
 		}
 	}
 	return lib.Monitor{}
@@ -84,14 +79,8 @@ func (em ExistingMonitors) Get(key string, code string) lib.Monitor {
 
 func (em ExistingMonitors) GetNameForCurrent() (string, error) {
 	for _, value := range em.Monitors {
-		if em.CurrentCode != "" {
-			if value.Attributes.Code == em.CurrentCode {
-				return value.Name, nil
-			}
-		} else {
-			if value.Attributes.Key == em.CurrentKey {
-				return value.Name, nil
-			}
+		if monitorMatches(value, em.CurrentKey, em.CurrentCode) {
+			return value.Name, nil
 		}
 	}
 	return "", errors.New("does not exist")
