@@ -454,23 +454,89 @@ func invokedExecutable(arg0 string, lookPath func(string) (string, error), getwd
 
 func processCrontab(crontab *lib.Crontab) bool {
 	defer printLn()
+	plan := planCrontab(crontab)
+	if plan == nil || plan.aborted {
+		return false
+	}
+	return applyPlan(plan)
+}
 
+// syncAction is what sync does with one crontab line.
+type syncAction int
+
+const (
+	actionSend syncAction = iota // send line.Mon to Cronitor
+	actionSkip                   // the user skipped the line
+)
+
+type plannedLine struct {
+	line   *lib.Line
+	key    string // hash key of the line, see Line.Key
+	action syncAction
+}
+
+// crontabPlan holds every decision for one crontab. planCrontab fills it
+// without calling the API or writing anything; applyPlan carries it out.
+type crontabPlan struct {
+	crontab *lib.Crontab
+	lines   []plannedLine
+	aborted bool // the user quit
+}
+
+type promptChoice int
+
+const (
+	choiceMonitor promptChoice = iota
+	choiceSkip
+	choiceQuit
+)
+
+type promptResult struct {
+	choice promptChoice
+	name   string
+}
+
+// askAboutJob shows one job and asks what to do with it. Tests replace it.
+var askAboutJob = func(line *lib.Line, name string, monitored bool) promptResult {
+	printSuccessText(fmt.Sprintf("Line %d:", line.LineNumber), true)
+	fmt.Println(renderJobInfoBox(name, line.CronExpression, line.CommandToRun, monitored))
+
+	result, err := tea.NewProgram(initialNameInputModel(name)).Run()
+	if err != nil {
+		printErrorText("Error: "+err.Error()+"\n", false)
+		return promptResult{choice: choiceSkip}
+	}
+	finalModel := result.(nameInputModel)
+	if finalModel.exited {
+		printWarningText("Exiting", true)
+		return promptResult{choice: choiceQuit}
+	}
+	if !finalModel.done {
+		printWarningText("Skipped", true)
+		return promptResult{choice: choiceSkip}
+	}
+	return promptResult{choice: choiceMonitor, name: finalModel.textInput.Value()}
+}
+
+// planCrontab reads a crontab and decides what to do with each job. It
+// returns nil when the crontab cannot be used.
+func planCrontab(crontab *lib.Crontab) *crontabPlan {
 	if !crontab.Exists() {
 		printWarningText("This crontab does not exist. Skipping.", true)
-		return false
+		return nil
 	}
 
 	// This will mostly happen when the crontab is empty
 	if err, _ := crontab.Parse(noAutoDiscover); err != nil {
 		printWarningText("This crontab is empty. Skipping.", true)
 		log(fmt.Sprintf("Skipping %s: %s", crontab.DisplayName(), err.Error()))
-		return false
+		return nil
 	}
 
 	// Before going further, ensure we aren't going to run into permissions problems writing the crontab later
 	if !crontab.IsWritable() {
 		printWarningText(fmt.Sprintf("This crontab is not writeable. Re-run command with sudo. Skipping"), true)
-		return false
+		return nil
 	}
 
 	// If a timezone env var is set in the crontab it takes precedence over system tz
@@ -496,10 +562,8 @@ func processCrontab(crontab *lib.Crontab) bool {
 		printSuccessText(fmt.Sprintf("Found %d %s in %s", count, label, crontab.DisplayName()), true)
 	}
 
-	// Read crontab into map of Monitor structs
-	monitors := map[string]*lib.Monitor{}
+	plan := &crontabPlan{crontab: crontab}
 	allNameCandidates := map[string]bool{}
-	userExited := false
 
 	for _, line := range crontab.Lines {
 		if !line.IsMonitorable() {
@@ -517,21 +581,16 @@ func processCrontab(crontab *lib.Crontab) bool {
 		}
 
 		defaultName := createDefaultName(line, crontab, effectiveHostname(), excludeFromName, allNameCandidates)
-		tags := createTags()
 		key := line.Key(crontab.CanonicalName())
 		name := defaultName
-		skip := false
 
 		// Priority order for name selection:
 		// 1. Use Line.Name if it exists (from "# Name: <name>" comment)
 		// 2. Use existing monitor name if available
 		// 3. Use default generated name or prompt user
-
 		if line.Name != "" {
-			// Use the name from the crontab comment
 			name = line.Name
 		} else {
-			// If we know this monitor exists already, return the name
 			existingMonitors.CurrentKey = key
 			existingMonitors.CurrentCode = line.Code
 			if existingName, err := existingMonitors.GetNameForCurrent(); err == nil {
@@ -540,36 +599,17 @@ func processCrontab(crontab *lib.Crontab) bool {
 		}
 
 		if !isAutoDiscover && !line.IsAutoDiscoverCommand() {
-			isMonitored := line.Code != ""
-
-			printSuccessText(fmt.Sprintf("Line %d:", line.LineNumber), true)
-			fmt.Println(renderJobInfoBox(name, line.CronExpression, line.CommandToRun, isMonitored))
-
-			model := initialNameInputModel(name)
-			p := tea.NewProgram(model)
-
-			if result, err := p.Run(); err != nil {
-				printErrorText("Error: "+err.Error()+"\n", false)
-				skip = true
-			} else {
-				finalModel := result.(nameInputModel)
-				if finalModel.exited {
-					printWarningText("Exiting", true)
-					userExited = true
-					userAbortedSync = true
-					break
-				}
-				if !finalModel.done {
-					printWarningText("Skipped", true)
-					skip = true
-				} else {
-					name = finalModel.textInput.Value()
-				}
+			answer := askAboutJob(line, name, line.Code != "")
+			if answer.choice == choiceQuit {
+				userAbortedSync = true
+				plan.aborted = true
+				break
 			}
-		}
-
-		if skip {
-			continue
+			if answer.choice == choiceSkip {
+				plan.lines = append(plan.lines, plannedLine{line: line, key: key, action: actionSkip})
+				continue
+			}
+			name = answer.name
 		}
 
 		existingMonitors.AddName(name)
@@ -591,7 +631,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 			Name:             name,
 			DefaultName:      defaultName,
 			Key:              line.Code,
-			Tags:             tags,
+			Tags:             createTags(),
 			Schedules:        &[]string{line.CronExpression},
 			Type:             "job",
 			Platform:         lib.CRON,
@@ -607,14 +647,21 @@ func processCrontab(crontab *lib.Crontab) bool {
 			line.Mon.Key = key
 		}
 
-		monitors[key] = &line.Mon
+		plan.lines = append(plan.lines, plannedLine{line: line, key: key, action: actionSend})
 	}
 
 	printLn()
+	return plan
+}
 
-	// If user pressed Ctrl+D, exit without posting anything
-	if userExited {
-		return false
+// applyPlan sends the planned monitors to Cronitor and writes the crontab.
+func applyPlan(plan *crontabPlan) bool {
+	crontab := plan.crontab
+	monitors := map[string]*lib.Monitor{}
+	for _, p := range plan.lines {
+		if p.action == actionSend {
+			monitors[p.key] = &p.line.Mon
+		}
 	}
 
 	if len(monitors) > 0 {
