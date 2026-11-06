@@ -541,12 +541,7 @@ func processCrontab(crontab *lib.Crontab) bool {
 
 		key := line.Key(crontab.CanonicalName())
 		if updatedMonitor, exists := monitors[key]; exists {
-			line.Mon = *updatedMonitor
-			line.Code = updatedMonitor.Attributes.Code
-			// Ensure the line name is set so it gets written as a comment
-			if updatedMonitor.Name != "" {
-				line.Name = updatedMonitor.Name
-			}
+			line.ApplyDiscoveredMonitor(*updatedMonitor)
 		}
 	}
 
