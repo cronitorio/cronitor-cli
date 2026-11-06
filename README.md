@@ -6,7 +6,7 @@
 CronitorCLI is the recommended companion application to the Cronitor monitoring service.  Use it on your workstation and deploy it to your server for powerful features, including:
 
 * Import and sync all of your cron jobs with Cronitor
-* Easily manage your cron jobs with the [web-based control panel](#crontab-guru-dashboard)
+* Manage your cron jobs in a browser with the optional [Crontab Guru Dashboard](#crontab-guru-dashboard)
 * Automatic integration with Cronitor
 * Power tools for your cron jobs
 
@@ -69,7 +69,7 @@ Logout revokes this installation's credential and removes it locally. **Schedule
 | `cronitor exec <key> <cmd>` | Run a command with monitoring |
 | `cronitor list` | List all cron jobs |
 | `cronitor status` | View monitor status |
-| `cronitor dash` | Start the web dashboard |
+| `cronitor dash` | Start the Crontab Guru Dashboard (installed separately as `crontab-dashboard`) |
 
 #### How `cronitor sync` changes a crontab
 
@@ -253,12 +253,24 @@ Team and API key commands need a credential from `cronitor auth login --admin` a
 
 ## Crontab Guru Dashboard
 
-The Cronitor CLI bundles the [Crontab Guru Dashboard](https://crontab.guru/dashboard.html), a self‑hosted web UI to manage your cron jobs, including a one‑click “run now” and "suspend", a local console for testing jobs, and a built in MCP server for configuring jobs and checking the health/status of existing ones.
+The [Crontab Guru Dashboard](https://crontab.guru/dashboard.html) is a self‑hosted web UI to manage your cron jobs, including a one‑click “run now” and "suspend", a local console for testing jobs, and a built in MCP server for configuring jobs and checking the health/status of existing ones.
+
+Since version 34.0 the dashboard is a separate program, `crontab-dashboard`, released with each CLI version. The `cronitor` binary does not include it. Your configuration, cron jobs, systemd units, and MCP settings do not change: `cronitor dash` starts `crontab-dashboard` with the same arguments.
+
+Install
+
+Put `crontab-dashboard` in the same folder as `cronitor` (Linux and macOS shown; use your platform and architecture, for example `darwin_arm64`). If `crontab-dashboard` is missing, `cronitor dash` prints this command with the right values:
+
+```
+curl -fsSL https://github.com/cronitorio/cronitor-cli/releases/latest/download/crontab-dashboard_linux_amd64.tar.gz | sudo tar -xz -C /usr/local/bin
+```
+
+On Windows, extract `crontab-dashboard.exe` from `crontab-dashboard_windows_amd64.zip` into the folder that holds `cronitor.exe`. `cronitor update` updates both programs when they are in the same folder.
 
 Start locally
 
 ```
-cronitor dash
+cronitor dash            # or: crontab-dashboard
 # then visit http://localhost:9000
 ```
 
@@ -282,8 +294,8 @@ cronitor configure --users user1,user2
 ```
 ### Docker
 
-The included `dockerfile` downloads and extracts the CLI for the target platform
-(`amd64`, `arm64`, or `arm`). Credentials are supplied when the container starts;
+The included `dockerfile` downloads and extracts the CLI and the dashboard for
+the target platform (`amd64`, `arm64`, or `arm`). Credentials are supplied when the container starts;
 do not put them in Docker build arguments or Dockerfile `ENV` instructions.
 The dashboard reads these environment variables directly, so no
 `cronitor configure` step is needed.
@@ -355,7 +367,7 @@ You can also pass `--ping-api-host eu.cronitor.link`, or save it with `cronitor 
 
 ## MCP Server (AI Integration)
 
-The Cronitor CLI includes a built-in [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for managing cron jobs with natural language through AI-powered tools like Claude Code, Cursor, Cline, and Windsurf.
+The Crontab Guru Dashboard includes a built-in [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for managing cron jobs with natural language through AI-powered tools like Claude Code, Cursor, Cline, and Windsurf.
 
 **Quick start:** Run `cronitor dash` on your server, then configure your MCP client to spawn `cronitor dash --mcp-instance default`.
 

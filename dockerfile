@@ -18,8 +18,14 @@ RUN case "${TARGETARCH}" in amd64|arm64|arm) ;; \
     chmod +x /usr/local/bin/cronitor && \
     rm /tmp/cronitor.tar.gz
 
+# Install the dashboard, released next to the CLI.
+RUN curl -fsSL "https://github.com/cronitorio/cronitor-cli/releases/latest/download/crontab-dashboard_linux_${TARGETARCH}.tar.gz" -o /tmp/dashboard.tar.gz && \
+    tar -xzf /tmp/dashboard.tar.gz -C /usr/local/bin crontab-dashboard && \
+    chmod +x /usr/local/bin/crontab-dashboard && \
+    rm /tmp/dashboard.tar.gz
+
 # Supply CRONITOR_DASH_USER and CRONITOR_DASH_PASS at runtime.
 
 EXPOSE 9000
 
-CMD ["cronitor", "dash", "--port", "9000"]
+CMD ["crontab-dashboard", "--port", "9000"]

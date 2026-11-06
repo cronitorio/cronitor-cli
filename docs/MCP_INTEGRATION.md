@@ -2,7 +2,7 @@
 
 ## Overview
 
-Cronitor CLI includes built-in support for the [Model Context Protocol (MCP)](https://modelcontextprotocol.io), enabling integration with AI-powered development tools like Claude Code, Cursor, Cline, Windsurf, and others. Manage cron jobs using natural language directly from your editor or terminal.
+The Crontab Guru Dashboard includes built-in support for the [Model Context Protocol (MCP)](https://modelcontextprotocol.io), enabling integration with AI-powered development tools like Claude Code, Cursor, Cline, Windsurf, and others. Manage cron jobs using natural language directly from your editor or terminal.
 
 ## Features
 
@@ -17,7 +17,7 @@ Cronitor CLI includes built-in support for the [Model Context Protocol (MCP)](ht
 
 The MCP integration has two components:
 
-1. **Dashboard** (`cronitor dash`) - The web UI that manages cron jobs. This **must be running on the server where your cron jobs live**.
+1. **Dashboard** (`cronitor dash`, or `crontab-dashboard`) - The web UI that manages cron jobs. Since CLI 34.0 it is a separate program; see [Install](../README.md#crontab-guru-dashboard). This **must be running on the server where your cron jobs live**.
 
 2. **MCP Server** (`cronitor dash --mcp-instance`) - A bridge process that your AI tool spawns locally. It communicates with your AI tool via stdio and connects to the dashboard over HTTP.
 
