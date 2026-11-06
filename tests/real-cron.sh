@@ -26,8 +26,6 @@ mkdir -p "$out" "$work/bin"
 echo "work dir: $work"
 
 # 1. Build. Only the API host is changed; pings use CRONITOR_PING_API_HOST.
-mkdir -p "$repo/web/static"
-[ -e "$repo/web/static/index.html" ] || echo placeholder > "$repo/web/static/index.html"
 (cd "$repo" && go build -o "$work/bin/cronitor" \
 	-ldflags "-X github.com/cronitorio/cronitor-cli/lib.BaseURLOverride=http://127.0.0.1:$port/api" .)
 

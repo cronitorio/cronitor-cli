@@ -79,7 +79,8 @@ TODO.md
 
 # Dashboard
 node_modules/
-web/static/
+web/static/*
+!web/static/README.md
 cronitor-linux
 
 Claude.md

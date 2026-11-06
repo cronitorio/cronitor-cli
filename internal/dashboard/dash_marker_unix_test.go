@@ -1,6 +1,6 @@
 //go:build !windows
 
-package cmd
+package dashboard
 
 import (
 	"encoding/json"
