@@ -78,7 +78,7 @@ func TestShellShimDashCIsNotTheConfigFlag(t *testing.T) {
 func TestExplicitShellBypassesBinShHeuristic(t *testing.T) {
 	// The child environment says the wrapper, which is what cron exports.
 	// The explicit real shell must still win, including when it is /bin/sh.
-	childEnv := []string{"SHELL=/etc/cronitor/cronitor-shell", "CRONITOR_REAL_SHELL=/bin/sh"}
+	childEnv := []string{"SHELL=/etc/cronitor/shell-wrapper", "CRONITOR_SHELL=/bin/sh"}
 	cmd := makeSubcommandExecWithShell("true", "/bin/sh", childEnv)
 	if len(cmd.Args) < 3 || cmd.Args[0] != "/bin/sh" || cmd.Args[1] != "-c" || cmd.Args[2] != "true" {
 		t.Fatalf("explicit /bin/sh args = %q", cmd.Args)
@@ -129,7 +129,7 @@ func TestShellShimPassthroughAndNeverFail(t *testing.T) {
 			"CRONITOR_SHIM_CHILD=1",
 			"CRONITOR_SHIM_CMD="+command,
 			"CRONITOR_SHIM_CONFIG="+badConfig,
-			"CRONITOR_REAL_SHELL="+shell,
+			"CRONITOR_SHELL="+shell,
 			"CRONITOR_API_KEY=",
 		)
 		cmd.Env = append(cmd.Env, extra...)
@@ -162,7 +162,7 @@ func TestShellShimPassthroughAndNeverFail(t *testing.T) {
 	which := filepath.Join(dir, "which-shell")
 	probe := "printf %s \"$0\" > " + shellQuote(which)
 	// SHELL is the wrapper, which exec's heuristic would select. The shim must
-	// still run under CRONITOR_REAL_SHELL.
+	// still run under CRONITOR_SHELL.
 	if code := run(t, "/bin/sh", "MONITORIO=abc123 "+probe, "SHELL=/bin/bash"); code != 0 {
 		t.Fatalf("probe exit=%d", code)
 	}
@@ -189,12 +189,12 @@ func TestMissingRealShellExits127(t *testing.T) {
 	cmd := shimCommand(wrapper, "-c", "MONITORIO=k1 printf x >> "+shellQuote(count))
 	env := make([]string, 0, len(cmd.Env))
 	for _, e := range cmd.Env {
-		if strings.HasPrefix(e, "CRONITOR_REAL_SHELL=") {
+		if strings.HasPrefix(e, "CRONITOR_SHELL=") {
 			continue
 		}
 		env = append(env, e)
 	}
-	cmd.Env = append(env, "CRONITOR_REAL_SHELL=/bin/nonexistent")
+	cmd.Env = append(env, "CRONITOR_SHELL=/bin/nonexistent")
 	out, err := cmd.CombinedOutput()
 	exit, ok := err.(*exec.ExitError)
 	if !ok || exit.ExitCode() != 127 {
@@ -277,7 +277,7 @@ func shellQuote(s string) string {
 
 func installRealShim(t *testing.T, bin string) string {
 	t.Helper()
-	wrapper, err := lib.InstallShimWrapper(filepath.Join(t.TempDir(), "cronitor-shell"), bin)
+	wrapper, err := lib.InstallShimWrapper(filepath.Join(t.TempDir(), "cronitor", "shell-wrapper"), bin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func installRealShim(t *testing.T, bin string) string {
 
 func shimEnv(extra ...string) []string {
 	env := append(os.Environ(),
-		"CRONITOR_REAL_SHELL=/bin/sh",
+		"CRONITOR_SHELL=/bin/sh",
 		"CRONITOR_API_KEY=",
 		"CRONITOR_PING_API_KEY=",
 		"CRONITOR_CONFIG=",

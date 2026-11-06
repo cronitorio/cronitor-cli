@@ -55,7 +55,7 @@ func writeFixture(t *testing.T, content string, mode WriteMode, convert bool) st
 	ct := parseContent(t, content)
 	ct.WriteMode = mode
 	ct.ConvertExec = convert
-	ct.ShimShellPath = "/etc/cronitor/cronitor-shell"
+	ct.ShimShellPath = "/etc/cronitor/shell-wrapper"
 	for i, l := range ct.Lines {
 		if l.IsMonitorable() && !l.IsComment && l.GetCode() == "" {
 			l.Code = fmt.Sprintf("new%02d", i)

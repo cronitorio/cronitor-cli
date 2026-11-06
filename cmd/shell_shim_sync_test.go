@@ -120,7 +120,7 @@ func withSyncFixture(t *testing.T) (serverURL, shimPath string) {
 	t.Helper()
 	server := monitorServer(t)
 	t.Cleanup(server.Close)
-	shimPath = filepath.Join(t.TempDir(), "cronitor-shell")
+	shimPath = filepath.Join(t.TempDir(), "cronitor", "shell-wrapper")
 	oldOverride := lib.ShimShellPathOverride
 	oldBase := lib.BaseURLOverride
 	oldAuto, oldSilent := isAutoDiscover, isSilent
@@ -213,7 +213,7 @@ func TestSyncDefaultShimThroughCommand(t *testing.T) {
 
 	runSync(t, serverURL, path)
 	first := readCron(t, path)
-	if !strings.Contains(first, "CRONITOR_REAL_SHELL=/bin/bash\n") {
+	if !strings.Contains(first, "CRONITOR_SHELL=/bin/bash\n") {
 		t.Fatalf("prior bash shell not preserved:\n%s", first)
 	}
 	if !strings.Contains(first, "SHELL="+shimPath+"\n") {
@@ -284,7 +284,7 @@ func TestSyncKeepsExistingExecLineByteForByte(t *testing.T) {
 	if !strings.Contains(first, "CRONITOR=") {
 		t.Fatalf("new line was not shim style:\n%s", first)
 	}
-	if !strings.Contains(first, "CRONITOR_REAL_SHELL=/bin/sh\n") {
+	if !strings.Contains(first, "CRONITOR_SHELL=/bin/sh\n") {
 		t.Fatalf("missing default real shell:\n%s", first)
 	}
 
@@ -315,7 +315,7 @@ func TestSyncExecStyleRevertsShimAndRestoresShell(t *testing.T) {
 	if hasShimMarker(reverted) {
 		t.Fatalf("--format=exec left a marker line:\n%s", reverted)
 	}
-	if strings.Contains(reverted, "CRONITOR_REAL_SHELL=") {
+	if strings.Contains(reverted, "CRONITOR_SHELL=") {
 		t.Fatalf("real-shell line kept after revert:\n%s", reverted)
 	}
 	if !strings.Contains(reverted, "SHELL=/bin/bash\n") {
@@ -342,7 +342,7 @@ func TestSyncExecStyleOnNewLines(t *testing.T) {
 	path := writeCron(t, "SHELL=/bin/bash\n0 * * * * date +\\%Y\n")
 	runSync(t, serverURL, path, "--format=exec", "--no-stdout")
 	got := readCron(t, path)
-	if hasShimMarker(got) || strings.Contains(got, "cronitor-shell") {
+	if hasShimMarker(got) || strings.Contains(got, "shell-wrapper") {
 		t.Fatalf("--format=exec wrote a shim:\n%s", got)
 	}
 	if !strings.Contains(got, "SHELL=/bin/bash\n") {
@@ -434,7 +434,7 @@ func TestSyncMultipleShellsStayExec(t *testing.T) {
 	if !strings.Contains(stderr, "more than one SHELL=") {
 		t.Fatalf("expected a multiple-shell notice:\n%s", stderr)
 	}
-	if hasShimMarker(got) || strings.Contains(got, shimPath) || strings.Contains(got, "CRONITOR_REAL_SHELL=") {
+	if hasShimMarker(got) || strings.Contains(got, shimPath) || strings.Contains(got, "CRONITOR_SHELL=") {
 		t.Fatalf("multiple SHELL= installed a shim:\n%s", got)
 	}
 	if !hasLine(got, "SHELL=/bin/bash") || !hasLine(got, "SHELL=/bin/zsh") {
@@ -472,7 +472,7 @@ func TestSyncExecStyleQuotesCompoundShimLine(t *testing.T) {
 	}
 	command := "cd " + app + " && ./run.sh " + marker
 	original := "SHELL=/bin/sh\n0 1 * * * cronitor exec k1 " + shellquote.Join(command) + "\n"
-	path := writeCron(t, "CRONITOR_REAL_SHELL=/bin/sh\nSHELL="+shimPath+"\n0 1 * * * CRONITOR=k1 "+command+"\n")
+	path := writeCron(t, "CRONITOR_SHELL=/bin/sh\nSHELL="+shimPath+"\n0 1 * * * CRONITOR=k1 "+command+"\n")
 
 	runSync(t, serverURL, path, "--format=exec")
 	if got := readCron(t, path); got != original {
@@ -498,7 +498,7 @@ func TestSyncExecStyleQuotesCompoundShimLine(t *testing.T) {
 func TestSyncNoStdoutRewritesShimLines(t *testing.T) {
 	serverURL, shimPath := withSyncFixture(t)
 	path := writeCron(t, strings.Join([]string{
-		"CRONITOR_REAL_SHELL=/bin/bash",
+		"CRONITOR_SHELL=/bin/bash",
 		"SHELL=" + shimPath,
 		"0 * * * * MONITORIO=abc /bin/true",
 	}, "\n"))
@@ -511,7 +511,7 @@ func TestSyncNoStdoutRewritesShimLines(t *testing.T) {
 	if got != want {
 		t.Fatalf("shim line was not rewritten\nwant:\n%s\ngot:\n%s", want, got)
 	}
-	if hasShimMarker(got) || strings.Contains(got, "CRONITOR_REAL_SHELL=") || strings.Contains(got, shimPath) {
+	if hasShimMarker(got) || strings.Contains(got, "CRONITOR_SHELL=") || strings.Contains(got, shimPath) {
 		t.Fatalf("shim left behind:\n%s", got)
 	}
 	if again := runSync(t, serverURL, path, "--no-stdout"); again != "" {
@@ -525,7 +525,7 @@ func TestSyncNoStdoutRewritesShimLines(t *testing.T) {
 func TestSyncNoStdoutWithShellAfterRewritesLines(t *testing.T) {
 	serverURL, shimPath := withSyncFixture(t)
 	path := writeCron(t, strings.Join([]string{
-		"CRONITOR_REAL_SHELL=/bin/zsh",
+		"CRONITOR_SHELL=/bin/zsh",
 		"SHELL=" + shimPath,
 		"0 * * * * MONITORIO=abc /bin/true",
 		"SHELL=/bin/bash",
@@ -549,7 +549,7 @@ func TestSyncNoStdoutWithShellAfterRewritesLines(t *testing.T) {
 func TestSyncShellAfterShimIsLeftAlone(t *testing.T) {
 	serverURL, shimPath := withSyncFixture(t)
 	body := strings.Join([]string{
-		"CRONITOR_REAL_SHELL=/bin/zsh",
+		"CRONITOR_SHELL=/bin/zsh",
 		"SHELL=" + shimPath,
 		"0 * * * * MONITORIO=abc /bin/true",
 		"SHELL=/bin/bash",
@@ -639,7 +639,7 @@ func TestSyncFormatShort(t *testing.T) {
 	runSync(t, serverURL, path, "--format=short")
 	got := readCron(t, path)
 	for _, want := range []string{
-		"CRONITOR_REAL_SHELL=/bin/bash\n",
+		"CRONITOR_SHELL=/bin/bash\n",
 		"SHELL=" + shimPath + "\n",
 		"0 1 * * * CRONITOR=k1 cd /tmp && echo x\n",
 		"0 2 * * * CRONITOR=k2 CRONITOR_NO_STDOUT=1 echo y\n",
@@ -670,7 +670,7 @@ func TestParseSyncFormat(t *testing.T) {
 func TestSyncFormatExecKeepsSettings(t *testing.T) {
 	serverURL, shimPath := withSyncFixture(t)
 	path := writeCron(t, strings.Join([]string{
-		"CRONITOR_REAL_SHELL=/bin/sh",
+		"CRONITOR_SHELL=/bin/sh",
 		"SHELL=" + shimPath,
 		"0 1 * * * CRONITOR=k1 CRONITOR_ENV=staging CRONITOR_NO_STDOUT=1 echo hi",
 	}, "\n"))
@@ -738,7 +738,7 @@ func TestSyncFormatShortWarnsWhenShellChanges(t *testing.T) {
 			t.Fatalf("missing %q in:\n%s", want, got)
 		}
 	}
-	for _, want := range []string{"monitor k2: kept as cronitor exec because /bin/sh cannot parse", "1 converted job in", "ran in /bin/bash and will now run in /bin/sh: k1", "SHELL=/bin/bash"} {
+	for _, want := range []string{"monitor k2: kept as cronitor exec because /bin/sh cannot parse", "1 converted job in", "ran in /bin/bash and will now run in /bin/sh: k1", "set CRONITOR_SHELL=/bin/bash"} {
 		if !strings.Contains(stderr, want) {
 			t.Fatalf("stderr misses %q:\n%s", want, stderr)
 		}
