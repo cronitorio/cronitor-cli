@@ -98,10 +98,18 @@ SHELL=/etc/cronitor/shell
 
 #### Running `cronitor sync` again
 
-- Sync asks only about jobs that are not monitored yet. `--with-monitored` asks about every job.
-- For a monitored job, sync sends only what changed: the schedule, and the alert list when you pass `--notification-list`. Names, tags and alert lists set in Cronitor are kept. A `# Name:` comment is updated to the name in Cronitor.
+There are three ways to run sync:
+
+| Command | Asks about | Picks up schedule and timezone changes | Monitors new jobs |
+| --- | --- | --- | --- |
+| `cronitor sync` | new jobs only | yes | the ones you choose |
+| `cronitor sync --with-monitored` | every job (to rename one) | yes | the ones you choose |
+| `cronitor sync --auto` | nothing | yes | **all of them** |
+
+- Run plain `cronitor sync` again whenever you add jobs or change a schedule. It shows one summary with each change (for example `L3  Nightly backup: schedule 0 2 * * * → 30 3 * * *`) and asks once. If nothing changed, it asks nothing.
+- `--auto` is for scripts and pipelines. It also monitors every new job, so it is not the way to pick up one schedule change.
+- For a monitored job, sync sends only what changed. Names, tags and alert lists set in Cronitor are kept; alert lists change only with `--notification-list`. A `# Name:` comment is updated to the name in Cronitor.
 - If a monitor was deleted in Cronitor, sync warns and does not create it again.
-- Sync shows one summary and asks once before it sends or writes anything. If nothing changed, it asks nothing.
 - In the menu: enter selects, `s` skips, `q` quits. "Skip this job, don't ask again" adds `# cronitor: ignore` above the line.
 
 ### API Resources

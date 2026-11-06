@@ -137,27 +137,30 @@ Cronitor sync will parse your crontab and create or update monitors using the Cr
 
 Note: You must supply your Cronitor API key. This can be passed as a flag, environment variable, or saved in your Cronitor configuration file. See 'help configure' for more details.
 
-Example:
-  $ cronitor sync
-      > Reads your crontabs and asks about each job that is not monitored yet
-      > Shows a summary, then asks once before it changes anything
-      > Creates monitors on your Cronitor dashboard and adds Cronitor integration to your crontab
+There are three ways to run sync:
 
-  Run it again at any time. Jobs that are already monitored are not asked about. Only a changed
-  schedule is sent; names, tags and alert lists set in Cronitor are kept. If nothing changed, it asks nothing.
+  $ cronitor sync
+      > Asks about each job that is not monitored yet
+      > Checks every monitored job against Cronitor and picks up schedule and timezone changes
+      > Shows one summary with each change, then asks once before it sends or writes anything
+      > Run it again whenever you add jobs or change a schedule. If nothing changed, it asks nothing.
+
+  $ cronitor sync --with-monitored
+      > The same, but also asks about jobs that are already monitored, for example to rename them
+
+  $ cronitor sync --auto
+      > Asks nothing. Monitors every new job, sends schedule and timezone changes, and writes the crontab
+      > Prints the updated crontab to stdout, for pipelines and scripts
+      > Use it to automate sync, not to pick up one schedule change: it also monitors every new job
+
+  For a job that is already monitored, sync sends only what changed. Names, tags and alert lists set
+  in Cronitor are kept. Alert lists change only with --notification-list.
 
   In the job menu: enter selects, s skips, q quits (sync then offers to save your answers so far).
   "Skip this job, don't ask again" adds "# cronitor: ignore" above the line.
 
-  $ cronitor sync --with-monitored
-      > Also asks about jobs that are already monitored, for example to rename them
-
   $ cronitor sync /path/to/crontab
       > Instead of the user crontab, provide a crontab file (or directory of crontabs) to use
-
-Example that does not use an interactive shell:
-  $ cronitor sync --auto
-      > The only output to stdout will be your updated crontab file, suitable for piplines or writing to another crontab.
 
 Example excluding secrets or common text from monitor names:
   $ cronitor sync /path/to/crontab -e "secret-token" -e "/var/common/app/path/"
@@ -1388,7 +1391,7 @@ func init() {
 	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")
-	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Do not use an interactive shell. Write updated crontab to stdout.")
+	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Ask nothing: monitor every new job, send schedule changes, write the crontab and print it to stdout.")
 	discoverCmd.Flags().StringVar(&syncFormat, "format", "", "Line format on Unix. short: write every line as CRONITOR=<key> <command>, converting cronitor exec lines (lines with other exec flags stay as exec). exec: write every line as cronitor exec <key> <command> and restore the prior SHELL. Default: new lines short, existing lines unchanged.")
 	discoverCmd.Flags().BoolVar(&withMonitored, "with-monitored", false, "Also ask about jobs that are already monitored, for example to rename them. Ignored with --auto.")
 	discoverCmd.Flags().StringVar(&syncFile, "file", "", "Path to YAML or JSON file containing monitor definitions for bulk import")
