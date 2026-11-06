@@ -39,6 +39,12 @@ type Crontab struct {
 	BlockNewShim            bool                  `json:"-"`
 	RewriteShimToExec       bool                  `json:"-"`
 	ConvertExec             bool                  `json:"-"` // sync --format=short
+	original                string                // the text Parse read
+}
+
+// Original returns the crontab text as Parse read it.
+func (c Crontab) Original() string {
+	return c.original
 }
 
 // isExampleCronLine checks if a line contains obvious placeholder/example text
@@ -116,6 +122,7 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 	if len(c.Lines) > 0 {
 		panic("Cannot read into non-empty crontab struct")
 	}
+	c.original = strings.Join(lines, "\n")
 
 	var autoDiscoverLine *Line
 	var name string

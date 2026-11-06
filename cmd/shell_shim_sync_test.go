@@ -22,6 +22,15 @@ import (
 // call Write; that skips the flag handling and the API round trip.
 func runSync(t *testing.T, serverURL, path string, extra ...string) string {
 	t.Helper()
+	return runSyncArgs(t, serverURL, path, append([]string{"--auto", "--silent"}, extra...)...)
+}
+
+// lastSyncStdout is what the last runSyncArgs printed on stdout.
+var lastSyncStdout string
+
+// runSyncArgs is runSync without --auto --silent, for the interactive path.
+func runSyncArgs(t *testing.T, serverURL, path string, extra ...string) string {
+	t.Helper()
 	lib.BaseURLOverride = serverURL + "/api"
 	viper.Set(varApiKey, "test-api-key-1234567890")
 	existingMonitors = ExistingMonitors{}
@@ -50,7 +59,7 @@ func runSync(t *testing.T, serverURL, path string, extra ...string) string {
 	}
 
 	// Execute on the subcommand is ignored: cobra always runs from the root.
-	args := []string{"--config", cfg, "sync", "--auto", "--silent"}
+	args := []string{"--config", cfg, "sync"}
 	args = append(args, extra...)
 	args = append(args, path)
 	RootCmd.SetArgs(args)
@@ -71,6 +80,7 @@ func runSync(t *testing.T, serverURL, path string, extra ...string) string {
 	os.Stderr, os.Stdout = oldStderr, oldStdout
 	errText, _ := io.ReadAll(stderrR)
 	outText, _ := io.ReadAll(stdoutR)
+	lastSyncStdout = string(outText)
 	stderrR.Close()
 	stdoutR.Close()
 	if execErr != nil {
@@ -138,6 +148,7 @@ func withSyncFixture(t *testing.T) (serverURL, shimPath string) {
 		syncFormat = oldFormat
 		dryRun = oldDry
 		existingMonitors = oldMonitors
+		userAbortedSync = false
 		cfgFile = oldCfg
 		viper.Set(varApiKey, oldKey)
 		viper.Set(varConfig, oldCfg)
@@ -514,7 +525,9 @@ func TestSyncNoStdoutRewritesShimLines(t *testing.T) {
 	if hasShimMarker(got) || strings.Contains(got, "CRONITOR_SHELL=") || strings.Contains(got, shimPath) {
 		t.Fatalf("shim left behind:\n%s", got)
 	}
-	if again := runSync(t, serverURL, path, "--no-stdout"); again != "" {
+	// The fake API lists no monitors, so a "no longer exists" warning is
+	// expected. Only the rewrite notice must not come back.
+	if again := runSync(t, serverURL, path, "--no-stdout"); strings.Contains(again, "--no-stdout") {
 		t.Fatalf("second --no-stdout still noticed:\n%s", again)
 	}
 	if second := readCron(t, path); second != got {
