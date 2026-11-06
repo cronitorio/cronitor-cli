@@ -120,7 +120,7 @@ func withSyncFixture(t *testing.T) (serverURL, shimPath string) {
 	t.Helper()
 	server := monitorServer(t)
 	t.Cleanup(server.Close)
-	shimPath = filepath.Join(t.TempDir(), "cronitor", "shell-wrapper")
+	shimPath = filepath.Join(t.TempDir(), "cronitor", "shell")
 	oldOverride := lib.ShimShellPathOverride
 	oldBase := lib.BaseURLOverride
 	oldAuto, oldSilent := isAutoDiscover, isSilent
@@ -284,8 +284,8 @@ func TestSyncKeepsExistingExecLineByteForByte(t *testing.T) {
 	if !strings.Contains(first, "CRONITOR=") {
 		t.Fatalf("new line was not shim style:\n%s", first)
 	}
-	if !strings.Contains(first, "CRONITOR_SHELL=/bin/sh\n") {
-		t.Fatalf("missing default real shell:\n%s", first)
+	if strings.Contains(first, "CRONITOR_SHELL=") {
+		t.Fatalf("crontab had no SHELL line, but sync wrote CRONITOR_SHELL:\n%s", first)
 	}
 
 	runSync(t, serverURL, path)
@@ -342,7 +342,7 @@ func TestSyncExecStyleOnNewLines(t *testing.T) {
 	path := writeCron(t, "SHELL=/bin/bash\n0 * * * * date +\\%Y\n")
 	runSync(t, serverURL, path, "--format=exec", "--no-stdout")
 	got := readCron(t, path)
-	if hasShimMarker(got) || strings.Contains(got, "shell-wrapper") {
+	if hasShimMarker(got) || strings.Contains(got, "cronitor/shell") {
 		t.Fatalf("--format=exec wrote a shim:\n%s", got)
 	}
 	if !strings.Contains(got, "SHELL=/bin/bash\n") {

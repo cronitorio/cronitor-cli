@@ -293,8 +293,8 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 		c.Lines = append(c.Lines, createAutoDiscoverLine(c))
 	}
 
-	if IsShimShellPath(c.Shell) && c.RealShell != "" {
-		c.Shell = c.RealShell
+	if IsShimShellPath(c.Shell) {
+		c.Shell = c.RealShell // "" when the crontab had no SHELL line before sync
 	}
 
 	return nil, 0

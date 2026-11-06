@@ -125,7 +125,7 @@ func shellQuote(s string) string {
 
 func installRealShim(t *testing.T, bin string) string {
 	t.Helper()
-	wrapper, err := lib.InstallShimWrapper(filepath.Join(t.TempDir(), "cronitor", "shell-wrapper"), bin)
+	wrapper, err := lib.InstallShimWrapper(filepath.Join(t.TempDir(), "cronitor", "shell"), bin)
 	if err != nil {
 		t.Fatal(err)
 	}

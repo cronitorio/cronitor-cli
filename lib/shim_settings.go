@@ -4,7 +4,7 @@ import "strings"
 
 // Settings a marker line can carry after CRONITOR=<key>, for example
 // `CRONITOR=abc CRONITOR_ENV=staging ./job.sh`. Each one stands for an exec
-// flag. shell-wrapper passes them to cronitor exec as those flags.
+// flag. The shell wrapper passes them to cronitor exec as those flags.
 var shimSettingNames = map[string]bool{
 	"CRONITOR_NO_STDOUT":    true,
 	"CRONITOR_ENV":          true,

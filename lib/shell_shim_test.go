@@ -65,7 +65,7 @@ func TestUnmonitoredLinesAreNotRewritten(t *testing.T) {
 		t.Run(line, func(t *testing.T) {
 			ct := parseContent(t, line)
 			ct.WriteMode = WriteModeShim
-			ct.ShimShellPath = "/etc/cronitor/shell-wrapper"
+			ct.ShimShellPath = "/etc/cronitor/shell"
 			if got := strings.TrimSpace(ct.Write()); got != line {
 				t.Fatalf("shim write rewrote an unmonitored line\n got %s\nwant %s", got, line)
 			}
@@ -143,7 +143,7 @@ func TestInstallShimKeepsSymlinkPath(t *testing.T) {
 	if err := os.Symlink(bin, link); err != nil {
 		t.Fatal(err)
 	}
-	dest := filepath.Join(dir, ".cronitor", "shell-wrapper")
+	dest := filepath.Join(dir, ".cronitor", "shell")
 	if _, err := InstallShimWrapper(dest, link); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestInstallShimKeepsSymlinkPath(t *testing.T) {
 }
 
 func TestInstallShimRejectsRelativeCronitorUnderEtc(t *testing.T) {
-	_, err := InstallShimWrapper("/etc/cronitor/shell-wrapper", "cronitor")
+	_, err := InstallShimWrapper("/etc/cronitor/shell", "cronitor")
 	if err == nil {
 		t.Fatal("relative cronitor path was accepted under /etc")
 	}

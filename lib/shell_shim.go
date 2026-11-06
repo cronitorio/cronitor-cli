@@ -14,9 +14,8 @@ import (
 const (
 	MonitorPrefix        = "CRONITOR="      // written on new lines
 	RealShellEnv         = "CRONITOR_SHELL" // the shell jobs run in; the wrapper hands every line to it
-	DefaultRealShell     = "/bin/sh"
-	ShimWrapperBase      = "shell-wrapper"
-	DefaultShimShellPath = "/etc/cronitor/shell-wrapper"
+	ShimWrapperBase      = "shell"
+	DefaultShimShellPath = "/etc/cronitor/shell"
 )
 
 type WriteMode int
@@ -140,7 +139,7 @@ func shimExecCommand(line Line) string {
 	return cmd
 }
 
-// IsShimShellPath reports whether p is the wrapper sync installs: shell-wrapper
+// IsShimShellPath reports whether p is the wrapper sync installs: shell
 // in a cronitor or .cronitor directory. The file name alone is too generic.
 func IsShimShellPath(p string) bool {
 	p = filepath.Clean(strings.TrimSpace(p))
@@ -301,13 +300,13 @@ func (c Crontab) withShimShell(wrapper string) []*Line {
 			}
 		}
 	}
-	if real == "" {
-		real = DefaultRealShell
+	// CRONITOR_SHELL is written only when the crontab had its own shell. With
+	// none, the wrapper uses /bin/sh, the same as cron.
+	var out []*Line
+	if real != "" {
+		out = append(out, &Line{FullLine: RealShellEnv + "=" + real})
 	}
-	out := []*Line{
-		{FullLine: RealShellEnv + "=" + real},
-		{FullLine: "SHELL=" + wrapper},
-	}
+	out = append(out, &Line{FullLine: "SHELL=" + wrapper})
 	for _, l := range c.Lines {
 		if l.isManagedEnv() {
 			switch l.GetEnvVarKey() {
@@ -341,15 +340,15 @@ func (c Crontab) withoutShimShell() []*Line {
 	if shellIdx < 0 {
 		return c.Lines
 	}
-	if realVal == "" {
-		realVal = DefaultRealShell
-	}
 	out := make([]*Line, 0, len(c.Lines))
 	for i, l := range c.Lines {
 		if i == realIdx {
 			continue
 		}
 		if i == shellIdx {
+			if realVal == "" {
+				continue // the crontab had no SHELL line before sync
+			}
 			cp := *l
 			cp.FullLine = "SHELL=" + realVal
 			out = append(out, &cp)
@@ -419,7 +418,7 @@ set -f
 CRONITOR_BIN='__CRONITOR_BIN__'
 REAL_SHELL=${CRONITOR_SHELL:-/bin/sh}
 case $REAL_SHELL in
-  */cronitor/shell-wrapper|*/.cronitor/shell-wrapper) REAL_SHELL=/bin/sh ;;
+  */cronitor/shell|*/.cronitor/shell) REAL_SHELL=/bin/sh ;;
 esac
 export SHELL="$REAL_SHELL"
 if [ "$#" -ne 2 ] || [ "$1" != "-c" ]; then
