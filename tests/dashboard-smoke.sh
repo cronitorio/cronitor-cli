@@ -56,11 +56,7 @@ settings=$(curl -s -u "$user:$pass" "http://127.0.0.1:$port/api/settings")
 grep -q "\"config_file_path\":\"$work/cronitor.json\"" <<<"$settings" || fail "--config not passed through: ${settings:0:300}"
 echo "ok 2 - cronitor dash runs crontab-dashboard with its flags"
 
-# 3. SIGTERM. The dashboard handles signals once it prints "Dashboard running".
-for _ in $(seq 1 40); do
-	grep -q "Dashboard running" "$work/dash.log" && break
-	sleep 0.25
-done
+# 3. SIGTERM as soon as the dashboard answers.
 kill -TERM "$pid"
 status=0
 wait "$pid" || status=$?

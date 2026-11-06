@@ -965,6 +965,11 @@ not start a web server but instead communicates via stdio protocol.`,
 			IdleTimeout:  60 * time.Second,
 		}
 
+		// Handle stop signals before the server starts, so a stop sent right
+		// after start still shuts down gracefully.
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
 		// Start the server in a goroutine
 		go func() {
 			fmt.Printf("Starting Cronitor dashboard on port %d...\n", port)
@@ -980,10 +985,6 @@ not start a web server but instead communicates via stdio protocol.`,
 		url := fmt.Sprintf("http://localhost:%d", port)
 		fmt.Printf("Opening browser to %s...\n", url)
 		openBrowser(url)
-
-		// Wait for interrupt signal to gracefully shutdown
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
 		fmt.Printf("Dashboard running on %s (Press Ctrl+C to stop)\n", url)
 		<-c
