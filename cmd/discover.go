@@ -177,8 +177,9 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 
 	Run: func(cmd *cobra.Command, args []string) {
 
-		// Reset the flag for each command execution
+		// Reset the flags for each command execution
 		processingMultipleCrontabs = false
+		userAbortedSync = false
 
 		if len(viper.GetString(varApiKey)) < 10 {
 			fatal(discoverMissingAPIKeyGuidance(), 1)
@@ -257,7 +258,7 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 		}
 
 		if userAbortedSync {
-			printWarningText("Sync aborted", false)
+			printWarningText("Sync stopped", false)
 		} else {
 			printDoneText("Sync complete", false)
 			printSuccessText("View your dashboard https://cronitor.io/app/dashboard", false)
@@ -563,14 +564,21 @@ func (p *crontabPlan) summary() string {
 func finishSync(plans []*crontabPlan) int {
 	var todo []*crontabPlan
 	for _, p := range plans {
-		if !p.aborted && p.hasChanges() {
+		if p.hasChanges() {
 			todo = append(todo, p)
 		}
 	}
-	if userAbortedSync {
-		return 0
-	}
 	interactive := !isAutoDiscover && !isSilent
+
+	// The user quit. Offer to keep the answers given so far, then apply
+	// them without a second question.
+	quit := userAbortedSync
+	if quit {
+		if len(todo) == 0 || dryRun || !confirm("Save what you've done so far?", false) {
+			printWarningText("Nothing was changed", false)
+			return 0
+		}
+	}
 	if len(todo) == 0 {
 		if interactive {
 			printDoneText("Nothing to change", false)
@@ -581,9 +589,6 @@ func finishSync(plans []*crontabPlan) int {
 	if interactive {
 		fmt.Println()
 		for _, p := range plans {
-			if p.aborted {
-				continue
-			}
 			fmt.Println("  " + p.crontab.DisplayName())
 			fmt.Println("    " + p.summary())
 		}
@@ -593,7 +598,7 @@ func finishSync(plans []*crontabPlan) int {
 		printWarningText("Dry run: nothing was sent to Cronitor or written to the crontab", false)
 		return len(todo)
 	}
-	if interactive {
+	if interactive && !quit {
 		if !confirm("Apply these changes?", true) {
 			printWarningText("Nothing was changed", false)
 			return 0
@@ -1125,7 +1130,7 @@ type nameInputModel struct {
 	defaultName string
 	err         error
 	done        bool
-	exited      bool   // True if user pressed Ctrl+D to exit entirely
+	exited      bool   // True if the user quit (q, esc, ctrl+c or ctrl+d)
 	ignore      bool   // True if the user chose to skip the job for good
 	state       string // "choosing" or "naming"
 	width       int    // Add width field to store terminal width
@@ -1140,11 +1145,21 @@ func initialNameInputModel(defaultName string) nameInputModel {
 		item{title: IgnoreJob, desc: "Adds # cronitor: ignore above the line. Delete that comment to undo."},
 	}
 
-	// Setup list with height of 3 to show all items
-	l := list.New(items, list.NewDefaultDelegate(), 0, 3)
+	// Each item is two lines (title and description) with no spacing, plus
+	// two lines for the title bar, so every item shows at once.
+	l := list.New(items, list.NewDefaultDelegate(), 0, len(items)*2+2)
 	l.Title = "What would you like to do with this job?"
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
+	l.SetShowPagination(false)
+	l.SetShowHelp(false) // the footer in View lists the keys
+	// The list's own keys (q and esc quit, ? help, / filter) are off. Update
+	// handles enter, s, q, esc, ctrl+c and ctrl+d itself.
+	l.KeyMap.Quit.SetEnabled(false)
+	l.KeyMap.ForceQuit.SetEnabled(false)
+	l.KeyMap.ShowFullHelp.SetEnabled(false)
+	l.KeyMap.CloseFullHelp.SetEnabled(false)
+	l.KeyMap.Filter.SetEnabled(false)
 	l.Styles.Title = lipgloss.NewStyle().MarginLeft(1).Bold(false)
 	l.Styles.TitleBar = lipgloss.NewStyle().MarginLeft(2)
 
@@ -1154,6 +1169,7 @@ func initialNameInputModel(defaultName string) nameInputModel {
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.MarginLeft(1)
 	delegate.Styles.NormalDesc = delegate.Styles.NormalDesc.MarginLeft(1).Italic(true)
 	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.MarginLeft(1).Italic(true)
+	delegate.SetSpacing(0)
 
 	l.SetDelegate(delegate)
 
@@ -1182,13 +1198,29 @@ func (m nameInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
-		case tea.KeyCtrlC:
-			// Skip this job
-			return m, tea.Quit
-		case tea.KeyCtrlD:
-			// Exit interactive sync entirely
+		case tea.KeyCtrlC, tea.KeyCtrlD:
+			// Stop asking. Sync then offers to save the answers so far.
 			m.exited = true
 			return m, tea.Quit
+		case tea.KeyEsc:
+			if m.state == "naming" {
+				m.state = "choosing"
+				m.err = nil
+				return m, nil
+			}
+			m.exited = true
+			return m, tea.Quit
+		case tea.KeyRunes:
+			if m.state == "choosing" {
+				switch string(msg.Runes) {
+				case "s":
+					m.done = false
+					return m, tea.Quit
+				case "q":
+					m.exited = true
+					return m, tea.Quit
+				}
+			}
 		case tea.KeyEnter:
 			if m.state == "choosing" {
 				// Handle selection based on list choice
@@ -1235,9 +1267,11 @@ func (m nameInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+var promptFooterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).MarginLeft(4)
+
 func (m nameInputModel) View() string {
 	if m.state == "choosing" {
-		return "\n" + m.list.View()
+		return "\n" + m.list.View() + "\n" + promptFooterStyle.Render("enter select · s skip · q quit") + "\n"
 	}
 
 	var sb strings.Builder
@@ -1245,6 +1279,7 @@ func (m nameInputModel) View() string {
 	if m.err != nil {
 		sb.WriteString(fmt.Sprintf("    Error: %s\n", m.err))
 	}
+	sb.WriteString(promptFooterStyle.Render("enter save · esc back · ctrl+c quit") + "\n")
 	return sb.String()
 }
 

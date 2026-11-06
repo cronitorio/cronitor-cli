@@ -148,6 +148,7 @@ func withSyncFixture(t *testing.T) (serverURL, shimPath string) {
 		syncFormat = oldFormat
 		dryRun = oldDry
 		existingMonitors = oldMonitors
+		userAbortedSync = false
 		cfgFile = oldCfg
 		viper.Set(varApiKey, oldKey)
 		viper.Set(varConfig, oldCfg)

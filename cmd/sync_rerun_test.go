@@ -500,3 +500,52 @@ func resetDryRun(t *testing.T) {
 		discoverCmd.Flags().Lookup("dry-run").Changed = false
 	})
 }
+
+func quitOnLine(n int) func(int, string) promptResult {
+	return func(line int, shown string) promptResult {
+		if line == n {
+			return promptResult{choice: choiceQuit}
+		}
+		return promptResult{choice: choiceMonitor, name: shown}
+	}
+}
+
+func TestSyncQuitSavesAnswersSoFar(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	resetWithMonitored(t)
+	api, apiURL := newRerunAPI(t, backupMonitor)
+	answerPrompts(t, quitOnLine(2))
+	questions := answerConfirm(t, true)
+	path := writeCron(t, "0 5 * * * /usr/bin/first.sh\n0 6 * * * /usr/bin/second.sh\n")
+
+	runSyncStdout(t, apiURL, path)
+
+	if len(*questions) != 1 || !strings.Contains((*questions)[0], "Save what you've done so far") {
+		t.Fatalf("asked %v; want only the save question", *questions)
+	}
+	if puts := api.sent(); len(puts) != 1 || len(puts[0]) != 1 {
+		t.Fatalf("sent %v; want only the first job", puts)
+	}
+	got := readCron(t, path)
+	if !strings.Contains(got, "CRONITOR=new") || !strings.Contains(got, "0 6 * * * /usr/bin/second.sh") {
+		t.Fatalf("crontab:\n%s", got)
+	}
+}
+
+func TestSyncQuitWithoutSavingChangesNothing(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	resetWithMonitored(t)
+	api, apiURL := newRerunAPI(t, backupMonitor)
+	answerPrompts(t, quitOnLine(2))
+	answerConfirm(t, false)
+	body := "0 5 * * * /usr/bin/first.sh\n0 6 * * * /usr/bin/second.sh\n"
+	path := writeCron(t, body)
+
+	runSyncStdout(t, apiURL, path)
+
+	if len(api.sent()) != 0 || readCron(t, path) != body {
+		t.Fatalf("sent %v, crontab:\n%s", api.sent(), readCron(t, path))
+	}
+}
