@@ -139,9 +139,18 @@ Note: You must supply your Cronitor API key. This can be passed as a flag, envir
 
 Example:
   $ cronitor sync
-      > Read user crontab and step through line by line
-      > Creates monitors on your Cronitor dashboard for each entry in the crontab. The command string will be used as the monitor name.
-      > Adds Cronitor integration to your crontab
+      > Reads your crontabs and asks about each job that is not monitored yet
+      > Shows a summary, then asks once before it changes anything
+      > Creates monitors on your Cronitor dashboard and adds Cronitor integration to your crontab
+
+  Run it again at any time. Jobs that are already monitored are not asked about. Only a changed
+  schedule is sent; names, tags and alert lists set in Cronitor are kept. If nothing changed, it asks nothing.
+
+  In the job menu: enter selects, s skips, q quits (sync then offers to save your answers so far).
+  "Skip this job, don't ask again" adds "# cronitor: ignore" above the line.
+
+  $ cronitor sync --with-monitored
+      > Also asks about jobs that are already monitored, for example to rename them
 
   $ cronitor sync /path/to/crontab
       > Instead of the user crontab, provide a crontab file (or directory of crontabs) to use
