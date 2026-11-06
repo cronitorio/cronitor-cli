@@ -16,7 +16,8 @@ func main() {
 }
 
 func setup() {
-	cmd.RootCmd.Use = "crontab-dashboard"
+	cmd.RootCmd.Use = cmd.DashboardBinaryName
+	cmd.SetUpdateBinary(cmd.DashboardBinaryName)
 	dashboard.Register(cmd.RootCmd)
 }
 

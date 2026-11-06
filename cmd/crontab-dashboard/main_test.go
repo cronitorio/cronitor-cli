@@ -28,6 +28,9 @@ func TestDashboardRegistersDash(t *testing.T) {
 	if found.Flags().Lookup("port") == nil {
 		t.Fatal("dash is missing --port")
 	}
+	if cmd.UpdateBinary() != cmd.DashboardBinaryName {
+		t.Errorf("updater binary = %q", cmd.UpdateBinary())
+	}
 	if cmd.RootCmd.Use != "crontab-dashboard" {
 		t.Errorf("root Use = %q", cmd.RootCmd.Use)
 	}
