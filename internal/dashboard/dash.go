@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"embed"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -30,17 +29,12 @@ import (
 	"time"
 
 	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/cronitorio/cronitor-cli/web"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/time/rate"
 )
-
-var webAssets embed.FS
-
-func SetWebAssets(assets embed.FS) {
-	webAssets = assets
-}
 
 // IP Filter for restricting access by IP address
 type IPFilter struct {
@@ -859,7 +853,7 @@ not start a web server but instead communicates via stdio protocol.`,
 		}
 
 		// Get the embedded filesystem
-		fsys, err := fs.Sub(webAssets, "web/static")
+		fsys, err := fs.Sub(web.Static, "static")
 		if err != nil {
 			fatal(err.Error(), 1)
 		}
@@ -3096,17 +3090,8 @@ func getSystemdServiceName() string {
 
 	baseName := strings.TrimSuffix(filepath.Base(executable), filepath.Ext(executable))
 
-	// Common patterns for systemd service names
-	possibleNames := []string{
-		baseName + ".service",
-		baseName + "-dashboard.service",
-		"crontab-guru-dashboard.service", // User mentioned this specific name
-		"cronitor-cli.service",
-		"cronitor.service",
-	}
-
 	// Check which service exists and is active
-	for _, name := range possibleNames {
+	for _, name := range systemdServiceCandidates(baseName) {
 		cmd := exec.Command("systemctl", "is-active", "--quiet", name)
 		if err := cmd.Run(); err == nil {
 			return name
@@ -3114,6 +3099,19 @@ func getSystemdServiceName() string {
 	}
 
 	return ""
+}
+
+// systemdServiceCandidates lists common unit names for the dashboard. Units
+// written for `cronitor dash` keep working after the move to crontab-dashboard.
+func systemdServiceCandidates(baseName string) []string {
+	return []string{
+		baseName + ".service",
+		"crontab-dashboard.service",
+		"cronitor-dashboard.service",
+		"crontab-guru-dashboard.service",
+		"cronitor-cli.service",
+		"cronitor.service",
+	}
 }
 
 // performManualRestart performs a manual restart (non-systemd)

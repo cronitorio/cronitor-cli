@@ -1,15 +1,11 @@
 package main
 
 import (
-	"embed"
 	"os"
 
 	"github.com/cronitorio/cronitor-cli/cmd"
 	"github.com/cronitorio/cronitor-cli/internal/dashboard"
 )
-
-//go:embed web/static
-var WebAssets embed.FS
 
 func main() {
 	// Ensure that flags on `exec` commands are not parsed by Cobra
@@ -44,6 +40,5 @@ func main() {
 
 // registerCommands adds commands that live outside the cmd package.
 func registerCommands() {
-	dashboard.SetWebAssets(WebAssets)
 	dashboard.Register(cmd.RootCmd)
 }
