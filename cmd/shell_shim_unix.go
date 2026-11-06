@@ -15,7 +15,7 @@ import (
 var shellShimCmd = &cobra.Command{
 	Use:                "shell-shim",
 	DisableFlagParsing: true,
-	Short:              "Crontab SHELL shim (invoked by cronitor-shell)",
+	Short:              "Crontab SHELL shim (invoked by shell-wrapper)",
 	Args:               cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		os.Exit(RunShellShim(os.Args))

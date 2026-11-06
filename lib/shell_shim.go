@@ -12,11 +12,11 @@ import (
 )
 
 const (
-	MonitorPrefix        = "CRONITOR=" // written on new lines
-	RealShellEnv         = "CRONITOR_REAL_SHELL"
+	MonitorPrefix        = "CRONITOR="      // written on new lines
+	RealShellEnv         = "CRONITOR_SHELL" // the shell jobs run in; the wrapper hands every line to it
 	DefaultRealShell     = "/bin/sh"
-	ShimWrapperBase      = "cronitor-shell"
-	DefaultShimShellPath = "/etc/cronitor/cronitor-shell"
+	ShimWrapperBase      = "shell-wrapper"
+	DefaultShimShellPath = "/etc/cronitor/shell-wrapper"
 )
 
 type WriteMode int
@@ -148,8 +148,15 @@ func shimExecCommand(line Line) string {
 	return cmd
 }
 
+// IsShimShellPath reports whether p is the wrapper sync installs: shell-wrapper
+// in a cronitor or .cronitor directory. The file name alone is too generic.
 func IsShimShellPath(p string) bool {
-	return filepath.Base(strings.TrimSpace(p)) == ShimWrapperBase
+	p = filepath.Clean(strings.TrimSpace(p))
+	if filepath.Base(p) != ShimWrapperBase {
+		return false
+	}
+	dir := filepath.Base(filepath.Dir(p))
+	return dir == "cronitor" || dir == ".cronitor"
 }
 
 func (l Line) renderIntegration(c Crontab) string {
@@ -250,9 +257,9 @@ func (c Crontab) ShimNotices() (stop bool, notices []string) {
 		}
 		if c.ShellChange != nil && len(converted) > 0 {
 			notices = append(notices, fmt.Sprintf(
-				"warning: %d converted %s in %s ran in %s and will now run in %s: %s. To keep %s for this crontab, add SHELL=%s at the top. To undo, run cronitor sync --format=exec.",
+				"warning: %d converted %s in %s ran in %s and will now run in %s: %s. To keep %s for this crontab, set %s=%s. To undo, run cronitor sync --format=exec.",
 				len(converted), plural(len(converted), "job", "jobs"), c.DisplayName(), c.ShellChange.From, c.ShellChange.To, strings.Join(converted, ", "),
-				c.ShellChange.From, c.ShellChange.From))
+				c.ShellChange.From, RealShellEnv, c.ShellChange.From))
 		}
 	}
 	if c.RewriteShimToExec {
@@ -433,9 +440,9 @@ func renderShimWrapper(cronitorBin string) string {
 const shimWrapperTemplate = `#!/bin/sh
 set -f
 CRONITOR_BIN='__CRONITOR_BIN__'
-REAL_SHELL=${CRONITOR_REAL_SHELL:-/bin/sh}
+REAL_SHELL=${CRONITOR_SHELL:-/bin/sh}
 case $REAL_SHELL in
-  */cronitor-shell|cronitor-shell) REAL_SHELL=/bin/sh ;;
+  */cronitor/shell-wrapper|*/.cronitor/shell-wrapper) REAL_SHELL=/bin/sh ;;
 esac
 export SHELL="$REAL_SHELL"
 if [ "$#" -ne 2 ] || [ "$1" != "-c" ]; then
