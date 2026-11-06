@@ -4,6 +4,8 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -57,6 +59,7 @@ func TestShimFixtureRuns(t *testing.T) {
 		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	input := fixtureJobs(t, "crontab.input")
+	outputs := map[string]fixtureOutput{}
 	for _, file := range []string{"crontab.expected", "crontab.format-short.expected"} {
 		t.Run(file, func(t *testing.T) {
 			written := fixtureJobs(t, file)
@@ -82,6 +85,11 @@ func TestShimFixtureRuns(t *testing.T) {
 					pings = nil
 					mu.Unlock()
 					gotOut, gotCode := runCronField(t, wrapper, field, env)
+					_, rest, _ := lib.ParseMonitorMarker(field)
+					_, job := lib.SplitShimSettings(rest)
+					mu.Lock()
+					outputs[job] = fixtureOutput{Exit: wantCode, Output: wantOut}
+					mu.Unlock()
 					if gotOut != wantOut || gotCode != wantCode {
 						t.Fatalf("written line differs from the original\n  input:   %s -> %q (exit %d)\n  written: %s -> %q (exit %d)",
 							original, wantOut, wantCode, field, gotOut, gotCode)
@@ -111,6 +119,38 @@ func TestShimFixtureRuns(t *testing.T) {
 				t.Fatalf("only %d marked jobs ran; the fixture or the writer changed", ran)
 			}
 		})
+	}
+	checkFixtureOutputs(t, outputs)
+}
+
+var updateFixtureOutputs = flag.Bool("update", false, "rewrite fixtures/shim/crontab.outputs")
+
+// fixtureOutput is what a fixture job prints and its exit code. tests/real-cron.sh
+// reads crontab.outputs and checks real cron's pings against it.
+type fixtureOutput struct {
+	Exit   int    `json:"exit"`
+	Output string `json:"output"`
+}
+
+func checkFixtureOutputs(t *testing.T, outputs map[string]fixtureOutput) {
+	t.Helper()
+	path := filepath.Join("..", "fixtures", "shim", "crontab.outputs")
+	got, err := json.MarshalIndent(outputs, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = append(got, '\n')
+	if *updateFixtureOutputs {
+		if err := os.WriteFile(path, got, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%v (run go test ./cmd -run TestShimFixtureRuns -update)", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("%s is out of date (rerun with -update and review the diff)\n%s", path, got)
 	}
 }
 
