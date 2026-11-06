@@ -66,6 +66,8 @@ Logout revokes this installation's credential and removes it locally. **Schedule
 | `cronitor sync` | Sync cron jobs to Cronitor |
 | `cronitor sync --format=short` | Also convert `cronitor exec` lines to `CRONITOR=<key>` lines |
 | `cronitor sync --format=exec` | Write all lines as `cronitor exec` and restore your `SHELL` |
+| `cronitor sync --with-monitored` | Also ask about jobs that are already monitored, for example to rename them |
+| `cronitor sync --dry-run` | Show what sync would change, without sending anything or writing the crontab |
 | `cronitor exec <key> <cmd>` | Run a command with monitoring |
 | `cronitor list` | List all cron jobs |
 | `cronitor status` | View monitor status |
@@ -92,6 +94,14 @@ SHELL=/etc/cronitor/shell
   ```
 - A `CRONITOR=<key>` line works only in a crontab that sync has changed. To add monitoring by hand to any other crontab, script or task, use `cronitor exec <key> <cmd>`.
 - To go back, run `cronitor sync --format=exec`.
+
+#### Running `cronitor sync` again
+
+- Sync asks only about jobs that are not monitored yet. `--with-monitored` asks about every job.
+- For a monitored job, sync sends only what changed: the schedule, and the alert list when you pass `--notification-list`. Names, tags and alert lists set in Cronitor are kept. A `# Name:` comment is updated to the name in Cronitor.
+- If a monitor was deleted in Cronitor, sync warns and does not create it again.
+- Sync shows one summary and asks once before it sends or writes anything. If nothing changed, it asks nothing.
+- In the menu: enter selects, `s` skips, `q` quits. "Skip this job, don't ask again" adds `# cronitor: ignore` above the line.
 - Windows scheduled tasks always use `cronitor exec`.
 
 ### API Resources
