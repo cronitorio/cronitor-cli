@@ -1,0 +1,94 @@
+{
+  "\"$FIXTURE/my app/run.sh\" --flag \"x y\"": {
+    "exit": 0,
+    "output": "[--flag][x y]\n"
+  },
+  "FOO=bar sh -c 'echo $FOO'": {
+    "exit": 0,
+    "output": "bar\n"
+  },
+  "cat%line-one%line-two": {
+    "exit": 0,
+    "output": "line-one\nline-two\n"
+  },
+  "cat%stdin-a%stdin-b": {
+    "exit": 0,
+    "output": "stdin-a\nstdin-b\n"
+  },
+  "cd /tmp \u0026\u0026 echo exec-compound": {
+    "exit": 0,
+    "output": "exec-compound\n"
+  },
+  "cd /tmp \u0026\u0026 pwd; exit 3": {
+    "exit": 3,
+    "output": "/tmp\n"
+  },
+  "date +\\%Y \u003e /dev/null \u0026\u0026 echo escaped-percent": {
+    "exit": 0,
+    "output": "escaped-percent\n"
+  },
+  "echo \"two  spaces\"   \u003e  /dev/null; echo after-redirect": {
+    "exit": 0,
+    "output": "after-redirect\n"
+  },
+  "echo at-daily": {
+    "exit": 0,
+    "output": "at-daily\n"
+  },
+  "echo at-reboot": {
+    "exit": 0,
+    "output": "at-reboot\n"
+  },
+  "echo cronitor-marker": {
+    "exit": 0,
+    "output": "cronitor-marker\n"
+  },
+  "echo exec-env": {
+    "exit": 0,
+    "output": "exec-env\n"
+  },
+  "echo exec-no-stdout": {
+    "exit": 0,
+    "output": "exec-no-stdout\n"
+  },
+  "echo exec-ping-key": {
+    "exit": 0,
+    "output": "exec-ping-key\n"
+  },
+  "echo exec-plain": {
+    "exit": 0,
+    "output": "exec-plain\n"
+  },
+  "echo marker-with-env": {
+    "exit": 0,
+    "output": "marker-with-env\n"
+  },
+  "echo monicli-exec": {
+    "exit": 0,
+    "output": "monicli-exec\n"
+  },
+  "echo monitorio-marker": {
+    "exit": 0,
+    "output": "monitorio-marker\n"
+  },
+  "echo plain": {
+    "exit": 0,
+    "output": "plain\n"
+  },
+  "echo quoted  words": {
+    "exit": 0,
+    "output": "quoted words\n"
+  },
+  "echo ranges": {
+    "exit": 0,
+    "output": "ranges\n"
+  },
+  "printf \"\\%s|\" a b": {
+    "exit": 0,
+    "output": "a|b|"
+  },
+  "printf '\\%s\\n' a b | tr a-z A-Z": {
+    "exit": 0,
+    "output": "A\nB\n"
+  }
+}
