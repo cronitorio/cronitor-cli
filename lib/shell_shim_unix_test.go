@@ -4,6 +4,7 @@ package lib
 
 import (
 	"context"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +18,7 @@ func TestShimCommandBytesSurviveWrite(t *testing.T) {
 	line := `15 * * * * MONITORIO=k1 echo "hello  world" && date +%Y`
 	ct := parseContent(t, line)
 	ct.WriteMode = WriteModeShim
-	ct.ShimShellPath = "/etc/cronitor/shell-wrapper"
+	ct.ShimShellPath = "/etc/cronitor/shell"
 	got := ct.Write()
 	if !strings.Contains(got, line+"\n") && !strings.Contains(got, line) {
 		t.Fatalf("shim line was rebuilt:\n%s", got)
@@ -41,7 +42,7 @@ func TestWrapperRoutesAndFallsBack(t *testing.T) {
 		t.Skip("sh not available")
 	}
 	dir := t.TempDir()
-	wrapper, err := InstallShimWrapper(filepath.Join(dir, ".cronitor", "shell-wrapper"), filepath.Join(dir, "missing-cronitor"))
+	wrapper, err := InstallShimWrapper(filepath.Join(dir, ".cronitor", "shell"), filepath.Join(dir, "missing-cronitor"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +88,10 @@ func TestWrapperRoutesAndFallsBack(t *testing.T) {
 	if got := readFile(t, out); got != "-c\necho  hi\n" {
 		t.Fatalf("stripped command=\n%s", got)
 	}
+	run(t, "-c", "CRONITOR=k1 CRONITOR_API_KEY=abc echo hi")
+	if got := readFile(t, out); got != "-c\necho hi\n" {
+		t.Fatalf("settings reached the job without the binary:\n%s", got)
+	}
 
 	// A marked command with an extra argument is not monitored; argv stays intact.
 	run(t, "-c", "MONITORIO=k1 echo hi", "EXTRA")
@@ -115,7 +120,7 @@ func TestBrokenBinaryDoesNotAffectUnmarkedLines(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("not an executable"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	wrapper, err := InstallShimWrapper(filepath.Join(dir, ".cronitor", "shell-wrapper"), bin)
+	wrapper, err := InstallShimWrapper(filepath.Join(dir, ".cronitor", "shell"), bin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +143,7 @@ func TestWrapperExecsHealthyBinaryOnce(t *testing.T) {
 	if err := os.WriteFile(bin, []byte(stub), 0755); err != nil {
 		t.Fatal(err)
 	}
-	wrapper, err := InstallShimWrapper(filepath.Join(dir, ".cronitor", "shell-wrapper"), bin)
+	wrapper, err := InstallShimWrapper(filepath.Join(dir, ".cronitor", "shell"), bin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +185,7 @@ func TestWrapperExecsBinaryInPlace(t *testing.T) {
 	if err := os.WriteFile(bin, []byte(stub), 0755); err != nil {
 		t.Fatal(err)
 	}
-	wrapper, err := InstallShimWrapper(filepath.Join(dir, ".cronitor", "shell-wrapper"), bin)
+	wrapper, err := InstallShimWrapper(filepath.Join(dir, ".cronitor", "shell"), bin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +194,7 @@ func TestWrapperExecsBinaryInPlace(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatal(err)
 	}
-	want := strconv.Itoa(cmd.Process.Pid) + "\nshell-shim\n-c\nMONITORIO=k1 echo hi\n"
+	want := strconv.Itoa(cmd.Process.Pid) + "\nexec\nk1\necho hi\n"
 	if got := readFile(t, out); got != want {
 		t.Fatalf("binary saw:\n%s\nwant (same pid as the wrapper, so no supervisor):\n%s", got, want)
 	}
@@ -202,7 +207,7 @@ func TestWrapperRoutesBothMarkers(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s|' \"$@\" >> \"$OUT\"\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	wrapper, err := InstallShimWrapper(filepath.Join(dir, ".cronitor", "shell-wrapper"), bin)
+	wrapper, err := InstallShimWrapper(filepath.Join(dir, ".cronitor", "shell"), bin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +218,7 @@ func TestWrapperRoutesBothMarkers(t *testing.T) {
 			t.Fatalf("%s: %v\n%s", line, err, b)
 		}
 	}
-	want := "shell-shim|-c|CRONITOR=k1 echo a|shell-shim|-c|MONITORIO=k2 echo b|c"
+	want := "exec|k1|echo a|exec|k2|echo b|c"
 	if got := readFile(t, out); got != want {
 		t.Fatalf("got  %q\nwant %q", got, want)
 	}
@@ -226,7 +231,7 @@ func TestShimMarkers(t *testing.T) {
 		"0 3 * * * echo three",
 	}, "\n"))
 	ct.WriteMode = WriteModeShim
-	ct.ShimShellPath = "/etc/cronitor/shell-wrapper"
+	ct.ShimShellPath = "/etc/cronitor/shell"
 	for _, l := range ct.Lines {
 		switch l.CommandToRun {
 		case "echo one", "echo two":
@@ -264,7 +269,7 @@ func TestShimLineKeepsDashEdit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ct := parseContent(t, "0 1 * * * CRONITOR=k1 echo  old")
 			ct.WriteMode = tc.mode
-			ct.ShimShellPath = "/etc/cronitor/shell-wrapper"
+			ct.ShimShellPath = "/etc/cronitor/shell"
 			for _, l := range ct.Lines {
 				if l.IsJob {
 					l.CommandToRun = "echo new"
@@ -293,13 +298,13 @@ func TestConvertExecLines(t *testing.T) {
 		ct := parseContent(t, content)
 		ct.WriteMode = WriteModeShim
 		ct.ConvertExec = true
-		ct.ShimShellPath = "/etc/cronitor/shell-wrapper"
+		ct.ShimShellPath = "/etc/cronitor/shell"
 		_, notices := ct.ShimNotices()
 		return ct.Write(), notices
 	}
 	got, notices := write(input)
 	for _, want := range []string{
-		"SHELL=/etc/cronitor/shell-wrapper\n",
+		"SHELL=/etc/cronitor/shell\n",
 		"0 1 * * * CRONITOR=k1 echo hi\n",
 		"0 2 * * * CRONITOR=k2 cd /tmp && echo x\n",
 		"0 3 * * * CRONITOR=k3 echo \"a  b\"\n",
@@ -333,7 +338,7 @@ func TestShimSettingsOnMarkerLines(t *testing.T) {
 	parse := func(mode WriteMode) (*Crontab, *Line) {
 		ct := parseContent(t, line)
 		ct.WriteMode = mode
-		ct.ShimShellPath = "/etc/cronitor/shell-wrapper"
+		ct.ShimShellPath = "/etc/cronitor/shell"
 		for _, l := range ct.Lines {
 			if l.IsJob {
 				return ct, l
@@ -370,70 +375,177 @@ func TestShimSettingsOnMarkerLines(t *testing.T) {
 	}
 }
 
-func TestConvertWithShellChange(t *testing.T) {
-	input := strings.Join([]string{
-		"0 1 * * * cronitor exec k1 echo hi",
-		"0 2 * * * cronitor exec k2 'diff <(ls a) <(ls b)'",
-		"0 3 * * * cronitor exec --no-stdout k3 echo quiet",
-	}, "\n")
-	write := func(change *ShellChange) (string, []string) {
-		ct := parseContent(t, input)
-		ct.WriteMode = WriteModeShim
-		ct.ConvertExec = true
-		ct.ShellChange = change
-		ct.ShimShellPath = "/etc/cronitor/shell-wrapper"
-		_, notices := ct.ShimNotices()
-		return ct.Write(), notices
-	}
-
-	var checked []string
-	change := &ShellChange{From: "/bin/bash", To: "/bin/sh", Parses: func(cmd string) bool {
-		checked = append(checked, cmd)
-		return !strings.Contains(cmd, "<(")
-	}}
-	got, notices := write(change)
-	for _, want := range []string{
-		"0 1 * * * CRONITOR=k1 echo hi\n",
-		"0 2 * * * cronitor exec k2 'diff <(ls a) <(ls b)'\n",
-		"0 3 * * * CRONITOR=k3 CRONITOR_NO_STDOUT=1 echo quiet\n",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("missing %q in:\n%s", want, got)
-		}
-	}
-	if !containsString(checked, "diff <(ls a) <(ls b)") {
-		t.Fatalf("parse check did not get the unquoted command, got %q", checked)
-	}
-	joined := strings.Join(notices, "\n")
-	for _, want := range []string{"k2", "/bin/sh cannot parse", "2 converted jobs", "k1, k3", "ran in /bin/bash", "set CRONITOR_SHELL=/bin/bash", "--format=exec"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("notices miss %q:\n%s", want, joined)
-		}
-	}
-
-	got, notices = write(nil)
-	if !strings.Contains(got, "0 2 * * * CRONITOR=k2 diff <(ls a) <(ls b)\n") {
-		t.Fatalf("without a shell change every flag-free line converts:\n%s", got)
-	}
-	if joined := strings.Join(notices, "\n"); strings.Contains(joined, "will now run in") || strings.Contains(joined, "cannot parse") {
-		t.Fatalf("no shell change, but notices say so:\n%s", joined)
-	}
-}
-
 func TestIsShimShellPath(t *testing.T) {
 	for path, want := range map[string]bool{
-		"/etc/cronitor/shell-wrapper":        true,
-		"/root/.cronitor/shell-wrapper":      true,
-		" /home/u/.cronitor/shell-wrapper ":  true,
-		"/tmp/x/cronitor/shell-wrapper":      true,
-		"/usr/local/bin/shell-wrapper":       false,
-		"shell-wrapper":                      false,
-		"/etc/cronitor/cronitor-shell":       false,
-		"/etc/cronitor/shell-wrapper/bin/sh": false,
-		"/bin/sh":                            false,
+		"/etc/cronitor/shell":          true,
+		"/root/.cronitor/shell":        true,
+		" /home/u/.cronitor/shell ":    true,
+		"/tmp/x/cronitor/shell":        true,
+		"/usr/local/bin/shell":         false,
+		"shell":                        false,
+		"/etc/cronitor/shell-wrapper":  false,
+		"/etc/cronitor/cronitor-shell": false,
+		"/etc/cronitor/shell/bin/sh":   false,
+		"/bin/sh":                      false,
 	} {
 		if got := IsShimShellPath(path); got != want {
 			t.Errorf("IsShimShellPath(%q) = %v, want %v", path, got, want)
 		}
+	}
+}
+
+// The wrapper turns settings into the matching cronitor exec flags. It must
+// split settings off exactly as lib.SplitShimSettings does.
+func TestWrapperMapsSettingsToExecFlags(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "seen")
+	bin := filepath.Join(dir, "cronitor")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s|' \"$@\" > \"$OUT\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	wrapper, err := InstallShimWrapper(filepath.Join(dir, ".cronitor", "shell"), bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ line, want string }{
+		{"CRONITOR=k1 CRONITOR_ENV=staging CRONITOR_NO_STDOUT=1 CRONITOR_API_KEY=abc CRONITOR_PING_API_KEY=p1 CRONITOR_HOSTNAME=web-1.local echo hi",
+			"--env=staging|--api-key=abc|--ping-api-key=p1|--hostname=web-1.local|exec|--no-stdout|k1|echo hi|"},
+		{"CRONITOR=k1 CRONITOR_NO_STDOUT=0 echo hi", "exec|k1|echo hi|"},
+		{"CRONITOR=k1 CRONITOR_ENV=exec echo hi", "--env=exec|exec|k1|echo hi|"},
+		{"CRONITOR=k1 CRONITOR_ENV='a b' echo hi", "exec|k1|CRONITOR_ENV='a b' echo hi|"},
+		{"CRONITOR=k1 CRONITOR_FOO=1 echo hi", "exec|k1|CRONITOR_FOO=1 echo hi|"},
+		{"CRONITOR=k1 CRONITOR_ENV=staging", "exec|k1|CRONITOR_ENV=staging|"},
+		{"CRONITOR=k1\tCRONITOR_ENV=s  echo  hi", "--env=s|exec|k1|echo  hi|"},
+	} {
+		cmd := exec.Command(wrapper, "-c", tc.line)
+		cmd.Env = append(os.Environ(), "CRONITOR_SHELL=/bin/sh", "OUT="+out)
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s: %v\n%s", tc.line, err, b)
+		}
+		if got := readFile(t, out); got != tc.want {
+			t.Errorf("%q\n got  %s\n want %s", tc.line, got, tc.want)
+		}
+		_, rest, _ := ParseMonitorMarker(tc.line)
+		_, job := SplitShimSettings(rest)
+		if !strings.HasSuffix(tc.want, "|"+job+"|") {
+			t.Errorf("%q: Go parser gives job %q, wrapper gives %s", tc.line, job, tc.want)
+		}
+	}
+}
+
+// TestWrapperMatchesGoParserFuzz builds random marker lines from tricky words
+// and checks that the shell wrapper hands cronitor exec the same flags, key and
+// command that lib.SplitShimSettings and the settings table give.
+func TestWrapperMatchesGoParserFuzz(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "seen")
+	bin := filepath.Join(dir, "cronitor")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s\\037' \"$@\" > \"$OUT\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	wrapper, err := InstallShimWrapper(filepath.Join(dir, ".cronitor", "shell"), bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	words := []string{
+		"CRONITOR_ENV=staging", "CRONITOR_ENV=exec", "CRONITOR_ENV=a/b:c@d+e-f.g", "CRONITOR_ENV=",
+		"CRONITOR_ENV='x y'", "CRONITOR_ENV=$X", "CRONITOR_ENV==x", "CRONITOR_ENV=x=y",
+		"CRONITOR_NO_STDOUT=1", "CRONITOR_NO_STDOUT=0", "CRONITOR_API_KEY=abc123",
+		"CRONITOR_PING_API_KEY=p1", "CRONITOR_HOSTNAME=web-1.local", "CRONITOR_FOO=1", "FOO=1",
+		"echo", "hi", "'a b'", `"c  d"`, "--", "-x", "--no-stdout", "exec", "|", "&&", ";", `\%`, "*", "$HOME", "k2",
+	}
+	seps := []string{" ", "  ", "\t", " \t "}
+	flagFor := map[string]string{
+		"CRONITOR_ENV": "--env=", "CRONITOR_API_KEY": "--api-key=",
+		"CRONITOR_PING_API_KEY": "--ping-api-key=", "CRONITOR_HOSTNAME": "--hostname=",
+	}
+	rng := rand.New(rand.NewSource(66))
+	for i := 0; i < 400; i++ {
+		var b strings.Builder
+		b.WriteString("CRONITOR=k1")
+		for n := 1 + rng.Intn(6); n > 0; n-- {
+			b.WriteString(seps[rng.Intn(len(seps))])
+			b.WriteString(words[rng.Intn(len(words))])
+		}
+		if rng.Intn(4) == 0 {
+			b.WriteString(seps[rng.Intn(len(seps))])
+		}
+		line := b.String()
+
+		_, rest, ok := ParseMonitorMarker(line)
+		if !ok {
+			t.Fatalf("generator made an unparsed line %q", line)
+		}
+		settings, job := SplitShimSettings(rest)
+		var want []string
+		noStdout := false
+		for _, s := range settings {
+			name, value, _ := strings.Cut(s, "=")
+			if name == "CRONITOR_NO_STDOUT" {
+				noStdout = noStdout || value == "1"
+				continue
+			}
+			want = append(want, flagFor[name]+value)
+		}
+		want = append(want, "exec")
+		if noStdout {
+			want = append(want, "--no-stdout")
+		}
+		want = append(want, "k1", job)
+
+		os.Remove(out)
+		cmd := exec.Command(wrapper, "-c", line)
+		cmd.Env = append(os.Environ(), "CRONITOR_SHELL=/bin/sh", "OUT="+out)
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%q: %v\n%s", line, err, b)
+		}
+		got := strings.Split(strings.TrimSuffix(readFile(t, out), "\x1f"), "\x1f")
+		if strings.Join(got, "\x1f") != strings.Join(want, "\x1f") {
+			t.Fatalf("line %q\n got  %q\n want %q", line, got, want)
+		}
+	}
+}
+
+// Sync writes CRONITOR_SHELL only when the crontab had its own SHELL, and
+// --format=exec then gives back the crontab as it was.
+func TestShimShellLinesRoundTrip(t *testing.T) {
+	write := func(content string, mode WriteMode) (string, *Crontab) {
+		ct := parseContent(t, content)
+		ct.WriteMode = mode
+		ct.ShimShellPath = "/etc/cronitor/shell"
+		for _, l := range ct.Lines {
+			if l.IsJob && l.GetCode() == "" {
+				l.Code = "k1"
+			}
+		}
+		return ct.Write(), ct
+	}
+	for _, tc := range []struct {
+		name, original, shim, exec string
+	}{
+		{"no SHELL line", "0 1 * * * echo hi\n",
+			"SHELL=/etc/cronitor/shell\n0 1 * * * CRONITOR=k1 echo hi\n",
+			"0 1 * * * cronitor exec k1 echo hi\n"},
+		{"own SHELL line", "SHELL=/bin/zsh\n0 1 * * * echo hi\n",
+			"CRONITOR_SHELL=/bin/zsh\nSHELL=/etc/cronitor/shell\n0 1 * * * CRONITOR=k1 echo hi\n",
+			"SHELL=/bin/zsh\n0 1 * * * cronitor exec k1 echo hi\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			shim, _ := write(tc.original, WriteModeShim)
+			if shim != tc.shim {
+				t.Fatalf("shim write\n got  %q\n want %q", shim, tc.shim)
+			}
+			if again, _ := write(shim, WriteModeShim); again != shim {
+				t.Fatalf("second sync changed it\n got  %q\n want %q", again, shim)
+			}
+			_, parsed := write(shim, WriteModeShim)
+			if want := strings.TrimPrefix(strings.SplitN(tc.original, "\n", 2)[0], "SHELL="); strings.HasPrefix(tc.original, "SHELL=") && parsed.Shell != want || !strings.HasPrefix(tc.original, "SHELL=") && parsed.Shell != "" {
+				t.Fatalf("parsed Shell = %q", parsed.Shell)
+			}
+			back, _ := write(shim, WriteModeExec)
+			if back != tc.exec {
+				t.Fatalf("--format=exec\n got  %q\n want %q", back, tc.exec)
+			}
+		})
 	}
 }

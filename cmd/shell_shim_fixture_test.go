@@ -21,7 +21,7 @@ import (
 )
 
 // TestShimFixtureRuns runs every marked job in the default and
-// --format=short outputs through the real wrapper and shell-shim, and runs
+// --format=short outputs through the real wrapper and cronitor exec, and runs
 // the matching line from crontab.input with /bin/sh. Output and exit code must
 // match, and the marked run must send a run ping and a final ping. The test
 // binary is on PATH as cronitor and monicli, so original exec lines run

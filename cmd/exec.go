@@ -109,11 +109,7 @@ Example with no command output send to Cronitor:
 	},
 }
 
-func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, explicitShell ...string) int {
-	shell := ""
-	if len(explicitShell) > 0 {
-		shell = explicitShell[0]
-	}
+func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool) int {
 	var monitoringWaitGroup sync.WaitGroup
 
 	startTime := makeStamp()
@@ -135,10 +131,7 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 		env = makeCronLikeEnv()
 	}
 	env = append(env, "CRONITOR_EXEC=1")
-	if shell != "" {
-		env = setEnv(env, "SHELL", shell)
-	}
-	execCmd := makeSubcommandExecWithShell(subcommand, shell, env)
+	execCmd := makeSubcommandExec(subcommand, env)
 	execCmd.Env = env
 
 	// Handle stdin to the subcommand - improved pipe handling
@@ -251,9 +244,6 @@ func RunCommand(subcommand string, withEnvironment bool, withMonitoring bool, ex
 					} else {
 						exitCode = 1
 					}
-				} else if shell != "" {
-					fmt.Fprintf(os.Stderr, "shell-shim: %s: %v\n", shell, err)
-					exitCode = 127
 				}
 
 				if withMonitoring {
@@ -300,15 +290,6 @@ func makeSubcommandExec(subcommand string, env []string) *exec.Cmd {
 	execCmd := exec.Command(name, flag, subcommand)
 	execCmd.SysProcAttr = getPlatformSysProcAttr()
 	return execCmd
-}
-
-func makeSubcommandExecWithShell(subcommand, explicitShell string, env []string) *exec.Cmd {
-	if explicitShell == "" {
-		return makeSubcommandExec(subcommand, env)
-	}
-	cmd := exec.Command(explicitShell, "-c", subcommand)
-	cmd.SysProcAttr = getPlatformSysProcAttr()
-	return cmd
 }
 
 // interpreterForExec selects the program and its command flag.
@@ -446,20 +427,4 @@ func shipLogData(tempFile *os.File, series string, wg *sync.WaitGroup) {
 		log(fmt.Sprintf("%v", err))
 	}
 	wg.Done()
-}
-
-func setEnv(env []string, key, value string) []string {
-	return append(dropEnv(env, key), key+"="+value)
-}
-
-func dropEnv(env []string, key string) []string {
-	prefix := key + "="
-	out := make([]string, 0, len(env))
-	for _, entry := range env {
-		if strings.HasPrefix(entry, prefix) {
-			continue
-		}
-		out = append(out, entry)
-	}
-	return out
 }

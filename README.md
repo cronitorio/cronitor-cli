@@ -73,15 +73,15 @@ Logout revokes this installation's credential and removes it locally. **Schedule
 
 #### How `cronitor sync` changes a crontab
 
-On Linux and macOS, sync puts the monitor key in front of each job you monitor:
+On Linux and macOS, sync puts the monitor key in front of each job you monitor, and adds one line to the top of the crontab:
 
 ```
-CRONITOR_SHELL=/bin/sh
-SHELL=/etc/cronitor/shell-wrapper
+SHELL=/etc/cronitor/shell
 0 1 * * * CRONITOR=abc123 /usr/local/bin/backup.sh
 ```
 
-- `shell-wrapper` is a small script. For a line that starts with `CRONITOR=<key>`, it runs the job through `cronitor`. Every other line runs in the shell named by `CRONITOR_SHELL` (your previous `SHELL`), as before. The job runs in that shell too.
+- A `CRONITOR=<key> <command>` line runs exactly like `cronitor exec <key> <command>`. `/etc/cronitor/shell` is a small script that cron starts every line with. For a line that starts with `CRONITOR=<key>`, it runs `cronitor exec`. Every other line runs in `/bin/sh`, as before.
+- If the crontab already had a `SHELL=` line, sync keeps that shell as `CRONITOR_SHELL=` (for example `CRONITOR_SHELL=/bin/zsh`), and jobs keep running in it.
 - Sync installs the script in `/etc/cronitor/` as root, or in `~/.cronitor/` otherwise.
 - If the `cronitor` binary is missing, marked jobs still run, without monitoring.
 - `MONITORIO=<key>` works the same as `CRONITOR=<key>`.
@@ -90,7 +90,6 @@ SHELL=/etc/cronitor/shell-wrapper
   ```
   0 1 * * * CRONITOR=abc123 CRONITOR_ENV=staging CRONITOR_NO_STDOUT=1 /usr/local/bin/backup.sh
   ```
-- A `CRONITOR=<key>` line runs in the crontab's shell, the same as cron. `cronitor exec` uses bash when the crontab's shell is `/bin/sh`. When `--format=short` would move jobs from bash to `/bin/sh`, sync prints a warning that lists them, and a command that `/bin/sh` cannot parse stays `cronitor exec`. To keep bash, set `CRONITOR_SHELL=/bin/bash` in the crontab.
 - A `CRONITOR=<key>` line works only in a crontab that sync has changed. To add monitoring by hand to any other crontab, script or task, use `cronitor exec <key> <cmd>`.
 - To go back, run `cronitor sync --format=exec`.
 - Windows scheduled tasks always use `cronitor exec`.
@@ -363,10 +362,10 @@ The Cronitor CLI includes a built-in [Model Context Protocol (MCP)](https://mode
 For setup instructions, available tools, and configuration options, see the [MCP Integration Guide](docs/MCP_INTEGRATION.md).
 
 ## Uninstall CronitorCLI
-First, run `cronitor sync --format=exec` for each crontab that sync changed. This removes the `SHELL=.../shell-wrapper` and `CRONITOR_SHELL=` lines, restores your previous `SHELL`, and writes monitored jobs as `cronitor exec MONITOR_KEY ...`.
+First, run `cronitor sync --format=exec` for each crontab that sync changed. This removes the `SHELL=.../cronitor/shell` line (and `CRONITOR_SHELL=`, if any), restores your previous `SHELL`, and writes monitored jobs as `cronitor exec MONITOR_KEY ...`.
 
-**Do not delete `shell-wrapper` while a crontab still has `SHELL=.../shell-wrapper`. If you do, no job in that crontab runs, including jobs without monitoring.**
+**Do not delete `/etc/cronitor/shell` while a crontab still has `SHELL=/etc/cronitor/shell`. If you do, no job in that crontab runs, including jobs without monitoring.**
 
 Then, update any crontab files that were edited to include Cronitor to remove the reference to `cronitor exec MONITOR_KEY` that were added when you created monitors.
 
-Then, remove `/etc/cronitor/shell-wrapper` or `~/.cronitor/shell-wrapper`, and remove the cronitor executable from wherever it was installed. If you followed our default instructions it can be removed with `rm /usr/bin/cronitor`
+Then, remove `/etc/cronitor/shell` or `~/.cronitor/shell`, and remove the cronitor executable from wherever it was installed. If you followed our default instructions it can be removed with `rm /usr/bin/cronitor`

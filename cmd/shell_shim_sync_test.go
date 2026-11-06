@@ -120,7 +120,7 @@ func withSyncFixture(t *testing.T) (serverURL, shimPath string) {
 	t.Helper()
 	server := monitorServer(t)
 	t.Cleanup(server.Close)
-	shimPath = filepath.Join(t.TempDir(), "cronitor", "shell-wrapper")
+	shimPath = filepath.Join(t.TempDir(), "cronitor", "shell")
 	oldOverride := lib.ShimShellPathOverride
 	oldBase := lib.BaseURLOverride
 	oldAuto, oldSilent := isAutoDiscover, isSilent
@@ -284,8 +284,8 @@ func TestSyncKeepsExistingExecLineByteForByte(t *testing.T) {
 	if !strings.Contains(first, "CRONITOR=") {
 		t.Fatalf("new line was not shim style:\n%s", first)
 	}
-	if !strings.Contains(first, "CRONITOR_SHELL=/bin/sh\n") {
-		t.Fatalf("missing default real shell:\n%s", first)
+	if strings.Contains(first, "CRONITOR_SHELL=") {
+		t.Fatalf("crontab had no SHELL line, but sync wrote CRONITOR_SHELL:\n%s", first)
 	}
 
 	runSync(t, serverURL, path)
@@ -342,7 +342,7 @@ func TestSyncExecStyleOnNewLines(t *testing.T) {
 	path := writeCron(t, "SHELL=/bin/bash\n0 * * * * date +\\%Y\n")
 	runSync(t, serverURL, path, "--format=exec", "--no-stdout")
 	got := readCron(t, path)
-	if hasShimMarker(got) || strings.Contains(got, "shell-wrapper") {
+	if hasShimMarker(got) || strings.Contains(got, "cronitor/shell") {
 		t.Fatalf("--format=exec wrote a shim:\n%s", got)
 	}
 	if !strings.Contains(got, "SHELL=/bin/bash\n") {
@@ -678,69 +678,5 @@ func TestSyncFormatExecKeepsSettings(t *testing.T) {
 	runSync(t, serverURL, path, "--format=exec")
 	if got, want := readCron(t, path), "0 1 * * * cronitor --env staging exec --no-stdout k1 echo hi\n"; !strings.Contains(got, want) {
 		t.Fatalf("missing %q in:\n%s", want, got)
-	}
-}
-
-func TestConvertShellChange(t *testing.T) {
-	withBash := func(name string) (os.FileInfo, error) {
-		switch name {
-		case "/bin/bash", "/bin/zsh", "/bin/sh":
-			return fakeFileInfo{mode: 0755}, nil
-		}
-		return nil, os.ErrNotExist
-	}
-	noBash := func(name string) (os.FileInfo, error) {
-		if name == "/bin/sh" {
-			return fakeFileInfo{mode: 0755}, nil
-		}
-		return nil, os.ErrNotExist
-	}
-	for _, tc := range []struct {
-		shell   string
-		stat    func(string) (os.FileInfo, error)
-		from    string
-		changed bool
-	}{
-		{"", withBash, "/bin/bash", true},
-		{"/bin/sh", withBash, "/bin/bash", true},
-		{"/bin//sh", withBash, "/bin/bash", true},
-		{"/bin/sh", noBash, "", false},
-		{"/bin/bash", withBash, "", false},
-		{"/bin/zsh", withBash, "", false},
-	} {
-		from, changed := convertShellChange("linux", tc.shell, tc.stat)
-		if from != tc.from || changed != tc.changed {
-			t.Errorf("convertShellChange(%q) = %q, %v; want %q, %v", tc.shell, from, changed, tc.from, tc.changed)
-		}
-	}
-	if _, changed := convertShellChange("windows", "", withBash); changed {
-		t.Error("windows never converts")
-	}
-}
-
-func TestSyncFormatShortWarnsWhenShellChanges(t *testing.T) {
-	if _, err := os.Stat("/bin/bash"); err != nil {
-		t.Skip("needs /bin/bash")
-	}
-	if exec.Command("/bin/sh", "-n", "-c", "diff <(ls) <(ls)").Run() == nil {
-		t.Skip("/bin/sh accepts process substitution here")
-	}
-	serverURL, _ := withSyncFixture(t)
-	path := writeCron(t, strings.Join([]string{
-		"0 1 * * * cronitor exec k1 echo hi",
-		"0 2 * * * cronitor exec k2 'diff <(ls) <(ls)'",
-	}, "\n"))
-
-	stderr := runSync(t, serverURL, path, "--format=short")
-	got := readCron(t, path)
-	for _, want := range []string{"0 1 * * * CRONITOR=k1 echo hi\n", "0 2 * * * cronitor exec k2 'diff <(ls) <(ls)'\n"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("missing %q in:\n%s", want, got)
-		}
-	}
-	for _, want := range []string{"monitor k2: kept as cronitor exec because /bin/sh cannot parse", "1 converted job in", "ran in /bin/bash and will now run in /bin/sh: k1", "set CRONITOR_SHELL=/bin/bash"} {
-		if !strings.Contains(stderr, want) {
-			t.Fatalf("stderr misses %q:\n%s", want, stderr)
-		}
 	}
 }
