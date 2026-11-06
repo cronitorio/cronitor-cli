@@ -591,8 +591,8 @@ func TestSyncInteractiveRerunSendsScheduleChange(t *testing.T) {
 	if len(puts) != 1 || !reflect.DeepEqual(puts[0][0]["schedules"], []interface{}{"30 3 * * *"}) {
 		t.Fatalf("sent %v; want the new schedule", puts)
 	}
-	if !strings.Contains(out, "1 updated") {
-		t.Fatalf("summary:\n%s", out)
+	if !strings.Contains(out, "1 updated") || !strings.Contains(out, "L1  Nightly backup: schedule 0 2 * * * → 30 3 * * *") {
+		t.Fatalf("summary does not show the change:\n%s", out)
 	}
 }
 
@@ -624,5 +624,21 @@ func TestSyncRerunSameTimezoneSendsNothing(t *testing.T) {
 
 	if puts := api.sent(); len(puts) != 0 {
 		t.Fatalf("sync sent %v; the timezone did not change", puts)
+	}
+}
+
+func TestPlanUpdateDescribesEachChange(t *testing.T) {
+	old := timezone
+	t.Cleanup(func() { timezone = old })
+	timezone = lib.TimezoneLocationName{Name: "America/New_York"}
+	withNotificationList(t, "oncall")
+	existing := lib.Monitor{Name: "Old name", Schedules: &[]string{"0 2 * * *"}, Timezone: "UTC"}
+	line := &lib.Line{Code: "abc123", CronExpression: "0 2 * * *"}
+
+	p := planUpdate(line, "hash", existing, true, "Old name", "New name")
+
+	want := []string{"timezone UTC → America/New_York", `name "Old name" → "New name"`, "alert list → oncall"}
+	if !reflect.DeepEqual(p.changes, want) {
+		t.Fatalf("changes = %q; want %q", p.changes, want)
 	}
 }

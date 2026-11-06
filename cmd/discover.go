@@ -624,6 +624,11 @@ func finishSync(plans []*crontabPlan) int {
 		for _, p := range plans {
 			fmt.Println("  " + p.crontab.DisplayName())
 			fmt.Println("    " + p.summary())
+			for _, l := range p.lines {
+				if l.action == actionUpdate {
+					fmt.Printf("    L%d  %s: %s\n", l.line.LineNumber, l.label, strings.Join(l.changes, "; "))
+				}
+			}
 		}
 		fmt.Println()
 	}
@@ -667,6 +672,8 @@ type plannedLine struct {
 	// commentUpdated is set when the "# Name:" comment was changed to the
 	// monitor's name in Cronitor.
 	commentUpdated bool
+	label          string   // the job's name, for the summary
+	changes        []string // what actionUpdate changes, for the summary
 }
 
 // crontabPlan holds every decision for one crontab. planCrontab fills it
@@ -888,31 +895,46 @@ func planCrontab(crontab *lib.Crontab) *crontabPlan {
 // sent because sync cannot compare it.
 func planUpdate(line *lib.Line, key string, existing lib.Monitor, found bool, currentName, name string) plannedLine {
 	payload := lib.Monitor{Key: line.Code, Type: "job"}
-	changed := false
+	var changes []string
 
-	if !found || !sameSchedule(existing.Schedules, line.CronExpression) {
+	if !found {
 		payload.Schedules = &[]string{line.CronExpression}
 		payload.Timezone = timezone.Name
-		changed = true
+		changes = append(changes, "schedule "+line.CronExpression)
+	} else if !sameSchedule(existing.Schedules, line.CronExpression) {
+		payload.Schedules = &[]string{line.CronExpression}
+		payload.Timezone = timezone.Name
+		changes = append(changes, fmt.Sprintf("schedule %s → %s", scheduleText(existing.Schedules), line.CronExpression))
 	} else if existing.Timezone != "" && existing.Timezone != timezone.Name {
 		// Same schedule, but the crontab's timezone (CRON_TZ, TZ or the server's) changed.
 		payload.Timezone = timezone.Name
-		changed = true
+		changes = append(changes, fmt.Sprintf("timezone %s → %s", existing.Timezone, timezone.Name))
 	}
 	if name != "" && name != currentName {
 		payload.Name = name
 		line.Name = name
-		changed = true
+		changes = append(changes, fmt.Sprintf("name %q → %q", currentName, name))
 	}
 	if notify := notifyList(); notify != nil {
 		payload.Notify = notify
-		changed = true
+		changes = append(changes, "alert list → "+strings.Join(notify, ", "))
 	}
 
-	if !changed {
-		return plannedLine{line: line, key: key, action: actionUnchanged}
+	label := name
+	if label == "" {
+		label = currentName
 	}
-	return plannedLine{line: line, key: key, action: actionUpdate, payload: &payload}
+	if len(changes) == 0 {
+		return plannedLine{line: line, key: key, action: actionUnchanged, label: label}
+	}
+	return plannedLine{line: line, key: key, action: actionUpdate, payload: &payload, label: label, changes: changes}
+}
+
+func scheduleText(schedules *[]string) string {
+	if schedules == nil || len(*schedules) == 0 {
+		return "(none)"
+	}
+	return strings.Join(*schedules, ", ")
 }
 
 // applyNoStdout marks a monitored line for --no-stdout. A flag already on
