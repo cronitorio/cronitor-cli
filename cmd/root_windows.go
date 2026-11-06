@@ -9,11 +9,14 @@ import (
 	"github.com/capnspacehook/taskmaster"
 )
 
+// connectTaskScheduler opens the Task Scheduler connection. Tests replace it.
+var connectTaskScheduler = taskmaster.Connect
+
 // GetNextRunFromMonitorKey returns the NextRunTime timestamp from Windows
 // Task Scheduler. Since each `cronitor ping` call is run independently,
 // this call can't be memoized, regardless of how expensive it is.
 func GetNextRunFromMonitorKey(key string) string {
-	taskService, err := taskmaster.Connect()
+	taskService, err := connectTaskScheduler()
 	if err != nil {
 		log(fmt.Sprintf("err: %v", err))
 		return ""
