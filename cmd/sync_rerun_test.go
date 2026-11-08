@@ -603,6 +603,110 @@ func TestSyncAutoPrintsOriginalWhenShimInstallFails(t *testing.T) {
 	}
 }
 
+// An API failure used to os.Exit inside applyPlan, skipping the deferred
+// print. `cronitor sync --auto file | crontab -` then installed an empty crontab.
+func TestSyncAutoPrintsOriginalWhenAPIFails(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			io.WriteString(w, `{"total_monitor_count":0,"page_size":50,"monitors":[]}`)
+			return
+		}
+		http.Error(w, "nope", http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	body := "0 2 * * * /usr/bin/backup.sh\n"
+	path := writeCron(t, body)
+
+	var code int
+	oldExit := exitFn
+	t.Cleanup(func() {
+		exitFn = oldExit
+		verbose = false
+		if f := RootCmd.PersistentFlags().Lookup("verbose"); f != nil {
+			_ = f.Value.Set("false")
+			f.Changed = false
+		}
+	})
+	exitFn = func(c int) { code = c }
+
+	// A previous test may have viper.Set the config path, which hides --config.
+	viperUnset(varConfig)
+	// --verbose must not prefix the crontab. Those logs used to be written
+	// before os.Exit, so the pipe installed a partial crontab.
+	stderr := runSyncArgs(t, srv.URL, path, "--auto", "--verbose")
+
+	if code != 1 {
+		t.Fatalf("exit %d; want 1 after the API call fails", code)
+	}
+	if strings.TrimSpace(lastSyncStdout) == "" {
+		t.Fatal("stdout is empty; the pipe would install an empty crontab")
+	}
+	if strings.TrimSpace(lastSyncStdout) != strings.TrimSpace(body) {
+		t.Fatalf("stdout = %q; want the original crontab", lastSyncStdout)
+	}
+	if got := readCron(t, path); got != body {
+		t.Fatalf("crontab on disk changed:\n%s", got)
+	}
+	if strings.TrimSpace(stderr) == "" {
+		t.Fatal("stderr is empty; the API error was not reported")
+	}
+}
+
+// A missing or unwritable file used to print nothing and exit 0, so
+// `cronitor sync --auto file | crontab -` installed an empty crontab.
+func TestSyncAutoExitsWhenCrontabMissingOrUnwritable(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	_, apiURL := newRerunAPI(t, backupMonitor)
+
+	var code int
+	oldExit := exitFn
+	t.Cleanup(func() { exitFn = oldExit })
+	exitFn = func(c int) { code = c }
+
+	t.Run("missing", func(t *testing.T) {
+		code = 0
+		missing := filepath.Join(t.TempDir(), "no-such-crontab")
+		stderr := runSyncArgs(t, apiURL, missing, "--auto")
+		if code != 1 {
+			t.Fatalf("exit %d; want 1 when the crontab does not exist", code)
+		}
+		if lastSyncStdout != "" {
+			t.Fatalf("stdout = %q; want nothing when the file does not exist", lastSyncStdout)
+		}
+		if strings.TrimSpace(stderr) == "" {
+			t.Fatal("stderr is empty; the missing file was not reported")
+		}
+	})
+
+	t.Run("unwritable", func(t *testing.T) {
+		code = 0
+		body := "0 2 * * * /usr/bin/backup.sh\n"
+		path := writeCron(t, body)
+		// Root can still open a mode 0444 file, so stub the check planCrontab uses.
+		old := crontabWritable
+		t.Cleanup(func() { crontabWritable = old })
+		crontabWritable = func(*lib.Crontab) bool { return false }
+
+		stderr := runSyncArgs(t, apiURL, path, "--auto")
+		if code != 1 {
+			t.Fatalf("exit %d; want 1 when the crontab is not writable", code)
+		}
+		if strings.TrimSpace(lastSyncStdout) != strings.TrimSpace(body) {
+			t.Fatalf("stdout = %q; want the original crontab", lastSyncStdout)
+		}
+		if got := readCron(t, path); got != body {
+			t.Fatalf("crontab on disk changed:\n%s", got)
+		}
+		if strings.TrimSpace(stderr) == "" {
+			t.Fatal("stderr is empty; the unwritable file was not reported")
+		}
+	})
+}
+
 func TestSyncSilentStillConfirms(t *testing.T) {
 	withSyncFixture(t)
 	withNotificationList(t, "")

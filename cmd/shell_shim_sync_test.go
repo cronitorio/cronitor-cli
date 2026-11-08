@@ -41,6 +41,12 @@ func runSyncArgs(t *testing.T, serverURL, path string, extra ...string) string {
 	isAutoDiscover = false
 	isSilent = false
 	withMonitored = false
+	stdoutIsCrontab = false
+	verbose = false
+	if f := RootCmd.PersistentFlags().Lookup("verbose"); f != nil {
+		_ = f.Value.Set("false")
+		f.Changed = false
+	}
 	_ = discoverCmd.Flags().Set("format", "")
 	_ = discoverCmd.Flags().Set("dry-run", "false")
 	_ = discoverCmd.Flags().Set("no-stdout", "false")
@@ -151,6 +157,7 @@ func withSyncFixture(t *testing.T) (serverURL, shimPath string) {
 		lib.BaseURLOverride = oldBase
 		isAutoDiscover = oldAuto
 		isSilent = oldSilent
+		stdoutIsCrontab = false
 		syncFormat = oldFormat
 		dryRun = oldDry
 		existingMonitors = oldMonitors
