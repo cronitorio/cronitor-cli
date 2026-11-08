@@ -127,6 +127,92 @@ func reserveStdoutForCrontab(args []string) bool {
 	return len(args) > 0 && !isPathToDirectory(args[0])
 }
 
+// printOriginalCrontab prints the crontab for a --auto run on one readable
+// file. Sync calls it when it fails before a plan exists. A missing or
+// unreadable file prints nothing.
+func printOriginalCrontab(args []string) {
+	if !reserveStdoutForCrontab(args) {
+		return
+	}
+	info, err := os.Stat(args[0])
+	if err != nil || !info.Mode().IsRegular() {
+		return
+	}
+	b, err := os.ReadFile(args[0])
+	if err != nil {
+		return
+	}
+	text := strings.TrimSpace(string(b))
+	if text == "" {
+		return
+	}
+	fmt.Println(text)
+}
+
+// redactAPIKeyArgs hides a Cronitor API key passed on the command line so
+// the dry-run reminder does not print it. Forms: -k X, -kX, -k=X,
+// --api-key X, --api-key=X, and -k with the value attached in a short
+// cluster such as -vkX.
+func redactAPIKeyArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if i == 0 {
+			out = append(out, a)
+			continue
+		}
+		redacted, takeNext := redactAPIKeyToken(a)
+		out = append(out, redacted)
+		if takeNext && i+1 < len(args) {
+			i++
+			out = append(out, "<api-key>")
+		}
+	}
+	return out
+}
+
+// shortFlagTakesValue reports shorthands on sync whose value consumes the
+// rest of a combined short-flag cluster. k is handled by the caller.
+func shortFlagTakesValue(letter byte) bool {
+	switch letter {
+	case 'c', 'e', 'l', 'n', 'p', 'u':
+		return true
+	default:
+		return false
+	}
+}
+
+// redactAPIKeyToken redacts one argv element. takeNext is true when the
+// API key is the following argument.
+func redactAPIKeyToken(token string) (string, bool) {
+	switch {
+	case token == "--api-key" || token == "-k":
+		return token, true
+	case strings.HasPrefix(token, "--api-key="):
+		return "--api-key=<api-key>", false
+	case strings.HasPrefix(token, "-k="):
+		return "-k=<api-key>", false
+	}
+	if !strings.HasPrefix(token, "-") || strings.HasPrefix(token, "--") || len(token) < 2 {
+		return token, false
+	}
+	body := token[1:]
+	for i := 0; i < len(body); i++ {
+		switch body[i] {
+		case 'k':
+			if i+1 < len(body) {
+				return token[:i+2] + "<api-key>", false
+			}
+			return token, true
+		default:
+			if shortFlagTakesValue(body[i]) {
+				return token, false
+			}
+		}
+	}
+	return token, false
+}
+
 var syncFile string    // Path to YAML/JSON file for bulk monitor import
 var syncFormat string  // --format: "", "short" or "exec"
 var withMonitored bool // --with-monitored: also ask about jobs that are already monitored
@@ -166,8 +252,9 @@ There are three ways to run sync:
 
   $ cronitor sync --auto
       > Asks nothing. Monitors every new job, sends schedule and timezone changes, and writes the crontab
-      > Prints the crontab to stdout even when nothing changed, so pipelines such as
-        cronitor sync --auto file | crontab - never install an empty crontab
+      > Prints the crontab to stdout even when nothing changed. On failure it exits 1
+        and prints the original crontab when it can read one. Use set -o pipefail
+        (or check the exit code) so a pipe does not install output from a failed run
       > Use it to automate sync, not to pick up one schedule change: it also monitors every new job
 
   For a job that is already monitored, sync sends only what changed. Names, tags and alert lists set
@@ -218,9 +305,13 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 		stdoutIsCrontab = false
 
 		if len(viper.GetString(varApiKey)) < 10 {
+			// Fail before a plan exists. When this is --auto on one readable
+			// file, stdout still gets that crontab so a pipe can reinstall it.
+			printOriginalCrontab(args)
 			fatal(discoverMissingAPIKeyGuidance(), 1)
 		}
 		if _, err := parseSyncFormat(syncFormat); err != nil {
+			printOriginalCrontab(args)
 			fatal(err.Error(), 1)
 		}
 		if runtime.GOOS == "windows" && syncFormat != "" {
@@ -315,7 +406,7 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 			printSuccessText("View your dashboard https://cronitor.io/app/dashboard", false)
 		}
 		if dryRun {
-			saveCommand := strings.Join(os.Args, " ")
+			saveCommand := strings.Join(redactAPIKeyArgs(os.Args), " ")
 			saveCommand = strings.Replace(saveCommand, " --dry-run", "", -1)
 
 			if importedCrontabs > 0 {
@@ -343,6 +434,18 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 
 // crontabWritable reports whether sync can write a crontab. Tests replace it.
 var crontabWritable = func(c *lib.Crontab) bool { return c.IsWritable() }
+
+// crontabFileReadable reports whether a file crontab can be opened. A user
+// crontab is not a path. Callers use this after Parse fails, to tell an
+// unreadable file from an empty one.
+func crontabFileReadable(c *lib.Crontab) bool {
+	f, err := os.Open(c.Filename)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	return true
+}
 
 // jobsNeedingSudo counts jobs in crontabs this user cannot write.
 var jobsNeedingSudo int
@@ -670,10 +773,24 @@ func finishSync(plans []*crontabPlan) int {
 	// output elsewhere, so print it whether or not anything changed. Print first, then
 	// exit, so a failed apply still writes the original crontab before exitFn.
 	// applyPlan must return on failure. os.Exit skips this print.
+	// A missing or unwritable file is the same kind of failure: exit 1, and
+	// print the original only when there is one to print.
 	applyFailed := false
+	unusable := false
+	for _, p := range plans {
+		if p.unusable {
+			unusable = true
+			applyFailed = true
+		}
+	}
 	defer func() {
 		if !isSilent && isAutoDiscover && !processingMultipleCrontabs {
 			for _, p := range plans {
+				// A missing file has no crontab. A blank line would still
+				// be installed by `... | crontab -`.
+				if p.unusable && strings.TrimSpace(p.output) == "" {
+					continue
+				}
 				fmt.Println(strings.TrimSpace(p.output))
 			}
 		}
@@ -681,6 +798,9 @@ func finishSync(plans []*crontabPlan) int {
 			exitFn(1)
 		}
 	}()
+	if unusable {
+		return 0
+	}
 	var todo []*crontabPlan
 	for _, p := range plans {
 		if p.hasChanges() {
@@ -772,6 +892,7 @@ type crontabPlan struct {
 	aborted  bool   // the user quit
 	rewrites bool   // the crontab text changes even if no monitor does
 	output   string // the crontab text --auto prints: as planned, or as written
+	unusable bool   // missing or not writable: do not apply; finishSync exits 1
 }
 
 type promptChoice int
@@ -815,15 +936,30 @@ var askAboutJob = func(line *lib.Line, name string, monitored bool) promptResult
 }
 
 // planCrontab reads a crontab and decides what to do with each job. It
-// returns nil when the crontab cannot be used.
+// returns nil when a crontab is skipped. One named file that does not exist
+// or is not writable is an unusable plan: sync prints the original crontab
+// when it has one, and exits 1.
 func planCrontab(crontab *lib.Crontab) *crontabPlan {
 	if !crontab.Exists() {
+		// One named file that is not there is a failure. Scanning many
+		// crontabs still skips a user who has none.
+		if !processingMultipleCrontabs {
+			reportError(fmt.Sprintf("%s does not exist", crontab.DisplayName()))
+			return &crontabPlan{crontab: crontab, unusable: true}
+		}
 		printWarningText("This crontab does not exist. Skipping.", true)
 		return nil
 	}
 
 	// This will mostly happen when the crontab is empty
 	if err, _ := crontab.Parse(noAutoDiscover); err != nil {
+		// A named file that cannot be read is a failure. There is nothing
+		// to print. An empty crontab is still a skip: installing it changes
+		// nothing. Scanning many crontabs keeps the old skip.
+		if !processingMultipleCrontabs && !crontab.IsUserCrontab && !crontabFileReadable(crontab) {
+			reportError(err.Error())
+			return &crontabPlan{crontab: crontab, unusable: true}
+		}
 		// While scanning, an empty or unreadable system crontab is only logged.
 		if !processingMultipleCrontabs || crontab.IsUserCrontab {
 			printWarningText("This crontab is empty. Skipping.", true)
@@ -837,10 +973,13 @@ func planCrontab(crontab *lib.Crontab) *crontabPlan {
 	if !crontabWritable(crontab) {
 		if processingMultipleCrontabs {
 			jobsNeedingSudo += countJobs(crontab)
-		} else {
-			printWarningText("This crontab is not writable. Run sync with sudo.", true)
+			return nil
 		}
-		return nil
+		// Readable (Parse succeeded) but not writable. Same as an API, shim
+		// or save failure: stdout gets the original crontab when this run
+		// prints one, and the process exits 1.
+		reportError(fmt.Sprintf("%s is not writable. Run sync with sudo.", crontab.DisplayName()))
+		return &crontabPlan{crontab: crontab, output: crontab.Original(), unusable: true}
 	}
 
 	// If a timezone env var is set in the crontab it takes precedence over system tz
