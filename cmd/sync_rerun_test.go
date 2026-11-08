@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -565,6 +567,42 @@ func TestSyncAutoPrintsCrontabWhenNothingChanged(t *testing.T) {
 	}
 }
 
+func TestSyncAutoPrintsOriginalWhenShimInstallFails(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	_, apiURL := newRerunAPI(t, backupMonitor)
+	body := "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n"
+	path := writeCron(t, body)
+	blocked := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocked, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	lib.ShimShellPathOverride = filepath.Join(blocked, "cronitor", "shell")
+
+	var code int
+	oldExit := exitFn
+	t.Cleanup(func() { exitFn = oldExit })
+	exitFn = func(c int) { code = c }
+
+	stderr := runSyncArgs(t, apiURL, path, "--auto", "--format=short")
+
+	if code != 1 {
+		t.Fatalf("exit %d; want 1 after the wrapper could not be installed", code)
+	}
+	if strings.Contains(lastSyncStdout, "SHELL=") || strings.Contains(lastSyncStdout, "CRONITOR=") {
+		t.Fatalf("stdout is the planned crontab:\n%s", lastSyncStdout)
+	}
+	if strings.TrimSpace(lastSyncStdout) != strings.TrimSpace(body) {
+		t.Fatalf("stdout = %q; want the original crontab", lastSyncStdout)
+	}
+	if got := readCron(t, path); got != body {
+		t.Fatalf("crontab on disk changed:\n%s", got)
+	}
+	if !strings.Contains(stderr, "cannot install") {
+		t.Fatalf("stderr = %q; want the install error", stderr)
+	}
+}
+
 func TestSyncSilentStillConfirms(t *testing.T) {
 	withSyncFixture(t)
 	withNotificationList(t, "")
@@ -585,28 +623,5 @@ func TestSyncSilentStillConfirms(t *testing.T) {
 	}
 	if len(api.sent()) != 0 || readCron(t, path) != body {
 		t.Fatalf("applied after answering no: sent %v\n%s", api.sent(), readCron(t, path))
-	}
-}
-
-// If the shim cannot be installed, nothing is written, so --auto must print
-// the crontab as it is, not one whose SHELL= points at a missing shim.
-func TestSyncAutoPrintsOriginalWhenShimInstallFails(t *testing.T) {
-	withSyncFixture(t)
-	withNotificationList(t, "")
-	lib.ShimShellPathOverride = "/dev/null/cronitor/shell"
-	_, apiURL := newRerunAPI(t, backupMonitor)
-	body := "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n"
-	path := writeCron(t, body)
-
-	stderr := runSyncArgs(t, apiURL, path, "--auto", "--format=short")
-
-	if strings.Contains(lastSyncStdout, "SHELL=") || strings.TrimSpace(lastSyncStdout) != strings.TrimSpace(body) {
-		t.Fatalf("stdout = %q; want the unchanged crontab", lastSyncStdout)
-	}
-	if !strings.Contains(stderr, "cannot install shell shim") {
-		t.Fatalf("stderr = %q; want the install error", stderr)
-	}
-	if got := readCron(t, path); got != body {
-		t.Fatalf("crontab written:\n%s", got)
 	}
 }

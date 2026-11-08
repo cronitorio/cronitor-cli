@@ -637,12 +637,17 @@ func printPlanSummaries(plans []*crontabPlan, toStderr bool) {
 // applies the plans. It returns the number of crontabs that changed.
 func finishSync(plans []*crontabPlan) int {
 	// When running --auto mode with a single crontab, you should be able to pipe or redirect crontab
-	// output elsewhere, so print it whether or not anything changed.
+	// output elsewhere, so print it whether or not anything changed. Print first, then
+	// exit, so a failed apply still writes the original crontab before exitFn.
+	applyFailed := false
 	defer func() {
 		if !isSilent && isAutoDiscover && !processingMultipleCrontabs {
 			for _, p := range plans {
 				fmt.Println(strings.TrimSpace(p.output))
 			}
+		}
+		if applyFailed {
+			exitFn(1)
 		}
 	}()
 	var todo []*crontabPlan
@@ -697,6 +702,8 @@ func finishSync(plans []*crontabPlan) int {
 	for _, p := range todo {
 		if applyPlan(p) {
 			changed++
+		} else {
+			applyFailed = true
 		}
 	}
 	return changed
@@ -1060,8 +1067,10 @@ func applyPlan(plan *crontabPlan) bool {
 	}
 
 	if err := configureShellShim(crontab, false); err != nil {
-		// Nothing is written, so --auto prints the crontab as it is: the
-		// planned text would point SHELL= at a shim that was not installed.
+		// The file is unchanged. --auto stdout must not print the planned
+		// crontab (SHELL= would point at a wrapper that was never installed).
+		// Print the original so `... | crontab -` without pipefail reinstalls
+		// a working crontab instead of an empty one; finishSync then exits 1.
 		plan.output = crontab.Original()
 		if isAutoDiscover || isSilent {
 			fmt.Fprintln(os.Stderr, err.Error())
@@ -1074,20 +1083,24 @@ func applyPlan(plan *crontabPlan) bool {
 	// Re-write crontab lines with new/updated monitoring
 	updatedCrontabLines := crontab.Write()
 
-	plan.output = updatedCrontabLines
-
 	changed := updatedCrontabLines != crontab.Original()
 	if !dryRun && changed {
 		if err := crontab.Save(updatedCrontabLines); err == nil {
+			plan.output = updatedCrontabLines
 			if !isSilent {
 				printDoneText("Integration complete", true)
 			}
 		} else {
-			if !isSilent {
+			plan.output = crontab.Original()
+			if isAutoDiscover || isSilent {
+				fmt.Fprintln(os.Stderr, "Problem saving crontab: "+err.Error())
+			} else {
 				printErrorText("Problem saving crontab: "+err.Error(), true)
 			}
 			return false
 		}
+	} else {
+		plan.output = updatedCrontabLines
 	}
 
 	return len(monitors) > 0 || changed
