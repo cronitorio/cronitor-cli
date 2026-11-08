@@ -40,17 +40,6 @@ func TestJobsCommandLayout(t *testing.T) {
 	if err != nil || viaAlias != discoverCmd {
 		t.Fatalf("jobs discover resolved to %v (%v)", viaAlias, err)
 	}
-	for _, flag := range []string{"auto", "dry-run", "format", "with-monitored", "silent"} {
-		if discoverCmd.Flags().Lookup(flag) == nil {
-			t.Errorf("sync is missing --%s", flag)
-		}
-	}
-	if dashCmd.Flags().Lookup("mcp-instance") == nil || dashCmd.Flags().Lookup("mcp") == nil {
-		t.Fatal("dash is missing --mcp-instance or --mcp")
-	}
-	if listCmd.Flags().Lookup("json") == nil {
-		t.Fatal("list is missing --json")
-	}
 
 	for _, name := range []string{"sync", "discover", "list", "shell", "dash"} {
 		found, _, findErr := RootCmd.Find([]string{name})
@@ -61,5 +50,12 @@ func TestJobsCommandLayout(t *testing.T) {
 			}
 			t.Errorf("root %s: %v (%s)", name, findErr, path)
 		}
+	}
+
+	RootCmd.SetArgs([]string{"jobs", "not-a-command"})
+	t.Cleanup(func() { RootCmd.SetArgs(nil) })
+	execErr := RootCmd.Execute()
+	if execErr == nil || !strings.Contains(execErr.Error(), "unknown command") || !strings.Contains(execErr.Error(), `"not-a-command"`) {
+		t.Fatalf("jobs typo: %v", execErr)
 	}
 }

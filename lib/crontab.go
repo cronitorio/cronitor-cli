@@ -284,6 +284,11 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			if noAutoDiscover {
 				continue // remove the auto-discover line from the crontab if --no-auto-discover flag is passed
 			}
+			// Opt-in only (--no-auto-discover=false). The default removes this
+			// line and does not add one. The monitor key ignores command text.
+			if !strings.Contains(line.CommandToRun, "jobs discover --auto") {
+				line.CommandToRun = autoDiscoverCommand(c)
+			}
 		}
 
 		// Reset the name and ignored for the next line after we've found its command line
@@ -914,134 +919,29 @@ func (l Line) GetEnvVarValue() string {
 	return ""
 }
 
-// ensureAutoOnJobsSubcommand inserts --auto after `jobs sync` or
-// `jobs discover`, including when inherited flags sit between the two words
-// (`jobs --hostname box sync`). sync is written as discover so
-// IsAutoDiscoverCommand still matches. Flag values are not rewritten.
-func ensureAutoOnJobsSubcommand(args []string) []string {
-	cleaned := make([]string, 0, len(args)+1)
-	for _, arg := range args {
+// autoDiscoverCommand is the hidden opt-in plumbing command. sync is written
+// as discover so IsAutoDiscoverCommand still matches. The first sync or
+// discover token after jobs is the subcommand.
+func autoDiscoverCommand(crontab *Crontab) string {
+	args := make([]string, 0, len(os.Args)+1)
+	seenJobs := false
+	replaced := false
+	for _, arg := range os.Args {
 		if arg == "--auto" || strings.HasPrefix(arg, "--auto=") {
 			continue
 		}
-		cleaned = append(cleaned, arg)
-	}
-	args = cleaned
-
-	if idx := jobsSubcommandIndex(args); idx >= 0 {
-		args = append([]string{}, args...)
-		args[idx] = "discover"
-		return insertArgAfter(args, idx, "--auto")
-	}
-	for _, arg := range args {
+		if seenJobs && !replaced && (arg == "sync" || arg == "discover") {
+			args = append(args, "discover", "--auto")
+			replaced = true
+			continue
+		}
 		if arg == "jobs" {
-			return args
+			seenJobs = true
 		}
-	}
-	for i, arg := range args {
-		if arg == "discover" {
-			return insertArgAfter(args, i, "--auto")
-		}
-	}
-	return args
-}
-
-func jobsSubcommandIndex(args []string) int {
-	for i := 0; i < len(args); i++ {
-		if args[i] != "jobs" {
-			continue
-		}
-		j := i + 1
-		for j < len(args) {
-			tok := args[j]
-			if tok == "sync" || tok == "discover" {
-				return j
-			}
-			if !strings.HasPrefix(tok, "-") || tok == "-" || tok == "--" {
-				break
-			}
-			step := inheritedFlagWidth(tok)
-			if step < 1 || j+step > len(args) {
-				break
-			}
-			j += step
-		}
-	}
-	return -1
-}
-
-func inheritedFlagWidth(tok string) int {
-	if strings.HasPrefix(tok, "--") {
-		name, _, hasEq := strings.Cut(strings.TrimPrefix(tok, "--"), "=")
-		if hasEq || inheritedBoolFlag(name) {
-			return 1
-		}
-		return 2
-	}
-	body := strings.TrimPrefix(tok, "-")
-	if strings.Contains(body, "=") {
-		return 1
-	}
-	takesNext := false
-	for i := 0; i < len(body); i++ {
-		letter := body[i : i+1]
-		if inheritedBoolFlag(letter) {
-			continue
-		}
-		if inheritedValueFlag(letter) {
-			if i < len(body)-1 {
-				return 1
-			}
-			takesNext = true
-			break
-		}
-		if len(body) == 1 {
-			return 2
-		}
-		return 1
-	}
-	if takesNext {
-		return 2
-	}
-	return 1
-}
-
-func inheritedBoolFlag(name string) bool {
-	switch name {
-	case "verbose", "v", "use-dev", "help", "h":
-		return true
-	default:
-		return false
-	}
-}
-
-func inheritedValueFlag(name string) bool {
-	switch name {
-	case "config", "c", "env", "api-key", "k", "ping-api-key", "p", "ping-api-host", "hostname", "n", "log", "l", "users", "u", "api-version":
-		return true
-	default:
-		return false
-	}
-}
-
-func insertArgAfter(args []string, i int, tok string) []string {
-	out := make([]string, 0, len(args)+1)
-	out = append(out, args[:i+1]...)
-	out = append(out, tok)
-	out = append(out, args[i+1:]...)
-	return out
-}
-
-func createAutoDiscoverLine(crontab *Crontab) *Line {
-	cronExpression := fmt.Sprintf("%d * * * *", randomMinute())
-	if crontab.UsesSixFieldExpressions {
-		cronExpression = fmt.Sprintf("* %s", cronExpression)
+		args = append(args, arg)
 	}
 
-	// Normalize the command so it can be run reliably from crontab.
-	// Place --auto on the jobs subcommand before the legacy string cleanups,
-	// which remove `-v` inside longer tokens such as `--verbose`.
-	commandToRun := strings.Join(ensureAutoOnJobsSubcommand(os.Args), " ")
+	commandToRun := strings.Join(args, " ")
 	commandToRun = strings.Replace(commandToRun, "--save", "", -1)
 	commandToRun = strings.Replace(commandToRun, "--verbose", "", -1)
 	commandToRun = strings.Replace(commandToRun, "-v", "", -1)
@@ -1050,10 +950,18 @@ func createAutoDiscoverLine(crontab *Crontab) *Line {
 	if len(crontab.Filename) > 0 {
 		commandToRun = strings.Replace(commandToRun, crontab.Filename, crontab.CanonicalName(), -1)
 	}
+	return commandToRun
+}
+
+func createAutoDiscoverLine(crontab *Crontab) *Line {
+	cronExpression := fmt.Sprintf("%d * * * *", randomMinute())
+	if crontab.UsesSixFieldExpressions {
+		cronExpression = fmt.Sprintf("* %s", cronExpression)
+	}
 
 	line := Line{}
 	line.CronExpression = cronExpression
-	line.CommandToRun = commandToRun
+	line.CommandToRun = autoDiscoverCommand(crontab)
 	line.FullLine = fmt.Sprintf("%s %s", line.CronExpression, line.CommandToRun)
 	return &line
 }

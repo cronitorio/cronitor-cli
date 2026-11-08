@@ -26,6 +26,14 @@ var jobsCmd = &cobra.Command{
 
 sync accepts the alias discover:
   $ cronitor jobs discover`,
+	// Cobra 1.2 only reports an unknown command for the root. A parent with
+	// subcommands and no Run prints help and exits 0. NoArgs runs once Run
+	// makes the command runnable, so `jobs <typo>` fails the way a root typo does.
+	// Bare `jobs` still prints help.
+	Args: cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		cmd.Help()
+	},
 }
 
 func init() {
