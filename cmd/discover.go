@@ -1060,10 +1060,13 @@ func applyPlan(plan *crontabPlan) bool {
 	}
 
 	if err := configureShellShim(crontab, false); err != nil {
-		if !isSilent {
-			printErrorText(err.Error(), true)
-		} else {
+		// Nothing is written, so --auto prints the crontab as it is: the
+		// planned text would point SHELL= at a shim that was not installed.
+		plan.output = crontab.Original()
+		if isAutoDiscover || isSilent {
 			fmt.Fprintln(os.Stderr, err.Error())
+		} else {
+			printErrorText(err.Error(), true)
 		}
 		return false
 	}
