@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -249,5 +250,54 @@ func TestLineWriteWithNoStdoutAndEnv(t *testing.T) {
 	// Check that both flags are present and in correct order
 	if !strings.Contains(output, "cronitor --env testing exec --no-stdout test123") {
 		t.Errorf("Expected 'cronitor --env testing exec --no-stdout test123' in output but got: %s", output)
+	}
+}
+
+func TestCreateAutoDiscoverLineTargetsJobsSubcommand(t *testing.T) {
+	old := os.Args
+	t.Cleanup(func() { os.Args = old })
+	ct := &Crontab{}
+
+	os.Args = []string{"cronitor", "jobs", "sync", "--auto", "--exclude-from-name", "my discover job", "/tmp/crontab"}
+	line := createAutoDiscoverLine(ct)
+	if !strings.Contains(line.CommandToRun, "jobs discover --auto") {
+		t.Fatalf("sync invocation = %q", line.CommandToRun)
+	}
+	if strings.Contains(line.CommandToRun, "discover --auto job") {
+		t.Fatalf("exclude text was rewritten: %q", line.CommandToRun)
+	}
+	if !line.IsAutoDiscoverCommand() {
+		t.Fatalf("plumbing line not recognized: %q", line.CommandToRun)
+	}
+
+	os.Args = []string{"cronitor", "--hostname", "sync", "jobs", "sync", "--auto", "/tmp/crontab"}
+	line = createAutoDiscoverLine(ct)
+	if !strings.Contains(line.CommandToRun, "--hostname sync jobs discover --auto") {
+		t.Fatalf("hostname value rewritten: %q", line.CommandToRun)
+	}
+
+	os.Args = []string{"cronitor", "jobs", "--hostname", "box", "sync", "--auto", "/tmp/crontab"}
+	line = createAutoDiscoverLine(ct)
+	if !strings.Contains(line.CommandToRun, "jobs --hostname box discover --auto") {
+		t.Fatalf("flag between jobs and sync = %q", line.CommandToRun)
+	}
+
+	os.Args = []string{"cronitor", "jobs", "--verbose", "sync", "--auto", "/tmp/crontab"}
+	line = createAutoDiscoverLine(ct)
+	if !strings.Contains(line.CommandToRun, "discover --auto") || strings.Contains(line.CommandToRun, " sync") {
+		t.Fatalf("bool flag between jobs and sync = %q", line.CommandToRun)
+	}
+
+	os.Args = []string{"cronitor", "jobs", "discover", "--auto", "/tmp/crontab"}
+	line = createAutoDiscoverLine(ct)
+	if !strings.Contains(line.CommandToRun, "jobs discover --auto") || strings.Contains(line.CommandToRun, "--auto --auto") {
+		t.Fatalf("discover alias = %q", line.CommandToRun)
+	}
+
+	if (&Line{CommandToRun: "cronitor jobs sync --auto /etc/crontab"}).IsAutoDiscoverCommand() {
+		t.Fatal("jobs sync --auto must stay a normal job")
+	}
+	if !(&Line{CommandToRun: "cronitor discover --auto /etc/crontab"}).IsAutoDiscoverCommand() {
+		t.Fatal("historical discover --auto line must still be plumbing")
 	}
 }

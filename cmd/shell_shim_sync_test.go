@@ -18,7 +18,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-// runSync drives `cronitor sync` itself. Tests must not assign line.Code and
+// runSync drives `cronitor jobs sync` itself. Tests must not assign line.Code and
 // call Write; that skips the flag handling and the API round trip.
 func runSync(t *testing.T, serverURL, path string, extra ...string) string {
 	t.Helper()
@@ -71,7 +71,7 @@ func runSyncArgs(t *testing.T, serverURL, path string, extra ...string) string {
 	}
 
 	// Execute on the subcommand is ignored: cobra always runs from the root.
-	args := []string{"--config", cfg, "sync"}
+	args := []string{"--config", cfg, "jobs", "sync"}
 	args = append(args, extra...)
 	args = append(args, path)
 	RootCmd.SetArgs(args)

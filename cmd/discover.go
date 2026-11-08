@@ -112,7 +112,7 @@ var existingMonitors = ExistingMonitors{}
 var processingMultipleCrontabs = false
 var userAbortedSync = false // Set to true when user presses Ctrl+D to abort sync entirely
 
-// stdoutIsCrontab is true while `cronitor sync --auto` handles one crontab
+// stdoutIsCrontab is true while `cronitor jobs sync --auto` handles one crontab
 // file and will print it on stdout. Verbose logs go to stderr so the pipe
 // cannot install log text or a partial crontab.
 var stdoutIsCrontab bool
@@ -257,22 +257,22 @@ Note: You must supply your Cronitor API key. This can be passed as a flag, envir
 
 There are three ways to run sync:
 
-  $ cronitor sync
+  $ cronitor jobs sync
       > Asks about each job that is not monitored yet
       > Checks every monitored job against Cronitor and picks up schedule and timezone changes
       > Shows one summary with each change, then asks once before it sends or writes anything
       > Run it again whenever you add jobs or change a schedule. If nothing changed, it asks nothing.
 
-  $ cronitor sync --with-monitored
+  $ cronitor jobs sync --with-monitored
       > The same, but also asks about jobs that are already monitored, for example to rename them
 
-  $ cronitor sync --auto
+  $ cronitor jobs sync --auto
       > Asks nothing. Monitors every new job, sends schedule and timezone changes, and writes the crontab
       > Prints the crontab to stdout even when nothing changed. Once sync has read the file,
         a failure prints the original crontab and exits 1. A direct "| crontab -" pipe can
         still install an empty crontab if sync fails before it can read the file, for example
         when the file is missing or a flag is invalid. Capture the output first:
-        out=$(cronitor sync --auto file) && printf '%s\n' "$out" | crontab -
+        out=$(cronitor jobs sync --auto file) && printf '%s\n' "$out" | crontab -
         Do not add --silent to that command: --auto --silent prints no crontab,
         so the pipe would install an empty one.
       > Use it to automate sync, not to pick up one schedule change: it also monitors every new job
@@ -285,11 +285,11 @@ There are three ways to run sync:
   sync shows the summary and asks whether to save. "Skip this job, don't ask again" adds
   "# cronitor: ignore" above the line; a monitored job keeps reporting to Cronitor.
 
-  $ cronitor sync /path/to/crontab
+  $ cronitor jobs sync /path/to/crontab
       > Instead of the user crontab, provide a crontab file (or directory of crontabs) to use
 
 Example excluding secrets or common text from monitor names:
-  $ cronitor sync /path/to/crontab -e "secret-token" -e "/var/common/app/path/"
+  $ cronitor jobs sync /path/to/crontab -e "secret-token" -e "/var/common/app/path/"
       > Creates new monitors, excluding the provided snippets from the generated name.
       > Existing monitored names are kept. Use --with-monitored to rename them.
       > Adds Cronitor integration to your crontab and outputs to stdout
@@ -297,7 +297,7 @@ Example excluding secrets or common text from monitor names:
   You can run the command as many times as you need, accumulating exclusion params until the job names on your Cronitor dashboard are clear and readable.
 
 Example where you perform a dry-run without any crontab modifications:
-  $ cronitor sync /path/to/crontab --dry-run
+  $ cronitor jobs sync /path/to/crontab --dry-run
       > Asks about new jobs and shows what would change
       > On Linux and macOS crontab sync, sends nothing to Cronitor and does not write the crontab
       > Does not apply to --file imports or Windows scheduled-task sync
@@ -432,8 +432,8 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 			if importedCrontabs > 0 {
 				msg := "Reminder: This is a DRY-RUN. Integration is not complete."
 				next := "To complete integration, run:"
-				// Same command without --dry-run. That is `cronitor sync`
-				// after an interactive dry run, or `cronitor sync --auto`
+				// Same command without --dry-run. That is `cronitor jobs sync`
+				// after an interactive dry run, or `cronitor jobs sync --auto`
 				// when --auto was already set. --auto --silent is neither:
 				// --auto would monitor every new job, and with --silent it
 				// also skips printing the crontab.
@@ -1243,7 +1243,7 @@ func applyPlan(plan *crontabPlan) bool {
 		sent, err := getCronitorApi().PutMonitors(monitors)
 		if err != nil {
 			// os.Exit here skips finishSync's deferred print, so
-			// `cronitor sync --auto file | crontab -` installs an empty
+			// `cronitor jobs sync --auto file | crontab -` installs an empty
 			// crontab. Same as a shim or save failure: stdout gets the
 			// original crontab (not the planned rewrite) and the process
 			// exits 1.
@@ -1678,11 +1678,11 @@ const (
 )
 
 func init() {
-	RootCmd.AddCommand(discoverCmd)
+	jobsCmd.AddCommand(discoverCmd)
 
 	discoverCmd.Flags().BoolVar(&saveCrontabFile, "save", saveCrontabFile, "Save the updated crontab file")
 	discoverCmd.Flags().BoolVar(&dryRun, "dry-run", dryRun, "Show what Linux/macOS crontab sync would change. Sends nothing to Cronitor and does not write the crontab. Does not apply to --file or Windows scheduled-task sync.")
-	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from auto-generated monitor name e.g. $ cronitor sync -e '> /dev/null' -e '/path/to/app'")
+	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from auto-generated monitor name e.g. $ cronitor jobs sync -e '> /dev/null' -e '/path/to/app'")
 	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Set this alert list on new and existing monitors. Without it, sync sends no alert list: new monitors get Cronitor's default list and existing monitors keep theirs.")

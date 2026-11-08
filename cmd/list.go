@@ -18,16 +18,16 @@ var listCmd = &cobra.Command{
 	Use:   "list <optional path>",
 	Short: "Search for and list all cron jobs",
 	Long: `
-Cronitor list scans for cron jobs and displays them in an easy to read format.
+cronitor jobs list scans for cron jobs and displays them in an easy to read format.
 
 Example:
-  $ cronitor list
+  $ cronitor jobs list
       > List all cron jobs in your user crontab and system directory
 
-  $ cronitor list /path/to/crontab
+  $ cronitor jobs list /path/to/crontab
       > Instead of the user crontab, list the jobs in a provided a crontab file (or directory of crontabs)
 
-  $ cronitor list --json
+  $ cronitor jobs list --json
       > Output all discovered cron jobs as JSON
 	`,
 	Args: func(cmd *cobra.Command, args []string) error {
@@ -53,7 +53,7 @@ Example:
 }
 
 func init() {
-	RootCmd.AddCommand(listCmd)
+	jobsCmd.AddCommand(listCmd)
 	listCmd.Flags().BoolVarP(&printJSON, "json", "j", false, "Output as JSON")
 }
 

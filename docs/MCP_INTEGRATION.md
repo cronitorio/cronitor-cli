@@ -17,17 +17,17 @@ Cronitor CLI includes built-in support for the [Model Context Protocol (MCP)](ht
 
 The MCP integration has two components:
 
-1. **Dashboard** (`cronitor dash`) - The web UI that manages cron jobs. This **must be running on the server where your cron jobs live**.
+1. **Dashboard** (`cronitor jobs dash`) - The web UI that manages cron jobs. This **must be running on the server where your cron jobs live**.
 
-2. **MCP Server** (`cronitor dash --mcp-instance`) - A bridge process that your AI tool spawns locally. It communicates with your AI tool via stdio and connects to the dashboard over HTTP.
+2. **MCP Server** (`cronitor jobs dash --mcp-instance`) - A bridge process that your AI tool spawns locally. It communicates with your AI tool via stdio and connects to the dashboard over HTTP.
 
 ```
-┌─────────────────────┐      stdio      ┌─────────────────────┐      HTTP       ┌─────────────────────┐
-│   AI Tool           │ ◄─────────────► │   MCP Server        │ ◄─────────────► │   Dashboard         │
-│   (Claude Code,     │                 │   (cronitor dash    │                 │   (cronitor dash)   │
-│    Cursor, etc.)    │                 │    --mcp-instance)  │                 │   on your server    │
-└─────────────────────┘                 └─────────────────────┘                 └─────────────────────┘
-      Your machine                           Your machine                           Your server
+┌─────────────────────┐      stdio      ┌──────────────────────────┐      HTTP       ┌──────────────────────────┐
+│   AI Tool           │ ◄─────────────► │   MCP Server             │ ◄─────────────► │   Dashboard              │
+│   (Claude Code,     │                 │   (cronitor jobs dash    │                 │   (cronitor jobs dash)   │
+│    Cursor, etc.)    │                 │    --mcp-instance)       │                 │   on your server         │
+└─────────────────────┘                 └──────────────────────────┘                 └──────────────────────────┘
+      Your machine                              Your machine                              Your server
 ```
 
 ## Quick Start
@@ -44,7 +44,7 @@ export CRONITOR_DASH_PASS=PASS
 cronitor configure
 
 # Start the dashboard (runs on port 9000 by default)
-cronitor dash
+cronitor jobs dash
 ```
 
 **Important:** The dashboard must be running and accessible for the MCP server to work. For production use, consider running it as a systemd service or in Docker.
@@ -59,7 +59,7 @@ Configure your AI tool to spawn the Cronitor MCP server. Most MCP-compatible too
   "mcpServers": {
     "cronitor": {
       "command": "cronitor",
-      "args": ["dash", "--mcp-instance", "default"]
+      "args": ["jobs", "dash", "--mcp-instance", "default"]
     }
   }
 }
@@ -116,15 +116,15 @@ To connect to multiple dashboards, configure each as a separate MCP server:
   "mcpServers": {
     "cronitor": {
       "command": "cronitor",
-      "args": ["dash", "--mcp-instance", "default"]
+      "args": ["jobs", "dash", "--mcp-instance", "default"]
     },
     "cronitor-prod": {
       "command": "cronitor",
-      "args": ["dash", "--mcp-instance", "production"]
+      "args": ["jobs", "dash", "--mcp-instance", "production"]
     },
     "cronitor-staging": {
       "command": "cronitor",
-      "args": ["dash", "--mcp-instance", "staging"]
+      "args": ["jobs", "dash", "--mcp-instance", "staging"]
     }
   }
 }
@@ -139,7 +139,7 @@ You can override the config file path per-project using an environment variable:
   "mcpServers": {
     "cronitor-project": {
       "command": "cronitor",
-      "args": ["dash", "--mcp-instance", "default"],
+      "args": ["jobs", "dash", "--mcp-instance", "default"],
       "env": {
         "CRONITOR_CONFIG": "/path/to/project/cronitor.json"
       }
@@ -278,7 +278,7 @@ Some MCP clients support running commands over SSH directly:
       "command": "ssh",
       "args": [
         "user@your-server",
-        "cronitor dash --mcp-instance default"
+        "cronitor jobs dash --mcp-instance default"
       ]
     }
   }
@@ -304,10 +304,10 @@ The MCP server respects these environment variables:
 
 ```bash
 # Test MCP server startup with default instance
-cronitor dash --mcp-instance default
+cronitor jobs dash --mcp-instance default
 
 # Test with specific instance
-cronitor dash --mcp-instance production
+cronitor jobs dash --mcp-instance production
 ```
 
 ### Check Configuration
@@ -330,7 +330,7 @@ cronitor configure
 
 **"Connection refused"**
 - Check that the dashboard URL is correct
-- Verify the dashboard is running: `cronitor dash` in another terminal
+- Verify the dashboard is running: `cronitor jobs dash` in another terminal
 - Check network connectivity and any firewalls
 - For remote dashboards, ensure your SSH tunnel is active
 

@@ -63,17 +63,20 @@ Logout revokes this installation's credential and removes it locally. **Schedule
 ### Cron Management
 | Command | Description |
 |---------|-------------|
-| `cronitor sync` | Sync cron jobs to Cronitor |
-| `cronitor sync --format=short` | Also convert `cronitor exec` lines to `CRONITOR=<key>` lines |
-| `cronitor sync --format=exec` | Write all lines as `cronitor exec` and restore your `SHELL` |
-| `cronitor sync --with-monitored` | Also ask about jobs that are already monitored, for example to rename them |
-| `cronitor sync --dry-run` | Show what Linux/macOS crontab sync would change, without sending or writing. Does not apply to `--file` or Windows scheduled tasks |
+| `cronitor jobs sync` | Sync cron jobs to Cronitor |
+| `cronitor jobs sync --format=short` | Also convert `cronitor exec` lines to `CRONITOR=<key>` lines |
+| `cronitor jobs sync --format=exec` | Write all lines as `cronitor exec` and restore your `SHELL` |
+| `cronitor jobs sync --with-monitored` | Also ask about jobs that are already monitored, for example to rename them |
+| `cronitor jobs sync --dry-run` | Show what Linux/macOS crontab sync would change, without sending or writing. Does not apply to `--file` or Windows scheduled tasks |
 | `cronitor exec <key> <cmd>` | Run a command with monitoring |
-| `cronitor list` | List all cron jobs |
+| `cronitor jobs list` | List all cron jobs |
+| `cronitor jobs shell` | Run a command the way cron would |
 | `cronitor status` | View monitor status |
-| `cronitor dash` | Start the web dashboard |
+| `cronitor jobs dash` | Start the web dashboard |
 
-#### How `cronitor sync` changes a crontab
+`cronitor jobs discover` is an alias of `cronitor jobs sync`. `ping`, `exec`, and the other commands stay at the top level.
+
+#### How `cronitor jobs sync` changes a crontab
 
 On Linux and macOS, sync puts the monitor key in front of each job you monitor, and adds one line to the top of the crontab:
 
@@ -93,21 +96,21 @@ SHELL=/etc/cronitor/shell
   0 1 * * * CRONITOR=abc123 CRONITOR_ENV=staging CRONITOR_NO_STDOUT=1 /usr/local/bin/backup.sh
   ```
 - A `CRONITOR=<key>` line works only in a crontab that sync has changed. To add monitoring by hand to any other crontab, script or task, use `cronitor exec <key> <cmd>`.
-- To go back, run `cronitor sync --format=exec`.
+- To go back, run `cronitor jobs sync --format=exec`.
 - Windows scheduled tasks always use `cronitor exec`.
 
-#### Running `cronitor sync` again
+#### Running `cronitor jobs sync` again
 
 There are three ways to run sync:
 
 | Command | Asks about | Picks up schedule and timezone changes | Monitors new jobs |
 | --- | --- | --- | --- |
-| `cronitor sync` | new jobs only | yes | the ones you choose |
-| `cronitor sync --with-monitored` | every job (to rename one) | yes | the ones you choose |
-| `cronitor sync --auto` | nothing | yes | **all of them** |
+| `cronitor jobs sync` | new jobs only | yes | the ones you choose |
+| `cronitor jobs sync --with-monitored` | every job (to rename one) | yes | the ones you choose |
+| `cronitor jobs sync --auto` | nothing | yes | **all of them** |
 
-- Run plain `cronitor sync` again whenever you add jobs or change a schedule. It shows one summary with each change (for example `L3  Nightly backup: schedule 0 2 * * * → 30 3 * * *`) and asks once. If nothing changed, it asks nothing.
-- `--auto` is for scripts and pipelines. When you pass a single crontab file, it prints that crontab to stdout even if nothing changed. Once sync has read the file, a failure prints the original crontab and exits 1. A direct `| crontab -` pipe can still install an empty crontab if sync fails before it can read the file, for example when the file is missing or a flag is invalid. Capture the output first: `out=$(cronitor sync --auto file) && printf '%s\n' "$out" | crontab -`. Do not add `--silent` to that command: `--auto --silent` prints no crontab, so the pipe would install an empty one. It also monitors every new job, so it is not the way to pick up one schedule change.
+- Run plain `cronitor jobs sync` again whenever you add jobs or change a schedule. It shows one summary with each change (for example `L3  Nightly backup: schedule 0 2 * * * → 30 3 * * *`) and asks once. If nothing changed, it asks nothing.
+- `--auto` is for scripts and pipelines. When you pass a single crontab file, it prints that crontab to stdout even if nothing changed. Once sync has read the file, a failure prints the original crontab and exits 1. A direct `| crontab -` pipe can still install an empty crontab if sync fails before it can read the file, for example when the file is missing or a flag is invalid. Capture the output first: `out=$(cronitor jobs sync --auto file) && printf '%s\n' "$out" | crontab -`. Do not add `--silent` to that command: `--auto --silent` prints no crontab, so the pipe would install an empty one. It also monitors every new job, so it is not the way to pick up one schedule change.
 - If any crontab fails to apply, in any mode, sync exits 1.
 - For a monitored job, sync sends only what changed. Names, tags and alert lists set in Cronitor are kept; alert lists change only with `--notification-list` (omitting the flag keeps existing lists; new monitors get Cronitor's default). A `# Name:` comment is updated to the name in Cronitor.
 - If a monitor was deleted in Cronitor, sync warns and does not create it again. A hand-written `CRONITOR=new-key` line for a monitor that was never created gets the same warning; create the monitor first, or remove the key and let sync add it.
@@ -279,7 +282,7 @@ The Cronitor CLI bundles the [Crontab Guru Dashboard](https://crontab.guru/dashb
 Start locally
 
 ```
-cronitor dash
+cronitor jobs dash
 # then visit http://localhost:9000
 ```
 
@@ -378,12 +381,12 @@ You can also pass `--ping-api-host eu.cronitor.link`, or save it with `cronitor 
 
 The Cronitor CLI includes a built-in [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for managing cron jobs with natural language through AI-powered tools like Claude Code, Cursor, Cline, and Windsurf.
 
-**Quick start:** Run `cronitor dash` on your server, then configure your MCP client to spawn `cronitor dash --mcp-instance default`.
+**Quick start:** Run `cronitor jobs dash` on your server, then configure your MCP client to spawn `cronitor jobs dash --mcp-instance default`.
 
 For setup instructions, available tools, and configuration options, see the [MCP Integration Guide](docs/MCP_INTEGRATION.md).
 
 ## Uninstall CronitorCLI
-First, run `cronitor sync --format=exec` for each crontab that sync changed. This removes the `SHELL=.../cronitor/shell` line (and `CRONITOR_SHELL=`, if any), restores your previous `SHELL`, and writes monitored jobs as `cronitor exec MONITOR_KEY ...`.
+First, run `cronitor jobs sync --format=exec` for each crontab that sync changed. This removes the `SHELL=.../cronitor/shell` line (and `CRONITOR_SHELL=`, if any), restores your previous `SHELL`, and writes monitored jobs as `cronitor exec MONITOR_KEY ...`.
 
 **Do not delete `/etc/cronitor/shell` while a crontab still has `SHELL=/etc/cronitor/shell`. If you do, no job in that crontab runs, including jobs without monitoring.**
 

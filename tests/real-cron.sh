@@ -87,7 +87,7 @@ EOF
 python3 -I "$repo/tests/real-cron-fixture.py" lines "$repo/fixtures/shim/crontab.input" >> "$work/crontab"
 echo '{"CRONITOR_API_KEY":"real-cron-test-key-0000"}' > "$work/cronitor.json"
 echo '{}' > "$work/other.json"
-"$work/bin/cronitor" --config "$work/cronitor.json" sync --auto --silent --format=short "$work/crontab"
+"$work/bin/cronitor" --config "$work/cronitor.json" jobs sync --auto --silent --format=short "$work/crontab"
 # A line added after sync has no marker. It must survive a broken binary.
 echo "* * * * * echo raw >> $out/raw.log" >> "$work/crontab"
 echo "--- synced crontab"

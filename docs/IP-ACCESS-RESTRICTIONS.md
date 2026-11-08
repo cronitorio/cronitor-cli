@@ -17,7 +17,7 @@ Set the `CRONITOR_ALLOWED_IPS` environment variable with a comma-separated list 
 export CRONITOR_ALLOWED_IPS="192.168.1.0/24,10.0.0.1,2001:db8::/32"
 
 # Start the dashboard
-cronitor dash
+cronitor jobs dash
 ```
 
 ### Command Line Configuration

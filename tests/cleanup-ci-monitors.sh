@@ -2,7 +2,7 @@
 #
 # Delete the monitors that the CI test suite creates in the Cronitor account.
 #
-# `cronitor discover` names each monitor after the machine it runs on:
+# `cronitor jobs sync` names each monitor after the machine it runs on:
 #   Linux:   "[<hostname>] <command>"
 #   Windows: "<hostname>/<scheduled task name>"
 # Hosted runner images reuse hostnames across runs, so the workflow renames

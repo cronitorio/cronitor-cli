@@ -382,7 +382,7 @@ export default function Docs() {
           
           <h4 className="text-md font-medium text-gray-900 dark:text-white">Understanding the CLI Connection</h4>
           <p className="text-gray-700 dark:text-gray-300">
-            When the dashboard is running and monitoring is enabled, job names and schedules are synced automatically with Cronitor. There is no need to run "cronitor sync" manually if you also use the dashboard. For job names, this is a 2-way sync: Names changed on Cronitor will show up on this dashboard, and names changed here will be synced with Cronitor. Schedules are only synced one-way: Changes made on Cronitor do not impact your actual job schedule. 
+            When the dashboard is running and monitoring is enabled, job names and schedules are synced automatically with Cronitor. There is no need to run "cronitor jobs sync" manually if you also use the dashboard. For job names, this is a 2-way sync: Names changed on Cronitor will show up on this dashboard, and names changed here will be synced with Cronitor. Schedules are only synced one-way: Changes made on Cronitor do not impact your actual job schedule. 
           </p>
 
           <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Version Management</h4>
@@ -432,13 +432,13 @@ cronitor update
           </p>
           <CodeBlock>
 {`# Connect to default instance
-cronitor dash --mcp-instance default
+cronitor jobs dash --mcp-instance default
 
 # Connect to production instance
-cronitor dash --mcp-instance production
+cronitor jobs dash --mcp-instance production
 
 # Connect to staging instance
-cronitor dash --mcp-instance staging`}
+cronitor jobs dash --mcp-instance staging`}
           </CodeBlock>
 
           <h4 className="text-md font-medium text-gray-900 dark:text-white mt-6">Configuring MCP Instances</h4>
@@ -487,15 +487,15 @@ cronitor dash --mcp-instance staging`}
   "mcpServers": {
     "cronitor": {
       "command": "cronitor",
-      "args": ["dash", "--mcp-instance", "default"]
+      "args": ["jobs", "dash", "--mcp-instance", "default"]
     },
     "cronitor-production": {
       "command": "cronitor",
-      "args": ["dash", "--mcp-instance", "production"]
+      "args": ["jobs", "dash", "--mcp-instance", "production"]
     },
     "cronitor-staging": {
       "command": "cronitor",
-      "args": ["dash", "--mcp-instance", "staging"]
+      "args": ["jobs", "dash", "--mcp-instance", "staging"]
     }
   }
 }`}
@@ -691,7 +691,7 @@ connect = remote-cron-server:9000`}
           </p>
           <CodeBlock>
 {`# Start dashboard in safe mode
-cronitor dash --safe-mode`}
+cronitor jobs dash --safe-mode`}
           </CodeBlock>
           <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
             <li>Prevents cron command modifications</li>

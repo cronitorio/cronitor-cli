@@ -1,5 +1,5 @@
 SHELL=/etc/cronitor/shell
-# Fixture for `cronitor sync` with the shell shim.
+# Fixture for `cronitor jobs sync` with the shell shim.
 # lib/shell_shim_golden_test.go writes this with every job monitored and
 # compares the result to crontab.expected (run with -update to regenerate).
 # cmd/shell_shim_fixture_test.go runs each job line, before and after, and

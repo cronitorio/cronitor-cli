@@ -710,7 +710,7 @@ not start a web server but instead communicates via stdio protocol.`,
 			}
 
 			fmt.Printf("\nCredentials saved to: %s\n", configPath)
-			fmt.Println("Please run 'cronitor dash' again to start the dashboard.")
+			fmt.Println("Please run 'cronitor jobs dash' again to start the dashboard.")
 			os.Exit(0)
 		}
 
@@ -1077,7 +1077,7 @@ func addLineToCrontab(file string, line string) error {
 }
 
 func init() {
-	RootCmd.AddCommand(dashCmd)
+	jobsCmd.AddCommand(dashCmd)
 	dashCmd.Flags().Int("port", 9000, "Port to run the dashboard on")
 	dashCmd.Flags().Bool("safe-mode", false, "Limit the ability to edit jobs, crontabs, and settings")
 	dashCmd.Flags().Bool("mcp", false, "Enable MCP server mode for Cursor integration (deprecated: use --mcp-instance instead)")
@@ -3063,7 +3063,7 @@ func requestSystemdRestart() error {
 	//   Type=simple
 	//   Restart=always
 	//   RestartSec=5
-	//   ExecStart=/usr/local/bin/cronitor dash
+	//   ExecStart=/usr/local/bin/cronitor jobs dash
 
 	// Try to determine the service name for logging purposes
 	serviceName := getSystemdServiceName()

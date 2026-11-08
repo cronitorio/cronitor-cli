@@ -546,7 +546,7 @@ func TestSyncRerunTimezoneChangeSendsTimezone(t *testing.T) {
 	}
 }
 
-// Pipelines such as "cronitor sync --auto file | crontab -" read stdout, so
+// Pipelines such as "cronitor jobs sync --auto file | crontab -" read stdout, so
 // --auto prints the crontab even when nothing changed, including --dry-run.
 func TestSyncAutoPrintsCrontabWhenNothingChanged(t *testing.T) {
 	for _, extra := range [][]string{{"--auto"}, {"--auto", "--dry-run"}} {
@@ -604,7 +604,7 @@ func TestSyncAutoPrintsOriginalWhenShimInstallFails(t *testing.T) {
 }
 
 // An API failure used to os.Exit inside applyPlan, skipping the deferred
-// print. `cronitor sync --auto file | crontab -` then installed an empty crontab.
+// print. `cronitor jobs sync --auto file | crontab -` then installed an empty crontab.
 func TestSyncAutoPrintsOriginalWhenAPIFails(t *testing.T) {
 	withSyncFixture(t)
 	withNotificationList(t, "")
@@ -656,7 +656,7 @@ func TestSyncAutoPrintsOriginalWhenAPIFails(t *testing.T) {
 }
 
 // A missing or unwritable file used to print nothing and exit 0, so
-// `cronitor sync --auto file | crontab -` installed an empty crontab.
+// `cronitor jobs sync --auto file | crontab -` installed an empty crontab.
 func TestSyncAutoExitsWhenCrontabMissingOrUnwritable(t *testing.T) {
 	withSyncFixture(t)
 	withNotificationList(t, "")
