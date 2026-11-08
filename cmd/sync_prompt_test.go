@@ -144,3 +144,24 @@ func TestSudoHint(t *testing.T) {
 		t.Fatalf("sudoHint(1) = %q", got)
 	}
 }
+
+// The Windows task flow has no save prompt and does not read the ignore
+// choice, so its menu keeps the old keys: q, esc and ctrl+c skip one task,
+// ctrl+d stops.
+func TestWindowsPromptKeepsOldKeys(t *testing.T) {
+	m := initialWindowsNameInputModel("task")
+	for _, it := range m.list.Items() {
+		if it.(item).title == IgnoreJob {
+			t.Fatal("the Windows menu offers \"don't ask again\", which it cannot save")
+		}
+	}
+	for _, key := range []tea.KeyMsg{runes("q"), {Type: tea.KeyEsc}, {Type: tea.KeyCtrlC}, runes("s")} {
+		got, quit := press(t, m, key)
+		if !quit || got.exited || got.done {
+			t.Fatalf("%q: quit=%v exited=%v done=%v; want skip", key.String(), quit, got.exited, got.done)
+		}
+	}
+	if got, quit := press(t, m, tea.KeyMsg{Type: tea.KeyCtrlD}); !quit || !got.exited {
+		t.Fatalf("ctrl+d: quit=%v exited=%v; want stop", quit, got.exited)
+	}
+}

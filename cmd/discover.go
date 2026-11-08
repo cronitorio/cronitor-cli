@@ -598,6 +598,15 @@ func (p *crontabPlan) summary() string {
 // finishSync shows one summary for all planned crontabs, asks once, then
 // applies the plans. It returns the number of crontabs that changed.
 func finishSync(plans []*crontabPlan) int {
+	// When running --auto mode with a single crontab, you should be able to pipe or redirect crontab
+	// output elsewhere, so print it whether or not anything changed.
+	defer func() {
+		if !isSilent && isAutoDiscover && !processingMultipleCrontabs {
+			for _, p := range plans {
+				fmt.Println(strings.TrimSpace(p.output))
+			}
+		}
+	}()
 	var todo []*crontabPlan
 	for _, p := range plans {
 		if p.hasChanges() {
@@ -606,17 +615,11 @@ func finishSync(plans []*crontabPlan) int {
 	}
 	interactive := !isAutoDiscover && !isSilent
 
-	// The user quit. Offer to keep the answers given so far, then apply
-	// them without a second question.
 	quit := userAbortedSync
-	if quit {
-		if len(todo) == 0 || dryRun || !confirm("Save what you've done so far?", false) {
-			printWarningText("Nothing was changed", false)
-			return 0
-		}
-	}
 	if len(todo) == 0 {
-		if interactive {
+		if quit {
+			printWarningText("Nothing was changed", false)
+		} else if interactive {
 			printDoneText("Nothing to change", false)
 		}
 		return 0
@@ -639,8 +642,14 @@ func finishSync(plans []*crontabPlan) int {
 		printWarningText("Dry run: nothing was sent to Cronitor or written to the crontab", false)
 		return len(todo)
 	}
-	if interactive && !quit {
-		if !confirm("Apply these changes?", true) {
+	if interactive {
+		// After a quit, the summary shows the answers given so far, and the
+		// question defaults to no.
+		question, defaultYes := "Apply these changes?", true
+		if quit {
+			question, defaultYes = "Save what you've done so far?", false
+		}
+		if !confirm(question, defaultYes) {
 			printWarningText("Nothing was changed", false)
 			return 0
 		}
@@ -684,8 +693,9 @@ type plannedLine struct {
 type crontabPlan struct {
 	crontab  *lib.Crontab
 	lines    []plannedLine
-	aborted  bool // the user quit
-	rewrites bool // the crontab text changes even if no monitor does
+	aborted  bool   // the user quit
+	rewrites bool   // the crontab text changes even if no monitor does
+	output   string // the crontab text --auto prints: as planned, or as written
 }
 
 type promptChoice int
@@ -855,7 +865,17 @@ func planCrontab(crontab *lib.Crontab) *crontabPlan {
 				line.Name = existing.Name
 				commentUpdated = true
 			}
-			planned := planUpdate(line, key, existing, found, currentName, name)
+			// A generated name is not a rename. Without the monitor list,
+			// currentName is empty, and sending the generated name would
+			// rename the monitor and add a "# Name:" comment.
+			newName := name
+			if newName == defaultName && currentName == "" {
+				newName = ""
+			}
+			planned := planUpdate(line, key, existing, found, currentName, newName)
+			if planned.label == "" {
+				planned.label = defaultName
+			}
 			planned.commentUpdated = commentUpdated && line.Name == existing.Name
 			plan.lines = append(plan.lines, planned)
 			continue
@@ -884,8 +904,10 @@ func planCrontab(crontab *lib.Crontab) *crontabPlan {
 	}
 
 	preview := *crontab
+	plan.output = crontab.Original()
 	if configureShellShim(&preview, true) == nil {
-		plan.rewrites = preview.Write() != crontab.Original()
+		plan.output = preview.Write()
+		plan.rewrites = plan.output != crontab.Original()
 	}
 
 	printLn()
@@ -1011,10 +1033,7 @@ func applyPlan(plan *crontabPlan) bool {
 	// Re-write crontab lines with new/updated monitoring
 	updatedCrontabLines := crontab.Write()
 
-	if !isSilent && isAutoDiscover && !processingMultipleCrontabs {
-		// When running --auto mode with a single crontab, you should be able to pipe or redirect crontab output elsewhere. Skip status-related messages.
-		fmt.Println(strings.TrimSpace(updatedCrontabLines))
-	}
+	plan.output = updatedCrontabLines
 
 	changed := updatedCrontabLines != crontab.Original()
 	if !dryRun && changed {
@@ -1222,19 +1241,34 @@ type nameInputModel struct {
 	defaultName string
 	err         error
 	done        bool
-	exited      bool   // True if the user quit (q, esc, ctrl+c or ctrl+d)
-	ignore      bool   // True if the user chose to skip the job for good
-	state       string // "choosing" or "naming"
-	width       int    // Add width field to store terminal width
+	exited      bool // True if the user quit (q, esc, ctrl+c or ctrl+d)
+	ignore      bool // True if the user chose to skip the job for good
+	// windows keeps the old keys for the Windows task flow, which has no save
+	// prompt and cannot write "# cronitor: ignore": q, esc and ctrl+c skip one
+	// task, ctrl+d stops.
+	windows bool
+	state   string // "choosing" or "naming"
+	width   int    // Add width field to store terminal width
 }
 
 func initialNameInputModel(defaultName string) nameInputModel {
+	return newNameInputModel(defaultName, false)
+}
+
+// initialWindowsNameInputModel is the menu for Windows scheduled tasks.
+func initialWindowsNameInputModel(defaultName string) nameInputModel {
+	return newNameInputModel(defaultName, true)
+}
+
+func newNameInputModel(defaultName string, windows bool) nameInputModel {
 	// Setup list items
 	items := []list.Item{
 		item{title: UseDefaultName, desc: defaultName},
 		item{title: EnterCustomName, desc: "Add a friendly, unique name for this job"},
 		item{title: SkipJob, desc: fmt.Sprintf("Do not monitor this %s. Sync asks again next time.", getJobLabel())},
-		item{title: IgnoreJob, desc: "Adds # cronitor: ignore above the line. Delete that comment to undo."},
+	}
+	if !windows {
+		items = append(items, item{title: IgnoreJob, desc: "Adds # cronitor: ignore above the line. A monitored job keeps reporting. Delete the comment to undo."})
 	}
 
 	// Each item is two lines (title and description) with no spacing, plus
@@ -1275,6 +1309,7 @@ func initialNameInputModel(defaultName string) nameInputModel {
 		list:        l,
 		textInput:   ti,
 		defaultName: defaultName,
+		windows:     windows,
 		state:       "choosing",
 		width:       80, // Default width if we don't get window size
 	}
@@ -1292,7 +1327,8 @@ func (m nameInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyCtrlD:
 			// Stop asking. Sync then offers to save the answers so far.
-			m.exited = true
+			// On Windows, ctrl+c skips the task, as before.
+			m.exited = !(m.windows && msg.Type == tea.KeyCtrlC)
 			return m, tea.Quit
 		case tea.KeyEsc:
 			if m.state == "naming" {
@@ -1300,7 +1336,7 @@ func (m nameInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = nil
 				return m, nil
 			}
-			m.exited = true
+			m.exited = !m.windows
 			return m, tea.Quit
 		case tea.KeyRunes:
 			if m.state == "choosing" {
@@ -1309,7 +1345,7 @@ func (m nameInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.done = false
 					return m, tea.Quit
 				case "q":
-					m.exited = true
+					m.exited = !m.windows
 					return m, tea.Quit
 				}
 			}
@@ -1363,7 +1399,11 @@ var promptFooterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Ma
 
 func (m nameInputModel) View() string {
 	if m.state == "choosing" {
-		return "\n" + m.list.View() + "\n" + promptFooterStyle.Render("enter select · s skip · q quit") + "\n"
+		footer := "enter select · s skip · q quit"
+		if m.windows {
+			footer = "enter select · s skip · ctrl+d stop"
+		}
+		return "\n" + m.list.View() + "\n" + promptFooterStyle.Render(footer) + "\n"
 	}
 
 	var sb strings.Builder
@@ -1390,8 +1430,8 @@ func init() {
 	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from auto-generated monitor name e.g. $ cronitor sync -e '> /dev/null' -e '/path/to/app'")
 	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
-	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Use the provided notification list when creating or updating monitors, or \"default\" list if omitted.")
-	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Ask nothing: monitor every new job, send schedule changes, write the crontab and print it to stdout.")
+	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Set this alert list on new and existing monitors. Without it, sync sends no alert list: new monitors get Cronitor's default list and existing monitors keep theirs.")
+	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Ask nothing: monitor every new job, send schedule and timezone changes, write the crontab and print it to stdout.")
 	discoverCmd.Flags().StringVar(&syncFormat, "format", "", "Line format on Unix. short: write every line as CRONITOR=<key> <command>, converting cronitor exec lines (lines with other exec flags stay as exec). exec: write every line as cronitor exec <key> <command> and restore the prior SHELL. Default: new lines short, existing lines unchanged.")
 	discoverCmd.Flags().BoolVar(&withMonitored, "with-monitored", false, "Also ask about jobs that are already monitored, for example to rename them. Ignored with --auto.")
 	discoverCmd.Flags().StringVar(&syncFile, "file", "", "Path to YAML or JSON file containing monitor definitions for bulk import")

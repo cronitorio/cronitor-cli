@@ -212,13 +212,15 @@ func TestSyncRerunKeepsHandWrittenKey(t *testing.T) {
 func TestSyncWarnsWhenMonitorListFails(t *testing.T) {
 	withSyncFixture(t)
 	withNotificationList(t, "")
-	var puts int
+	var bodies [][]map[string]interface{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			http.Error(w, "boom", http.StatusInternalServerError)
 			return
 		}
-		puts++
+		var body []map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
 		io.WriteString(w, `[]`)
 	}))
 	t.Cleanup(srv.Close)
@@ -230,9 +232,16 @@ func TestSyncWarnsWhenMonitorListFails(t *testing.T) {
 		t.Fatalf("stderr = %q; want a warning that the monitor list failed", stderr)
 	}
 	// Sync cannot compare, so it sends the schedule. It must not warn that
-	// the monitor was deleted.
-	if puts != 1 || strings.Contains(stderr, "no longer exists") {
-		t.Fatalf("puts = %d, stderr = %q", puts, stderr)
+	// the monitor was deleted, rename it to the generated name, or add a
+	// "# Name:" comment.
+	if len(bodies) != 1 || strings.Contains(stderr, "no longer exists") {
+		t.Fatalf("bodies = %v, stderr = %q", bodies, stderr)
+	}
+	if _, ok := bodies[0][0]["name"]; ok {
+		t.Fatalf("payload %v renames the monitor to the generated name", bodies[0][0])
+	}
+	if got := readCron(t, path); strings.Contains(got, "# Name:") {
+		t.Fatalf("crontab gained a name comment:\n%s", got)
 	}
 }
 
@@ -442,20 +451,6 @@ func TestSyncUpdatesNameCommentFromCronitor(t *testing.T) {
 	}
 }
 
-func TestSyncDoesNotAddNameComment(t *testing.T) {
-	withSyncFixture(t)
-	withNotificationList(t, "")
-	_, apiURL := newRerunAPI(t, backupMonitor)
-	body := "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n"
-	path := writeCron(t, body)
-
-	runSync(t, apiURL, path)
-
-	if got := readCron(t, path); got != body {
-		t.Fatalf("crontab changed:\n%s", got)
-	}
-}
-
 func TestSyncDryRunSendsNothing(t *testing.T) {
 	withSyncFixture(t)
 	withNotificationList(t, "")
@@ -640,5 +635,21 @@ func TestPlanUpdateDescribesEachChange(t *testing.T) {
 	want := []string{"timezone UTC → America/New_York", `name "Old name" → "New name"`, "alert list → oncall"}
 	if !reflect.DeepEqual(p.changes, want) {
 		t.Fatalf("changes = %q; want %q", p.changes, want)
+	}
+}
+
+// Pipelines such as "cronitor sync --auto file | crontab -" read stdout, so
+// --auto prints the crontab even when nothing changed.
+func TestSyncAutoPrintsCrontabWhenNothingChanged(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	_, apiURL := newRerunAPI(t, backupMonitor)
+	body := "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n"
+	path := writeCron(t, body)
+
+	runSyncArgs(t, apiURL, path, "--auto")
+
+	if strings.TrimSpace(lastSyncStdout) != strings.TrimSpace(body) {
+		t.Fatalf("stdout = %q; want the crontab", lastSyncStdout)
 	}
 }

@@ -507,7 +507,8 @@ func TestSyncExecStyleQuotesCompoundShimLine(t *testing.T) {
 }
 
 func TestSyncNoStdoutRewritesShimLines(t *testing.T) {
-	serverURL, shimPath := withSyncFixture(t)
+	_, shimPath := withSyncFixture(t)
+	_, serverURL := newRerunAPI(t, `{"name":"abc","key":"abc","schedules":["0 * * * *"],"attributes":{"key":"abc","code":"abc"}}`)
 	path := writeCron(t, strings.Join([]string{
 		"CRONITOR_SHELL=/bin/bash",
 		"SHELL=" + shimPath,
@@ -525,9 +526,7 @@ func TestSyncNoStdoutRewritesShimLines(t *testing.T) {
 	if hasShimMarker(got) || strings.Contains(got, "CRONITOR_SHELL=") || strings.Contains(got, shimPath) {
 		t.Fatalf("shim left behind:\n%s", got)
 	}
-	// The fake API lists no monitors, so a "no longer exists" warning is
-	// expected. Only the rewrite notice must not come back.
-	if again := runSync(t, serverURL, path, "--no-stdout"); strings.Contains(again, "--no-stdout") {
+	if again := runSync(t, serverURL, path, "--no-stdout"); again != "" {
 		t.Fatalf("second --no-stdout still noticed:\n%s", again)
 	}
 	if second := readCron(t, path); second != got {
