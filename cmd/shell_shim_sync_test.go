@@ -38,10 +38,16 @@ func runSyncArgs(t *testing.T, serverURL, path string, extra ...string) string {
 	dryRun = false
 	syncFormat = ""
 	noStdoutPassthru = false
+	isAutoDiscover = false
+	isSilent = false
+	withMonitored = false
 	_ = discoverCmd.Flags().Set("format", "")
 	_ = discoverCmd.Flags().Set("dry-run", "false")
 	_ = discoverCmd.Flags().Set("no-stdout", "false")
-	for _, name := range []string{"format", "dry-run", "no-stdout"} {
+	_ = discoverCmd.Flags().Set("auto", "false")
+	_ = discoverCmd.Flags().Set("silent", "false")
+	_ = discoverCmd.Flags().Set("with-monitored", "false")
+	for _, name := range []string{"format", "dry-run", "no-stdout", "auto", "silent", "with-monitored"} {
 		if f := discoverCmd.Flags().Lookup(name); f != nil {
 			f.Changed = false
 		}

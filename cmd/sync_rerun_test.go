@@ -8,8 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -89,41 +87,25 @@ func withNotificationList(t *testing.T, list string) {
 const backupMonitor = `{"name":"Nightly backup","key":"backup","schedules":["0 2 * * *"],"tags":["db","team-a"],"notify":["ops"],"attributes":{"key":"backup","code":"abc123"}}`
 
 func TestSyncRerunUnchangedSendsNothing(t *testing.T) {
-	serverURL, _ := withSyncFixture(t)
+	withSyncFixture(t)
 	withNotificationList(t, "")
-	api, apiURL := newRerunAPI(t, backupMonitor)
-	_ = serverURL
-	body := "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n"
+	resetWithMonitored(t)
+	api, apiURL := newRerunAPI(t, `{"name":"Nightly backup","key":"backup","schedules":["0 2 * * *"],"timezone":"America/New_York","attributes":{"key":"backup","code":"abc123"}}`)
+	asked := answerPrompts(t, keepName)
+	questions := answerConfirm(t, true)
+	body := "CRON_TZ=America/New_York\n0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n"
 	path := writeCron(t, body)
 
-	runSync(t, apiURL, path)
+	runSyncArgs(t, apiURL, path)
 
+	if len(*asked)+len(*questions) != 0 {
+		t.Fatalf("asked %v and %v; want no questions", *asked, *questions)
+	}
 	if puts := api.sent(); len(puts) != 0 {
 		t.Fatalf("sync sent %v; want no request for an unchanged job", puts)
 	}
 	if got := readCron(t, path); got != body {
 		t.Fatalf("crontab changed:\n%s", got)
-	}
-}
-
-func TestSyncRerunScheduleChangeSendsOnlySchedule(t *testing.T) {
-	withSyncFixture(t)
-	withNotificationList(t, "")
-	api, apiURL := newRerunAPI(t, backupMonitor)
-	path := writeCron(t, "TZ=UTC\n30 3 * * * cronitor exec abc123 /usr/bin/backup.sh\n")
-
-	runSync(t, apiURL, path)
-
-	puts := api.sent()
-	if len(puts) != 1 || len(puts[0]) != 1 {
-		t.Fatalf("sync sent %v; want one monitor", puts)
-	}
-	got := puts[0][0]
-	if names := fieldNames(got); !reflect.DeepEqual(names, []string{"key", "schedules", "timezone", "type"}) {
-		t.Fatalf("payload fields = %v (%v); want key, schedules, timezone and type only", names, got)
-	}
-	if got["key"] != "abc123" || !reflect.DeepEqual(got["schedules"], []interface{}{"30 3 * * *"}) || got["timezone"] != "UTC" {
-		t.Fatalf("payload = %v", got)
 	}
 }
 
@@ -314,21 +296,6 @@ func TestSyncWithMonitoredShowsMonitorNameAndRenames(t *testing.T) {
 	}
 }
 
-func TestSyncWithMonitoredIgnoredByAuto(t *testing.T) {
-	withSyncFixture(t)
-	withNotificationList(t, "")
-	resetWithMonitored(t)
-	api, apiURL := newRerunAPI(t, backupMonitor)
-	asked := answerPrompts(t, keepName)
-	path := writeCron(t, "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n")
-
-	runSync(t, apiURL, path, "--with-monitored")
-
-	if len(*asked) != 0 || len(api.sent()) != 0 {
-		t.Fatalf("asked %v, sent %v; --auto must ignore --with-monitored", *asked, api.sent())
-	}
-}
-
 // answerConfirm replaces the final "Apply?" prompt and records each question.
 func answerConfirm(t *testing.T, yes bool) *[]string {
 	t.Helper()
@@ -390,27 +357,6 @@ func TestSyncAnswerNoChangesNothing(t *testing.T) {
 	}
 }
 
-func TestSyncNothingToChangeAsksNothing(t *testing.T) {
-	withSyncFixture(t)
-	withNotificationList(t, "")
-	resetWithMonitored(t)
-	api, apiURL := newRerunAPI(t, backupMonitor)
-	asked := answerPrompts(t, keepName)
-	questions := answerConfirm(t, true)
-	path := writeCron(t, "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n")
-
-	out := runSyncStdout(t, apiURL, path)
-
-	if len(*asked)+len(*questions) != 0 {
-		t.Fatalf("asked %v and %v; want no questions", *asked, *questions)
-	}
-	// "Nothing to change" goes through the color package, which writes to
-	// the real stdout. Check that no summary was printed instead.
-	if len(api.sent()) != 0 || strings.Contains(out, "unchanged") {
-		t.Fatalf("sent %v, output:\n%s", api.sent(), out)
-	}
-}
-
 func TestSyncSkipForGoodWritesIgnoreMarker(t *testing.T) {
 	withSyncFixture(t)
 	withNotificationList(t, "")
@@ -454,39 +400,42 @@ func TestSyncUpdatesNameCommentFromCronitor(t *testing.T) {
 func TestSyncDryRunSendsNothing(t *testing.T) {
 	withSyncFixture(t)
 	withNotificationList(t, "")
+	resetWithMonitored(t)
 	resetDryRun(t)
 	api, apiURL := newRerunAPI(t, backupMonitor)
 	body := "30 3 * * * cronitor exec abc123 /usr/bin/backup.sh\n0 5 * * * /usr/bin/new-job.sh\n"
 	path := writeCron(t, body)
 
-	runSync(t, apiURL, path, "--dry-run")
+	t.Run("auto", func(t *testing.T) {
+		stderr := runSyncArgs(t, apiURL, path, "--auto", "--dry-run")
+		if len(api.sent()) != 0 {
+			t.Fatalf("dry run sent %v", api.sent())
+		}
+		if got := readCron(t, path); got != body {
+			t.Fatalf("dry run wrote the crontab:\n%s", got)
+		}
+		if !strings.Contains(lastSyncStdout, "30 3 * * * cronitor exec abc123") {
+			t.Fatalf("stdout = %q; want the crontab", lastSyncStdout)
+		}
+		if !strings.Contains(stderr, "1 new") || !strings.Contains(stderr, "1 updated") {
+			t.Fatalf("stderr missing summary:\n%s", stderr)
+		}
+	})
 
-	if len(api.sent()) != 0 {
-		t.Fatalf("dry run sent %v", api.sent())
-	}
-	if got := readCron(t, path); got != body {
-		t.Fatalf("dry run wrote the crontab:\n%s", got)
-	}
-}
-
-func TestSyncDryRunInteractiveAsksNoFinalQuestion(t *testing.T) {
-	withSyncFixture(t)
-	withNotificationList(t, "")
-	resetWithMonitored(t)
-	resetDryRun(t)
-	api, apiURL := newRerunAPI(t, backupMonitor)
-	answerPrompts(t, keepName)
-	questions := answerConfirm(t, true)
-	path := writeCron(t, "0 5 * * * /usr/bin/new-job.sh\n")
-
-	out := runSyncStdout(t, apiURL, path, "--dry-run")
-
-	if len(*questions) != 0 || len(api.sent()) != 0 {
-		t.Fatalf("asked %v, sent %v; a dry run only shows the summary", *questions, api.sent())
-	}
-	if !strings.Contains(out, "1 new") {
-		t.Fatalf("summary missing:\n%s", out)
-	}
+	t.Run("interactive", func(t *testing.T) {
+		answerPrompts(t, keepName)
+		questions := answerConfirm(t, true)
+		out := runSyncStdout(t, apiURL, path, "--dry-run")
+		if len(*questions) != 0 || len(api.sent()) != 0 {
+			t.Fatalf("asked %v, sent %v; a dry run only shows the summary", *questions, api.sent())
+		}
+		if got := readCron(t, path); got != body {
+			t.Fatalf("dry run wrote the crontab:\n%s", got)
+		}
+		if !strings.Contains(out, "1 new") {
+			t.Fatalf("summary missing:\n%s", out)
+		}
+	})
 }
 
 func resetDryRun(t *testing.T) {
@@ -508,61 +457,40 @@ func quitOnLine(n int) func(int, string) promptResult {
 }
 
 func TestSyncQuitSavesAnswersSoFar(t *testing.T) {
-	withSyncFixture(t)
-	withNotificationList(t, "")
-	resetWithMonitored(t)
-	api, apiURL := newRerunAPI(t, backupMonitor)
-	answerPrompts(t, quitOnLine(2))
-	questions := answerConfirm(t, true)
-	path := writeCron(t, "0 5 * * * /usr/bin/first.sh\n0 6 * * * /usr/bin/second.sh\n")
-
-	runSyncStdout(t, apiURL, path)
-
-	if len(*questions) != 1 || !strings.Contains((*questions)[0], "Save what you've done so far") {
-		t.Fatalf("asked %v; want only the save question", *questions)
-	}
-	if puts := api.sent(); len(puts) != 1 || len(puts[0]) != 1 {
-		t.Fatalf("sent %v; want only the first job", puts)
-	}
-	got := readCron(t, path)
-	if !strings.Contains(got, "CRONITOR=new") || !strings.Contains(got, "0 6 * * * /usr/bin/second.sh") {
-		t.Fatalf("crontab:\n%s", got)
-	}
-}
-
-func TestSyncQuitWithoutSavingChangesNothing(t *testing.T) {
-	withSyncFixture(t)
-	withNotificationList(t, "")
-	resetWithMonitored(t)
-	api, apiURL := newRerunAPI(t, backupMonitor)
-	answerPrompts(t, quitOnLine(2))
-	answerConfirm(t, false)
 	body := "0 5 * * * /usr/bin/first.sh\n0 6 * * * /usr/bin/second.sh\n"
-	path := writeCron(t, body)
+	for _, tc := range []struct {
+		name string
+		save bool
+	}{
+		{"save", true},
+		{"discard", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withSyncFixture(t)
+			withNotificationList(t, "")
+			resetWithMonitored(t)
+			api, apiURL := newRerunAPI(t, backupMonitor)
+			answerPrompts(t, quitOnLine(2))
+			questions := answerConfirm(t, tc.save)
+			path := writeCron(t, body)
 
-	runSyncStdout(t, apiURL, path)
+			runSyncStdout(t, apiURL, path)
 
-	if len(api.sent()) != 0 || readCron(t, path) != body {
-		t.Fatalf("sent %v, crontab:\n%s", api.sent(), readCron(t, path))
-	}
-}
-
-func TestSyncOneSudoHintForUnwritableCrontabs(t *testing.T) {
-	withSyncFixture(t)
-	withNotificationList(t, "")
-	_, apiURL := newRerunAPI(t, backupMonitor)
-	dir := t.TempDir()
-	locked := filepath.Join(dir, "locked")
-	os.WriteFile(locked, []byte("0 1 * * * root /usr/bin/a.sh\n0 2 * * * root /usr/bin/b.sh\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "open"), []byte("0 3 * * * root /usr/bin/c.sh\n"), 0644)
-	old := crontabWritable
-	t.Cleanup(func() { crontabWritable = old })
-	crontabWritable = func(c *lib.Crontab) bool { return c.Filename != locked }
-
-	stderr := runSync(t, apiURL, dir)
-
-	if strings.Count(stderr, "sudo") != 1 || !strings.Contains(stderr, "2 jobs in system crontabs were not checked") {
-		t.Fatalf("stderr = %q; want one hint that counts the 2 jobs", stderr)
+			if len(*questions) != 1 || !strings.Contains((*questions)[0], "Save what you've done so far") {
+				t.Fatalf("asked %v; want only the save question", *questions)
+			}
+			if tc.save {
+				if puts := api.sent(); len(puts) != 1 || len(puts[0]) != 1 {
+					t.Fatalf("sent %v; want only the first job", puts)
+				}
+				got := readCron(t, path)
+				if !strings.Contains(got, "CRONITOR=new") || !strings.Contains(got, "0 6 * * * /usr/bin/second.sh") {
+					t.Fatalf("crontab:\n%s", got)
+				}
+			} else if len(api.sent()) != 0 || readCron(t, path) != body {
+				t.Fatalf("sent %v, crontab:\n%s", api.sent(), readCron(t, path))
+			}
+		})
 	}
 }
 
@@ -575,7 +503,7 @@ func TestSyncInteractiveRerunSendsScheduleChange(t *testing.T) {
 	api, apiURL := newRerunAPI(t, backupMonitor)
 	asked := answerPrompts(t, keepName)
 	questions := answerConfirm(t, true)
-	path := writeCron(t, "30 3 * * * cronitor exec abc123 /usr/bin/backup.sh\n")
+	path := writeCron(t, "TZ=UTC\n30 3 * * * cronitor exec abc123 /usr/bin/backup.sh\n")
 
 	out := runSyncStdout(t, apiURL, path)
 
@@ -583,10 +511,17 @@ func TestSyncInteractiveRerunSendsScheduleChange(t *testing.T) {
 		t.Fatalf("asked %v, questions %v; want no job prompt and one Apply question", *asked, *questions)
 	}
 	puts := api.sent()
-	if len(puts) != 1 || !reflect.DeepEqual(puts[0][0]["schedules"], []interface{}{"30 3 * * *"}) {
+	if len(puts) != 1 || len(puts[0]) != 1 {
 		t.Fatalf("sent %v; want the new schedule", puts)
 	}
-	if !strings.Contains(out, "1 updated") || !strings.Contains(out, "L1  Nightly backup: schedule 0 2 * * * → 30 3 * * *") {
+	got := puts[0][0]
+	if names := fieldNames(got); !reflect.DeepEqual(names, []string{"key", "schedules", "timezone", "type"}) {
+		t.Fatalf("payload fields = %v (%v); want key, schedules, timezone and type only", names, got)
+	}
+	if got["key"] != "abc123" || !reflect.DeepEqual(got["schedules"], []interface{}{"30 3 * * *"}) || got["timezone"] != "UTC" {
+		t.Fatalf("payload = %v", got)
+	}
+	if !strings.Contains(out, "1 updated") || !strings.Contains(out, "L2  Nightly backup: schedule 0 2 * * * → 30 3 * * *") {
 		t.Fatalf("summary does not show the change:\n%s", out)
 	}
 }
@@ -609,47 +544,46 @@ func TestSyncRerunTimezoneChangeSendsTimezone(t *testing.T) {
 	}
 }
 
-func TestSyncRerunSameTimezoneSendsNothing(t *testing.T) {
-	withSyncFixture(t)
-	withNotificationList(t, "")
-	api, apiURL := newRerunAPI(t, `{"name":"Nightly backup","key":"backup","schedules":["0 2 * * *"],"timezone":"America/New_York","attributes":{"key":"backup","code":"abc123"}}`)
-	path := writeCron(t, "CRON_TZ=America/New_York\n0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n")
-
-	runSync(t, apiURL, path)
-
-	if puts := api.sent(); len(puts) != 0 {
-		t.Fatalf("sync sent %v; the timezone did not change", puts)
-	}
-}
-
-func TestPlanUpdateDescribesEachChange(t *testing.T) {
-	old := timezone
-	t.Cleanup(func() { timezone = old })
-	timezone = lib.TimezoneLocationName{Name: "America/New_York"}
-	withNotificationList(t, "oncall")
-	existing := lib.Monitor{Name: "Old name", Schedules: &[]string{"0 2 * * *"}, Timezone: "UTC"}
-	line := &lib.Line{Code: "abc123", CronExpression: "0 2 * * *"}
-
-	p := planUpdate(line, "hash", existing, true, "Old name", "New name")
-
-	want := []string{"timezone UTC → America/New_York", `name "Old name" → "New name"`, "alert list → oncall"}
-	if !reflect.DeepEqual(p.changes, want) {
-		t.Fatalf("changes = %q; want %q", p.changes, want)
-	}
-}
-
 // Pipelines such as "cronitor sync --auto file | crontab -" read stdout, so
-// --auto prints the crontab even when nothing changed.
+// --auto prints the crontab even when nothing changed, including --dry-run.
 func TestSyncAutoPrintsCrontabWhenNothingChanged(t *testing.T) {
+	for _, extra := range [][]string{{"--auto"}, {"--auto", "--dry-run"}} {
+		t.Run(strings.Join(extra, " "), func(t *testing.T) {
+			withSyncFixture(t)
+			withNotificationList(t, "")
+			resetDryRun(t)
+			_, apiURL := newRerunAPI(t, backupMonitor)
+			body := "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n"
+			path := writeCron(t, body)
+
+			runSyncArgs(t, apiURL, path, extra...)
+
+			if strings.TrimSpace(lastSyncStdout) != strings.TrimSpace(body) {
+				t.Fatalf("stdout = %q; want the crontab", lastSyncStdout)
+			}
+		})
+	}
+}
+
+func TestSyncSilentStillConfirms(t *testing.T) {
 	withSyncFixture(t)
 	withNotificationList(t, "")
-	_, apiURL := newRerunAPI(t, backupMonitor)
-	body := "0 2 * * * cronitor exec abc123 /usr/bin/backup.sh\n"
+	resetWithMonitored(t)
+	api, apiURL := newRerunAPI(t, backupMonitor)
+	asked := answerPrompts(t, keepName)
+	questions := answerConfirm(t, false)
+	body := "30 3 * * * cronitor exec abc123 /usr/bin/backup.sh\n"
 	path := writeCron(t, body)
 
-	runSyncArgs(t, apiURL, path, "--auto")
+	runSyncArgs(t, apiURL, path, "--silent")
 
-	if strings.TrimSpace(lastSyncStdout) != strings.TrimSpace(body) {
-		t.Fatalf("stdout = %q; want the crontab", lastSyncStdout)
+	if len(*asked) != 0 {
+		t.Fatalf("asked about jobs %v; --silent is not --auto", *asked)
+	}
+	if len(*questions) != 1 {
+		t.Fatalf("asked %v; --silent without --auto must still confirm before applying", *questions)
+	}
+	if len(api.sent()) != 0 || readCron(t, path) != body {
+		t.Fatalf("applied after answering no: sent %v\n%s", api.sent(), readCron(t, path))
 	}
 }

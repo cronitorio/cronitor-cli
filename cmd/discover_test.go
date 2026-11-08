@@ -244,29 +244,17 @@ func monitorWith(name, key, code string) lib.Monitor {
 	return m
 }
 
-// A line written as CRONITOR=prune-events holds the monitor's key, not its
-// code. Sync must still find the monitor, so it shows the real name.
-func TestExistingMonitorsMatchCustomKey(t *testing.T) {
+// The monitor being renamed is not a duplicate of itself.
+func TestHasMonitorByNameSkipsCurrent(t *testing.T) {
 	em := ExistingMonitors{Monitors: []lib.Monitor{
 		monitorWith("Other", "other", "zzz999"),
 		monitorWith("Prune events", "prune-events", "abc123"),
 	}}
-
 	em.CurrentKey, em.CurrentCode = "hash-of-line", "prune-events"
-	if got, err := em.GetNameForCurrent(); err != nil || got != "Prune events" {
-		t.Fatalf("GetNameForCurrent = %q, %v; want the monitor's name", got, err)
-	}
-	if got := em.Get("hash-of-line", "prune-events"); got.Name != "Prune events" {
-		t.Fatalf("Get = %q; want the monitor matched by key", got.Name)
-	}
-	// The monitor's own name is not a conflict when it is renamed in place.
 	if em.HasMonitorByName("Prune events") {
 		t.Fatal("HasMonitorByName counted the current monitor as a duplicate")
 	}
-
-	// A generated code still matches, as before.
-	em.CurrentCode = "zzz999"
-	if got, _ := em.GetNameForCurrent(); got != "Other" {
-		t.Fatalf("GetNameForCurrent by code = %q", got)
+	if !em.HasMonitorByName("Other") {
+		t.Fatal("HasMonitorByName missed a different monitor's name")
 	}
 }

@@ -150,30 +150,34 @@ There are three ways to run sync:
 
   $ cronitor sync --auto
       > Asks nothing. Monitors every new job, sends schedule and timezone changes, and writes the crontab
-      > Prints the updated crontab to stdout, for pipelines and scripts
+      > Prints the crontab to stdout even when nothing changed, so pipelines such as
+        cronitor sync --auto file | crontab - never install an empty crontab
       > Use it to automate sync, not to pick up one schedule change: it also monitors every new job
 
   For a job that is already monitored, sync sends only what changed. Names, tags and alert lists set
   in Cronitor are kept. Alert lists change only with --notification-list.
 
-  In the job menu: enter selects, s skips, q quits (sync then offers to save your answers so far).
-  "Skip this job, don't ask again" adds "# cronitor: ignore" above the line.
+  In the job menu: Enter selects, s skips, and q, Esc, Ctrl+C or Ctrl+D quits. While typing a name,
+  s and q type normally, Esc goes back, and Ctrl+C or Ctrl+D quits. If you quit with pending changes,
+  sync shows the summary and asks whether to save. "Skip this job, don't ask again" adds
+  "# cronitor: ignore" above the line; a monitored job keeps reporting to Cronitor.
 
   $ cronitor sync /path/to/crontab
       > Instead of the user crontab, provide a crontab file (or directory of crontabs) to use
 
 Example excluding secrets or common text from monitor names:
   $ cronitor sync /path/to/crontab -e "secret-token" -e "/var/common/app/path/"
-      > Updates previously discovered monitors or creates new monitors, excluding the provided snippets from the monitor name.
+      > Creates new monitors, excluding the provided snippets from the generated name.
+      > Existing monitored names are kept. Use --with-monitored to rename them.
       > Adds Cronitor integration to your crontab and outputs to stdout
-      > Names you create yourself in "sync" or from the dashboard are unchanged.
 
   You can run the command as many times as you need, accumulating exclusion params until the job names on your Cronitor dashboard are clear and readable.
 
 Example where you perform a dry-run without any crontab modifications:
   $ cronitor sync /path/to/crontab --dry-run
       > Asks about new jobs and shows what would change
-      > Sends nothing to Cronitor and does not write the crontab
+      > On Linux and macOS crontab sync, sends nothing to Cronitor and does not write the crontab
+      > Does not apply to --file imports or Windows scheduled-task sync
 
 On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read). --format=short also converts cronitor exec lines; --no-stdout, --env, --api-key, --ping-api-key and --hostname become CRONITOR_* settings on the line. --format=exec writes cronitor exec and restores SHELL. Windows stays exec.
 	`,
@@ -191,6 +195,7 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 	Run: func(cmd *cobra.Command, args []string) {
 
 		// Reset the flags for each command execution
+		importedCrontabs = 0
 		processingMultipleCrontabs = false
 		userAbortedSync = false
 		jobsNeedingSudo = 0
@@ -223,7 +228,11 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 		existingMonitors.Monitors = monitors
 		existingMonitors.Loaded = err == nil
 		if err != nil {
-			syncWarning(fmt.Sprintf("Could not load your monitors from Cronitor: %v. Sync cannot tell which jobs changed, so it asks about every job and sends each schedule.", err))
+			msg := fmt.Sprintf("Could not load your monitors from Cronitor: %v. Sync cannot tell which jobs changed, so it sends each monitored job's schedule.", err)
+			if !isAutoDiscover {
+				msg += " It asks about every job."
+			}
+			syncWarning(msg)
 		}
 
 		if runtime.GOOS == "windows" {
@@ -285,9 +294,18 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 			saveCommand = strings.Replace(saveCommand, " --dry-run", "", -1)
 
 			if importedCrontabs > 0 {
-				printWarningText("Reminder: This is a DRY-RUN. Integration is not complete.", true)
-				printWarningText("To complete integration, run:", true)
-				fmt.Println(fmt.Sprintf("      %s --auto --silent\n", saveCommand))
+				msg := "Reminder: This is a DRY-RUN. Integration is not complete."
+				next := "To complete integration, run:"
+				cmd := fmt.Sprintf("      %s --auto --silent", saveCommand)
+				if isAutoDiscover || isSilent {
+					fmt.Fprintln(os.Stderr, msg)
+					fmt.Fprintln(os.Stderr, next)
+					fmt.Fprintln(os.Stderr, cmd)
+				} else {
+					printWarningText(msg, true)
+					printWarningText(next, true)
+					fmt.Println(cmd + "\n")
+				}
 			}
 		}
 	},
@@ -595,6 +613,26 @@ func (p *crontabPlan) summary() string {
 	return line
 }
 
+// printPlanSummaries writes one summary per crontab. --auto --dry-run sends
+// it to stderr so stdout stays a clean crontab.
+func printPlanSummaries(plans []*crontabPlan, toStderr bool) {
+	w := os.Stdout
+	if toStderr {
+		w = os.Stderr
+	}
+	fmt.Fprintln(w)
+	for _, p := range plans {
+		fmt.Fprintln(w, "  "+p.crontab.DisplayName())
+		fmt.Fprintln(w, "    "+p.summary())
+		for _, l := range p.lines {
+			if l.action == actionUpdate {
+				fmt.Fprintf(w, "    L%d  %s: %s\n", l.line.LineNumber, l.label, strings.Join(l.changes, "; "))
+			}
+		}
+	}
+	fmt.Fprintln(w)
+}
+
 // finishSync shows one summary for all planned crontabs, asks once, then
 // applies the plans. It returns the number of crontabs that changed.
 func finishSync(plans []*crontabPlan) int {
@@ -613,36 +651,36 @@ func finishSync(plans []*crontabPlan) int {
 			todo = append(todo, p)
 		}
 	}
-	interactive := !isAutoDiscover && !isSilent
+	// --auto skips questions. --silent only hides status text; without --auto
+	// it still confirms before applying, so a schedule change cannot land
+	// with no prompt.
+	ask := !isAutoDiscover
 
 	quit := userAbortedSync
 	if len(todo) == 0 {
 		if quit {
 			printWarningText("Nothing was changed", false)
-		} else if interactive {
+		} else if ask {
 			printDoneText("Nothing to change", false)
+		} else if dryRun && !isSilent {
+			fmt.Fprintln(os.Stderr, "Nothing to change")
 		}
 		return 0
 	}
 
-	if interactive {
-		fmt.Println()
-		for _, p := range plans {
-			fmt.Println("  " + p.crontab.DisplayName())
-			fmt.Println("    " + p.summary())
-			for _, l := range p.lines {
-				if l.action == actionUpdate {
-					fmt.Printf("    L%d  %s: %s\n", l.line.LineNumber, l.label, strings.Join(l.changes, "; "))
-				}
-			}
-		}
-		fmt.Println()
+	if ask || (dryRun && isAutoDiscover && !isSilent) {
+		printPlanSummaries(plans, isAutoDiscover)
 	}
 	if dryRun {
-		printWarningText("Dry run: nothing was sent to Cronitor or written to the crontab", false)
+		msg := "Dry run: nothing was sent to Cronitor or written to the crontab"
+		if isAutoDiscover || isSilent {
+			fmt.Fprintln(os.Stderr, msg)
+		} else {
+			printWarningText(msg, false)
+		}
 		return len(todo)
 	}
-	if interactive {
+	if ask {
 		// After a quit, the summary shows the answers given so far, and the
 		// question defaults to no.
 		question, defaultYes := "Apply these changes?", true
@@ -1401,7 +1439,7 @@ func (m nameInputModel) View() string {
 	if m.state == "choosing" {
 		footer := "enter select · s skip · q quit"
 		if m.windows {
-			footer = "enter select · s skip · ctrl+d stop"
+			footer = "enter select · s skip · q skip · ctrl+d stop"
 		}
 		return "\n" + m.list.View() + "\n" + promptFooterStyle.Render(footer) + "\n"
 	}
@@ -1411,7 +1449,11 @@ func (m nameInputModel) View() string {
 	if m.err != nil {
 		sb.WriteString(fmt.Sprintf("    Error: %s\n", m.err))
 	}
-	sb.WriteString(promptFooterStyle.Render("enter save · esc back · ctrl+c quit") + "\n")
+	namingFooter := "enter save · esc back · ctrl+c quit · ctrl+d quit"
+	if m.windows {
+		namingFooter = "enter save · esc back · ctrl+c skip · ctrl+d stop"
+	}
+	sb.WriteString(promptFooterStyle.Render(namingFooter) + "\n")
 	return sb.String()
 }
 
@@ -1426,17 +1468,17 @@ func init() {
 	RootCmd.AddCommand(discoverCmd)
 
 	discoverCmd.Flags().BoolVar(&saveCrontabFile, "save", saveCrontabFile, "Save the updated crontab file")
-	discoverCmd.Flags().BoolVar(&dryRun, "dry-run", dryRun, "Show what sync would change. Sends nothing to Cronitor and does not write the crontab.")
+	discoverCmd.Flags().BoolVar(&dryRun, "dry-run", dryRun, "Show what Linux/macOS crontab sync would change. Sends nothing to Cronitor and does not write the crontab. Does not apply to --file or Windows scheduled-task sync.")
 	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from auto-generated monitor name e.g. $ cronitor sync -e '> /dev/null' -e '/path/to/app'")
 	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Set this alert list on new and existing monitors. Without it, sync sends no alert list: new monitors get Cronitor's default list and existing monitors keep theirs.")
-	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Ask nothing: monitor every new job, send schedule and timezone changes, write the crontab and print it to stdout.")
+	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Ask nothing: monitor every new job, send schedule and timezone changes, write the crontab, and print it to stdout even when nothing changed.")
 	discoverCmd.Flags().StringVar(&syncFormat, "format", "", "Line format on Unix. short: write every line as CRONITOR=<key> <command>, converting cronitor exec lines (lines with other exec flags stay as exec). exec: write every line as cronitor exec <key> <command> and restore the prior SHELL. Default: new lines short, existing lines unchanged.")
 	discoverCmd.Flags().BoolVar(&withMonitored, "with-monitored", false, "Also ask about jobs that are already monitored, for example to rename them. Ignored with --auto.")
 	discoverCmd.Flags().StringVar(&syncFile, "file", "", "Path to YAML or JSON file containing monitor definitions for bulk import")
 
-	discoverCmd.Flags().BoolVar(&isSilent, "silent", isSilent, "")
+	discoverCmd.Flags().BoolVar(&isSilent, "silent", isSilent, "Hide status messages. Does not skip the Apply prompt unless --auto is also set. With --auto, also skip printing the crontab.")
 	discoverCmd.Flags().MarkHidden("silent")
 
 	// Since 23.0 save is deprecated
