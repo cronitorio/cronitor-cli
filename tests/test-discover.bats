@@ -88,7 +88,7 @@ teardown() {
 # bash -c does not see this test's variables unless they are passed in.
 @test "Discover omits 'notifications' if notification-list not specificed" {
   run -1 env API_KEY="$API_KEY" FIXTURES_DIR="$FIXTURES_DIR" CRONITOR_ARGS="$CRONITOR_ARGS" \
-    bash -c '../cronitor $CRONITOR_ARGS discover --auto -v $FIXTURES_DIR/crontab.txt -k "$API_KEY" 2>&1 | grep -q "notifications"'
+    bash -c '../cronitor $CRONITOR_ARGS discover --auto -v $FIXTURES_DIR/crontab.txt -k "$API_KEY" 2>&1 | grep -q "\"notify\""'
 }
 
 @test "Discover includes custom notification-list" {
