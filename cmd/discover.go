@@ -149,10 +149,10 @@ func printOriginalCrontab(args []string) {
 	fmt.Println(text)
 }
 
-// redactAPIKeyArgs hides a Cronitor API key passed on the command line so
-// the dry-run reminder does not print it. Forms: -k X, -kX, -k=X,
-// --api-key X, --api-key=X, and -k with the value attached in a short
-// cluster such as -vkX.
+// redactAPIKeyArgs hides API and ping keys passed on the command line so
+// the dry-run reminder does not print them. Forms: -k X, -kX, -k=X,
+// --api-key X, --api-key=X, a short cluster such as -vkX or -vk=X, and the
+// same forms for -p / --ping-api-key (placeholder <ping-api-key>).
 func redactAPIKeyArgs(args []string) []string {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
@@ -161,56 +161,72 @@ func redactAPIKeyArgs(args []string) []string {
 			out = append(out, a)
 			continue
 		}
-		redacted, takeNext := redactAPIKeyToken(a)
+		redacted, next := redactAPIKeyToken(a)
 		out = append(out, redacted)
-		if takeNext && i+1 < len(args) {
+		if next != "" && i+1 < len(args) {
 			i++
-			out = append(out, "<api-key>")
+			out = append(out, next)
 		}
 	}
 	return out
 }
 
 // shortFlagTakesValue reports shorthands on sync whose value consumes the
-// rest of a combined short-flag cluster. k is handled by the caller.
+// rest of a combined short-flag cluster. k and p are handled by the caller.
 func shortFlagTakesValue(letter byte) bool {
 	switch letter {
-	case 'c', 'e', 'l', 'n', 'p', 'u':
+	case 'c', 'e', 'l', 'n', 'u':
 		return true
 	default:
 		return false
 	}
 }
 
-// redactAPIKeyToken redacts one argv element. takeNext is true when the
-// API key is the following argument.
-func redactAPIKeyToken(token string) (string, bool) {
+// redactAPIKeyToken redacts one argv element. next is the placeholder for
+// the following argument, or "" when this token already holds the value.
+func redactAPIKeyToken(token string) (string, string) {
 	switch {
 	case token == "--api-key" || token == "-k":
-		return token, true
+		return token, "<api-key>"
+	case token == "--ping-api-key" || token == "-p":
+		return token, "<ping-api-key>"
 	case strings.HasPrefix(token, "--api-key="):
-		return "--api-key=<api-key>", false
+		return "--api-key=<api-key>", ""
+	case strings.HasPrefix(token, "--ping-api-key="):
+		return "--ping-api-key=<ping-api-key>", ""
 	case strings.HasPrefix(token, "-k="):
-		return "-k=<api-key>", false
+		return "-k=<api-key>", ""
+	case strings.HasPrefix(token, "-p="):
+		return "-p=<ping-api-key>", ""
 	}
 	if !strings.HasPrefix(token, "-") || strings.HasPrefix(token, "--") || len(token) < 2 {
-		return token, false
+		return token, ""
 	}
 	body := token[1:]
 	for i := 0; i < len(body); i++ {
+		placeholder := ""
 		switch body[i] {
 		case 'k':
-			if i+1 < len(body) {
-				return token[:i+2] + "<api-key>", false
-			}
-			return token, true
+			placeholder = "<api-key>"
+		case 'p':
+			placeholder = "<ping-api-key>"
 		default:
 			if shortFlagTakesValue(body[i]) {
-				return token, false
+				return token, ""
 			}
+			continue
 		}
+		if i+1 >= len(body) {
+			return token, placeholder
+		}
+		// Keep the '=' in a cluster such as -vk=X.
+		end := i + 2
+		if body[i+1] == '=' {
+			end++
+		}
+		return token[:end] + placeholder, ""
 	}
-	return token, false
+	return token, ""
 }
 
 var syncFile string    // Path to YAML/JSON file for bulk monitor import
@@ -252,9 +268,11 @@ There are three ways to run sync:
 
   $ cronitor sync --auto
       > Asks nothing. Monitors every new job, sends schedule and timezone changes, and writes the crontab
-      > Prints the crontab to stdout even when nothing changed. On failure it exits 1
-        and prints the original crontab when it can read one. Use set -o pipefail
-        (or check the exit code) so a pipe does not install output from a failed run
+      > Prints the crontab to stdout even when nothing changed. Once sync has read the file,
+        a failure prints the original crontab and exits 1. A direct "| crontab -" pipe can
+        still install an empty crontab if sync fails before it can read the file, for example
+        when the file is missing or a flag is invalid. Capture the output first:
+        out=$(cronitor sync --auto file) && printf '%s\n' "$out" | crontab -
       > Use it to automate sync, not to pick up one schedule change: it also monitors every new job
 
   For a job that is already monitored, sync sends only what changed. Names, tags and alert lists set
@@ -1246,8 +1264,8 @@ func applyPlan(plan *crontabPlan) bool {
 	if err := configureShellShim(crontab, false); err != nil {
 		// The file is unchanged. --auto stdout must not print the planned
 		// crontab (SHELL= would point at a wrapper that was never installed).
-		// Print the original so `... | crontab -` without pipefail reinstalls
-		// a working crontab instead of an empty one; finishSync then exits 1.
+		// Print the original so a pipe to crontab reinstalls a working
+		// crontab instead of an empty one; finishSync then exits 1.
 		plan.output = crontab.Original()
 		if isAutoDiscover || isSilent {
 			fmt.Fprintln(os.Stderr, err.Error())
