@@ -22,6 +22,15 @@ import (
 // call Write; that skips the flag handling and the API round trip.
 func runSync(t *testing.T, serverURL, path string, extra ...string) string {
 	t.Helper()
+	return runSyncArgs(t, serverURL, path, append([]string{"--auto", "--silent"}, extra...)...)
+}
+
+// lastSyncStdout is what the last runSyncArgs printed on stdout.
+var lastSyncStdout string
+
+// runSyncArgs is runSync without --auto --silent, for the interactive path.
+func runSyncArgs(t *testing.T, serverURL, path string, extra ...string) string {
+	t.Helper()
 	lib.BaseURLOverride = serverURL + "/api"
 	viper.Set(varApiKey, "test-api-key-1234567890")
 	existingMonitors = ExistingMonitors{}
@@ -29,10 +38,16 @@ func runSync(t *testing.T, serverURL, path string, extra ...string) string {
 	dryRun = false
 	syncFormat = ""
 	noStdoutPassthru = false
+	isAutoDiscover = false
+	isSilent = false
+	withMonitored = false
 	_ = discoverCmd.Flags().Set("format", "")
 	_ = discoverCmd.Flags().Set("dry-run", "false")
 	_ = discoverCmd.Flags().Set("no-stdout", "false")
-	for _, name := range []string{"format", "dry-run", "no-stdout"} {
+	_ = discoverCmd.Flags().Set("auto", "false")
+	_ = discoverCmd.Flags().Set("silent", "false")
+	_ = discoverCmd.Flags().Set("with-monitored", "false")
+	for _, name := range []string{"format", "dry-run", "no-stdout", "auto", "silent", "with-monitored"} {
 		if f := discoverCmd.Flags().Lookup(name); f != nil {
 			f.Changed = false
 		}
@@ -50,7 +65,7 @@ func runSync(t *testing.T, serverURL, path string, extra ...string) string {
 	}
 
 	// Execute on the subcommand is ignored: cobra always runs from the root.
-	args := []string{"--config", cfg, "sync", "--auto", "--silent"}
+	args := []string{"--config", cfg, "sync"}
 	args = append(args, extra...)
 	args = append(args, path)
 	RootCmd.SetArgs(args)
@@ -71,6 +86,7 @@ func runSync(t *testing.T, serverURL, path string, extra ...string) string {
 	os.Stderr, os.Stdout = oldStderr, oldStdout
 	errText, _ := io.ReadAll(stderrR)
 	outText, _ := io.ReadAll(stdoutR)
+	lastSyncStdout = string(outText)
 	stderrR.Close()
 	stdoutR.Close()
 	if execErr != nil {
@@ -138,6 +154,7 @@ func withSyncFixture(t *testing.T) (serverURL, shimPath string) {
 		syncFormat = oldFormat
 		dryRun = oldDry
 		existingMonitors = oldMonitors
+		userAbortedSync = false
 		cfgFile = oldCfg
 		viper.Set(varApiKey, oldKey)
 		viper.Set(varConfig, oldCfg)
@@ -496,7 +513,8 @@ func TestSyncExecStyleQuotesCompoundShimLine(t *testing.T) {
 }
 
 func TestSyncNoStdoutRewritesShimLines(t *testing.T) {
-	serverURL, shimPath := withSyncFixture(t)
+	_, shimPath := withSyncFixture(t)
+	_, serverURL := newRerunAPI(t, `{"name":"abc","key":"abc","schedules":["0 * * * *"],"attributes":{"key":"abc","code":"abc"}}`)
 	path := writeCron(t, strings.Join([]string{
 		"CRONITOR_SHELL=/bin/bash",
 		"SHELL=" + shimPath,

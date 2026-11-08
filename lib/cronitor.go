@@ -51,12 +51,12 @@ type Monitor struct {
 		Code      string `json:"code"`
 	} `json:"attributes,omitempty"`
 	Name             string    `json:"name,omitempty"`
-	DefaultName      string    `json:"defaultName"`
+	DefaultName      string    `json:"defaultName,omitempty"`
 	Key              string    `json:"key"`
 	Schedules        *[]string `json:"schedules,omitempty"`
 	GraceSeconds     int       `json:"grace_seconds,omitempty"`
 	Platform         Platform  `json:"platform,omitempty"`
-	Tags             []string  `json:"tags"`
+	Tags             []string  `json:"tags,omitempty"`
 	Type             string    `json:"type"`
 	Code             string    `json:"code,omitempty"`
 	Timezone         string    `json:"timezone,omitempty"`
