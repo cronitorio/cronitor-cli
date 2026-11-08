@@ -273,6 +273,8 @@ There are three ways to run sync:
         still install an empty crontab if sync fails before it can read the file, for example
         when the file is missing or a flag is invalid. Capture the output first:
         out=$(cronitor sync --auto file) && printf '%s\n' "$out" | crontab -
+        Do not add --silent to that command: --auto --silent prints no crontab,
+        so the pipe would install an empty one.
       > Use it to automate sync, not to pick up one schedule change: it also monitors every new job
 
   For a job that is already monitored, sync sends only what changed. Names, tags and alert lists set
