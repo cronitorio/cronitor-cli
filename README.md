@@ -107,7 +107,7 @@ There are three ways to run sync:
 | `cronitor sync --auto` | nothing | yes | **all of them** |
 
 - Run plain `cronitor sync` again whenever you add jobs or change a schedule. It shows one summary with each change (for example `L3  Nightly backup: schedule 0 2 * * * → 30 3 * * *`) and asks once. If nothing changed, it asks nothing.
-- `--auto` is for scripts and pipelines. When you pass a single crontab file, it prints that crontab to stdout even if nothing changed, so `cronitor sync --auto file | crontab -` is safe. If the shell wrapper cannot be installed or the crontab cannot be saved, it prints the original crontab and exits 1. It also monitors every new job, so it is not the way to pick up one schedule change.
+- `--auto` is for scripts and pipelines. When you pass a single crontab file, it prints that crontab to stdout even if nothing changed, so `cronitor sync --auto file | crontab -` is safe. If the Cronitor API call fails, the shell wrapper cannot be installed, or the crontab cannot be saved, it prints the original crontab and exits 1. It also monitors every new job, so it is not the way to pick up one schedule change.
 - If any crontab fails to apply, in any mode, sync exits 1.
 - For a monitored job, sync sends only what changed. Names, tags and alert lists set in Cronitor are kept; alert lists change only with `--notification-list` (omitting the flag keeps existing lists; new monitors get Cronitor's default). A `# Name:` comment is updated to the name in Cronitor.
 - If a monitor was deleted in Cronitor, sync warns and does not create it again. A hand-written `CRONITOR=new-key` line for a monitor that was never created gets the same warning; create the monitor first, or remove the key and let sync add it.

@@ -111,9 +111,25 @@ var notificationList string
 var existingMonitors = ExistingMonitors{}
 var processingMultipleCrontabs = false
 var userAbortedSync = false // Set to true when user presses Ctrl+D to abort sync entirely
-var syncFile string         // Path to YAML/JSON file for bulk monitor import
-var syncFormat string       // --format: "", "short" or "exec"
-var withMonitored bool      // --with-monitored: also ask about jobs that are already monitored
+
+// stdoutIsCrontab is true while `cronitor sync --auto` handles one crontab
+// file and will print it on stdout. Verbose logs go to stderr so the pipe
+// cannot install log text or a partial crontab.
+var stdoutIsCrontab bool
+
+// reserveStdoutForCrontab reports whether this sync should keep stdout for
+// the crontab. Flags are already parsed when it runs (including from
+// initConfig, before the config file is logged).
+func reserveStdoutForCrontab(args []string) bool {
+	if runtime.GOOS == "windows" || !isAutoDiscover || isSilent {
+		return false
+	}
+	return len(args) > 0 && !isPathToDirectory(args[0])
+}
+
+var syncFile string    // Path to YAML/JSON file for bulk monitor import
+var syncFormat string  // --format: "", "short" or "exec"
+var withMonitored bool // --with-monitored: also ask about jobs that are already monitored
 
 // To deprecate this feature we are hijacking this flag that will trigger removal of auto-discover lines from existing user's crontabs.
 var noAutoDiscover = true
@@ -199,6 +215,7 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 		processingMultipleCrontabs = false
 		userAbortedSync = false
 		jobsNeedingSudo = 0
+		stdoutIsCrontab = false
 
 		if len(viper.GetString(varApiKey)) < 10 {
 			fatal(discoverMissingAPIKeyGuidance(), 1)
@@ -214,6 +231,14 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 		if syncFile != "" {
 			importMonitorsFromFile(syncFile)
 			return
+		}
+
+		// initConfig may already have set this so the config log stays off
+		// stdout. Set it again from the args Run received, and clear it
+		// when the command returns.
+		if reserveStdoutForCrontab(args) {
+			stdoutIsCrontab = true
+			defer func() { stdoutIsCrontab = false }()
 		}
 
 		var username string
@@ -296,7 +321,12 @@ On Unix, new jobs use a SHELL shim (CRONITOR=<key>; MONITORIO=<key> is also read
 			if importedCrontabs > 0 {
 				msg := "Reminder: This is a DRY-RUN. Integration is not complete."
 				next := "To complete integration, run:"
-				cmd := fmt.Sprintf("      %s --auto --silent", saveCommand)
+				// Same command without --dry-run. That is `cronitor sync`
+				// after an interactive dry run, or `cronitor sync --auto`
+				// when --auto was already set. --auto --silent is neither:
+				// --auto would monitor every new job, and with --silent it
+				// also skips printing the crontab.
+				cmd := "      " + saveCommand
 				if isAutoDiscover || isSilent {
 					fmt.Fprintln(os.Stderr, msg)
 					fmt.Fprintln(os.Stderr, next)
@@ -639,6 +669,7 @@ func finishSync(plans []*crontabPlan) int {
 	// When running --auto mode with a single crontab, you should be able to pipe or redirect crontab
 	// output elsewhere, so print it whether or not anything changed. Print first, then
 	// exit, so a failed apply still writes the original crontab before exitFn.
+	// applyPlan must return on failure. os.Exit skips this print.
 	applyFailed := false
 	defer func() {
 		if !isSilent && isAutoDiscover && !processingMultipleCrontabs {
@@ -1052,7 +1083,14 @@ func applyPlan(plan *crontabPlan) bool {
 		printDoneText("Sending to Cronitor", true)
 		sent, err := getCronitorApi().PutMonitors(monitors)
 		if err != nil {
-			fatal(err.Error(), 1)
+			// os.Exit here skips finishSync's deferred print, so
+			// `cronitor sync --auto file | crontab -` installs an empty
+			// crontab. Same as a shim or save failure: stdout gets the
+			// original crontab (not the planned rewrite) and the process
+			// exits 1.
+			plan.output = crontab.Original()
+			reportError(err.Error())
+			return false
 		}
 		// New monitors get their code from the response. Existing lines keep
 		// the key they have: it may be a hand-written key, not the code.

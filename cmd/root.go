@@ -111,12 +111,19 @@ func init() {
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
 	viper.AutomaticEnv() // read in environment variables that match
+	// ParseFlags has already run. Do this before logging the config path:
+	// with --verbose that line would otherwise precede the crontab on stdout.
+	stdoutIsCrontab = reserveStdoutForCrontab(discoverCmd.Flags().Args())
 	configFile := viper.GetString(varConfig)
 
 	// If a custom config file is specified by flag or env var, use it. Otherwise use default file.
 	if len(configFile) > 0 {
 		if len(configFile) < 5 || strings.ToLower(configFile[len(configFile)-5:]) != ".json" {
-			fmt.Println("Error: Config file must be a .json file")
+			if stdoutIsCrontab {
+				fmt.Fprintln(os.Stderr, "Error: Config file must be a .json file")
+			} else {
+				fmt.Println("Error: Config file must be a .json file")
+			}
 		}
 		viper.SetConfigFile(configFile)
 	} else {
@@ -483,11 +490,24 @@ func log(msg string) {
 	}
 
 	if verbose {
+		// sync --auto on one crontab file owns stdout (`... | crontab -`).
+		// Verbose text there would be installed as the crontab.
+		if stdoutIsCrontab {
+			fmt.Fprintln(os.Stderr, msg)
+			return
+		}
 		fmt.Println(msg)
 	}
 }
 
 func fatal(msg string, exitCode int) {
+	reportError(msg)
+	os.Exit(exitCode)
+}
+
+// reportError writes a redacted error to stderr and the debug log.
+// It does not exit, so a caller can still print a crontab on stdout.
+func reportError(msg string) {
 	msg = redactSecrets(msg)
 	debugLog := viper.GetString(varLog)
 	if len(debugLog) > 0 {
@@ -497,7 +517,6 @@ func fatal(msg string, exitCode int) {
 	}
 
 	fmt.Fprintln(os.Stderr, msg)
-	os.Exit(exitCode)
 }
 
 // redactSecrets removes remembered secrets and the configured API / ping keys

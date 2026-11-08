@@ -603,6 +603,66 @@ func TestSyncAutoPrintsOriginalWhenShimInstallFails(t *testing.T) {
 	}
 }
 
+// An API failure used to os.Exit inside applyPlan, skipping the deferred
+// print. `cronitor sync --auto file | crontab -` then installed an empty crontab.
+func TestSyncAutoPrintsOriginalWhenAPIFails(t *testing.T) {
+	withSyncFixture(t)
+	withNotificationList(t, "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			io.WriteString(w, `{"total_monitor_count":0,"page_size":50,"monitors":[]}`)
+			return
+		}
+		http.Error(w, "nope", http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	body := "0 2 * * * /usr/bin/backup.sh\n"
+	path := writeCron(t, body)
+
+	var code int
+	oldExit := exitFn
+	t.Cleanup(func() {
+		exitFn = oldExit
+		verbose = false
+		if f := RootCmd.PersistentFlags().Lookup("verbose"); f != nil {
+			_ = f.Value.Set("false")
+			f.Changed = false
+		}
+	})
+	exitFn = func(c int) { code = c }
+
+	// A previous test may have viper.Set the config path, which hides
+	// --config. Clear that so this run actually logs "Reading config".
+	viperUnset(varConfig)
+	// --verbose must not prefix the crontab with the config log or the
+	// request body. Those used to be written before os.Exit, so the pipe
+	// installed a partial crontab.
+	stderr := runSyncArgs(t, srv.URL, path, "--auto", "--verbose")
+
+	if code != 1 {
+		t.Fatalf("exit %d; want 1 after the API call fails", code)
+	}
+	if strings.TrimSpace(lastSyncStdout) == "" {
+		t.Fatal("stdout is empty; the pipe would install an empty crontab")
+	}
+	if strings.Contains(lastSyncStdout, "SHELL=") || strings.Contains(lastSyncStdout, "CRONITOR=") {
+		t.Fatalf("stdout is the planned crontab:\n%s", lastSyncStdout)
+	}
+	if strings.Contains(lastSyncStdout, "Reading config") || strings.Contains(lastSyncStdout, "Request:") {
+		t.Fatalf("stdout mixed with logs:\n%s", lastSyncStdout)
+	}
+	if strings.TrimSpace(lastSyncStdout) != strings.TrimSpace(body) {
+		t.Fatalf("stdout = %q; want the original crontab", lastSyncStdout)
+	}
+	if got := readCron(t, path); got != body {
+		t.Fatalf("crontab on disk changed:\n%s", got)
+	}
+	if !strings.Contains(stderr, "Error from") || !strings.Contains(stderr, "Request:") || !strings.Contains(stderr, "Reading config") {
+		t.Fatalf("stderr = %q; want the API error and the verbose logs", stderr)
+	}
+}
+
 func TestSyncSilentStillConfirms(t *testing.T) {
 	withSyncFixture(t)
 	withNotificationList(t, "")
