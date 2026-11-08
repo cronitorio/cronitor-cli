@@ -109,7 +109,7 @@ There are three ways to run sync:
 - Run plain `cronitor sync` again whenever you add jobs or change a schedule. It shows one summary with each change (for example `L3  Nightly backup: schedule 0 2 * * * → 30 3 * * *`) and asks once. If nothing changed, it asks nothing.
 - `--auto` is for scripts and pipelines. It also monitors every new job, so it is not the way to pick up one schedule change.
 - For a monitored job, sync sends only what changed. Names, tags and alert lists set in Cronitor are kept; alert lists change only with `--notification-list`. A `# Name:` comment is updated to the name in Cronitor.
-- If a monitor was deleted in Cronitor, sync warns and does not create it again.
+- If a monitor was deleted in Cronitor, sync warns and does not create it again. A hand-written `CRONITOR=new-key` line for a monitor that was never created gets the same warning; create the monitor first, or remove the key and let sync add it.
 - In the menu: enter selects, `s` skips, `q` quits. "Skip this job, don't ask again" adds `# cronitor: ignore` above the line.
 
 ### API Resources
