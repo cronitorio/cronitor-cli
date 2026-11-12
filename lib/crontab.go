@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kballard/go-shellquote"
 	"github.com/spf13/viper"
 )
 
@@ -41,12 +40,16 @@ type Crontab struct {
 	RewriteShimToExec       bool                  `json:"-"`
 	ConvertExec             bool                  `json:"-"` // sync --format=short
 	original                string                // the text Parse read
+	removedAutoDiscover     bool                  // Parse dropped an active legacy discover --auto line
 }
 
 // Original returns the crontab text as Parse read it.
 func (c Crontab) Original() string {
 	return c.original
 }
+
+// RemovedAutoDiscoverLine reports that Parse dropped an active legacy auto-discover line.
+func (c Crontab) RemovedAutoDiscoverLine() bool { return c.removedAutoDiscover }
 
 // isExampleCronLine checks if a line contains obvious placeholder/example text
 func isExampleCronLine(line string) bool {
@@ -114,7 +117,7 @@ func isValidCronExpression(line string) bool {
 	return true
 }
 
-func (c *Crontab) Parse(noAutoDiscover bool, discoverFlags ...string) (error, int) {
+func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 	lines, errCode, err := c.load()
 	if err != nil {
 		return err, errCode
@@ -127,8 +130,6 @@ func (c *Crontab) Parse(noAutoDiscover bool, discoverFlags ...string) (error, in
 
 	var name string
 	var ignored bool
-	var keptSchedule, keptRunAs string
-	emitted := false
 
 	for lineIndex, fullLine := range lines {
 		lineNumber := lineIndex + 1 // Convert to 1-indexed
@@ -281,21 +282,28 @@ func (c *Crontab) Parse(noAutoDiscover bool, discoverFlags ...string) (error, in
 		line.rawCommand = rawCommand
 		line.parsedCommand = line.CommandToRun
 
-		// Drop a discover --auto line. Opt-in emits one fresh line from flags already parsed.
+		// Active discover --auto lines are the old auto-discover plumbing. Sync
+		// removes them and does not install a replacement. A commented-out
+		// line is left byte-for-byte, including its leading #.
 		if line.IsAutoDiscoverCommand() {
-			if keptSchedule == "" {
-				keptSchedule = line.CronExpression
-				keptRunAs = line.RunAs
-			}
-			if !noAutoDiscover && !emitted {
-				c.Lines = append(c.Lines, createAutoDiscoverLine(c, keptSchedule, keptRunAs, discoverFlags))
-				emitted = true
-			}
-			if !noAutoDiscover && line.CronExpression != "" {
+			if isComment {
+				c.Lines = append(c.Lines, &Line{
+					IsComment:  true,
+					Name:       name,
+					FullLine:   lines[lineIndex],
+					LineNumber: lineNumber,
+					Ignored:    ignored,
+					verbatim:   true,
+					Crontab:    c.lightweightCopy(),
+				})
 				name = ""
 				ignored = false
+				continue
 			}
-			continue
+			if noAutoDiscover {
+				c.removedAutoDiscover = true
+				continue
+			}
 		}
 
 		// Reset the name and ignored for the next line after we've found its command line
@@ -305,10 +313,6 @@ func (c *Crontab) Parse(noAutoDiscover bool, discoverFlags ...string) (error, in
 		}
 
 		c.Lines = append(c.Lines, &line)
-	}
-
-	if !noAutoDiscover && !emitted {
-		c.Lines = append(c.Lines, createAutoDiscoverLine(c, "", "", discoverFlags))
 	}
 
 	if IsShimShellPath(c.Shell) {
@@ -489,6 +493,7 @@ type Line struct {
 	marker         string   // shim: CRONITOR= or MONITORIO=, as parsed
 	shimSettings   []string // shim: CRONITOR_ENV=... words after the key
 	Integration    string   `json:"-"`
+	verbatim       bool     // write FullLine unchanged; a commented-out auto-discover line
 }
 
 func (l Line) IsMonitorable() bool {
@@ -538,6 +543,11 @@ func (l Line) writeUsing(c Crontab) string {
 	// Add the name comment if present
 	if len(l.Name) > 0 {
 		outputLines = append(outputLines, fmt.Sprintf("# Name: %s", l.Name))
+	}
+
+	if l.verbatim {
+		outputLines = append(outputLines, l.FullLine)
+		return strings.Join(outputLines, "\n")
 	}
 
 	if !l.IsMonitorable() {
@@ -923,41 +933,6 @@ func (l Line) GetEnvVarValue() string {
 		return strings.TrimSpace(parts[1])
 	}
 	return ""
-}
-
-func autoDiscoverCommand(crontab *Crontab, flags []string) string {
-	bin := "cronitor"
-	if len(os.Args) > 0 && os.Args[0] != "" {
-		bin = os.Args[0]
-	}
-	args := append([]string{bin, "jobs", "discover", "--auto"}, flags...)
-	if !crontab.IsUserCrontab && crontab.Filename != "" {
-		args = append(args, crontab.CanonicalName())
-	}
-	return shellquote.Join(args...)
-}
-
-func createAutoDiscoverLine(crontab *Crontab, schedule, runAs string, flags []string) *Line {
-	if schedule == "" {
-		schedule = fmt.Sprintf("%d * * * *", randomMinute())
-		if crontab.UsesSixFieldExpressions {
-			schedule = "* " + schedule
-		}
-	}
-	cmd := autoDiscoverCommand(crontab, flags)
-	parts := []string{schedule}
-	if !crontab.IsUserCrontab && runAs != "" {
-		parts = append(parts, runAs)
-	}
-	parts = append(parts, cmd)
-	return &Line{
-		IsJob:          true,
-		CronExpression: schedule,
-		CommandToRun:   cmd,
-		RunAs:          runAs,
-		FullLine:       strings.Join(parts, " "),
-		Crontab:        crontab.lightweightCopy(),
-	}
 }
 
 func isSixFieldCronExpression(splitLine []string) bool {

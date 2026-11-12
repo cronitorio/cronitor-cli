@@ -382,6 +382,19 @@ func commandFieldOf(crontabLine string) string {
 	return skipWSFields(line, fields)
 }
 
+func TestLegacyAutoDiscoverLine(t *testing.T) {
+	commented := " #15 * * * * batchjob cronitor discover --auto /etc/crontab"
+	got := parseContent(t, strings.Join([]string{
+		"15 * * * * cronitor discover --auto /etc/crontab",
+		commented,
+		"0 1 * * * root echo hello",
+	}, "\n")).Write()
+	want := commented + "\n0 1 * * * root echo hello\n"
+	if got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func requireShSyntax(t *testing.T, commandField string) {
 	t.Helper()
 	if _, err := exec.LookPath("sh"); err != nil {

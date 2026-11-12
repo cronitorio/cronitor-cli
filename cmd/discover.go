@@ -233,9 +233,6 @@ var syncFile string    // Path to YAML/JSON file for bulk monitor import
 var syncFormat string  // --format: "", "short" or "exec"
 var withMonitored bool // --with-monitored: also ask about jobs that are already monitored
 
-// To deprecate this feature we are hijacking this flag that will trigger removal of auto-discover lines from existing user's crontabs.
-var noAutoDiscover = true
-
 func discoverMissingAPIKeyGuidance() string {
 	return fmt.Sprintf("\n%s\n\n%s Run %s to sign in with device authorization (%s is an alias).\n\n%s Copy an SDK key from https://cronitor.io/app/settings/api and save it with %s\n\n",
 		color.New(color.FgRed, color.Bold).Sprint("Add your API key before running sync."),
@@ -955,38 +952,6 @@ var askAboutJob = func(line *lib.Line, name string, monitored bool) promptResult
 	return promptResult{choice: choiceMonitor, name: finalModel.textInput.Value()}
 }
 
-func autoDiscoverFlagArgs() []string {
-	args := []string{"--no-auto-discover=false"}
-	for _, pair := range [][2]string{
-		{"config", cfgFile}, {"env", environment}, {"api-key", apiKey}, {"ping-api-key", pingApiKey},
-		{"ping-api-host", pingApiHostFlag}, {"hostname", hostname}, {"log", debugLog}, {"users", users},
-		{"notification-list", notificationList}, {"format", syncFormat},
-	} {
-		if pair[1] != "" {
-			args = append(args, "--"+pair[0], pair[1])
-		}
-	}
-	if f := RootCmd.PersistentFlags().Lookup("api-version"); f != nil && f.Changed && f.Value.String() != "" {
-		args = append(args, "--api-version", f.Value.String())
-	}
-	if verbose {
-		args = append(args, "--verbose")
-	}
-	if noStdoutPassthru {
-		args = append(args, "--no-stdout")
-	}
-	if dev {
-		args = append(args, "--use-dev")
-	}
-	if isSilent {
-		args = append(args, "--silent")
-	}
-	for _, text := range excludeFromName {
-		args = append(args, "--exclude-from-name", text)
-	}
-	return args
-}
-
 // planCrontab reads a crontab and decides what to do with each job. It
 // returns nil when a crontab is skipped. One named file that does not exist
 // or is not writable is an unusable plan: sync prints the original crontab
@@ -1004,7 +969,7 @@ func planCrontab(crontab *lib.Crontab) *crontabPlan {
 	}
 
 	// This will mostly happen when the crontab is empty
-	if err, _ := crontab.Parse(noAutoDiscover, autoDiscoverFlagArgs()...); err != nil {
+	if err, _ := crontab.Parse(true); err != nil {
 		// A named file that cannot be read is a failure. There is nothing
 		// to print. An empty crontab is still a skip: installing it changes
 		// nothing. Scanning many crontabs keeps the old skip.
@@ -1316,6 +1281,9 @@ func applyPlan(plan *crontabPlan) bool {
 	if !dryRun && changed {
 		if err := crontab.Save(updatedCrontabLines); err == nil {
 			plan.output = updatedCrontabLines
+			if crontab.RemovedAutoDiscoverLine() {
+				fmt.Fprintln(os.Stderr, "Removed the old auto-discover line. Auto-discover is no longer supported.")
+			}
 			if !isSilent {
 				printDoneText("Integration complete", true)
 			}
@@ -1715,7 +1683,6 @@ func init() {
 	discoverCmd.Flags().BoolVar(&saveCrontabFile, "save", saveCrontabFile, "Save the updated crontab file")
 	discoverCmd.Flags().BoolVar(&dryRun, "dry-run", dryRun, "Show what Linux/macOS crontab sync would change. Sends nothing to Cronitor and does not write the crontab. Does not apply to --file or Windows scheduled-task sync.")
 	discoverCmd.Flags().StringArrayVarP(&excludeFromName, "exclude-from-name", "e", excludeFromName, "Substring to exclude from auto-generated monitor name e.g. $ cronitor jobs sync -e '> /dev/null' -e '/path/to/app'")
-	discoverCmd.Flags().BoolVar(&noAutoDiscover, "no-auto-discover", noAutoDiscover, "Do not attach an automatic discover job to this crontab, or remove if already attached.")
 	discoverCmd.Flags().BoolVar(&noStdoutPassthru, "no-stdout", noStdoutPassthru, "Do not send cron job output to Cronitor when your job completes.")
 	discoverCmd.Flags().StringVar(&notificationList, "notification-list", notificationList, "Set this alert list on new and existing monitors. Without it, sync sends no alert list: new monitors get Cronitor's default list and existing monitors keep theirs.")
 	discoverCmd.Flags().BoolVar(&isAutoDiscover, "auto", isAutoDiscover, "Ask nothing: monitor every new job, send schedule and timezone changes, write the crontab, and print it to stdout even when nothing changed.")
@@ -1729,9 +1696,5 @@ func init() {
 	// Since 23.0 save is deprecated
 	discoverCmd.Flags().MarkDeprecated("save", "save will now happen automatically when the --dry-run flag is not used")
 	discoverCmd.Flags().MarkHidden("save")
-
-	// Since 24.0 no auto discover is deprecated
-	discoverCmd.Flags().MarkDeprecated("no-auto-discover", "the auto-discover feature has been removed")
-	discoverCmd.Flags().MarkHidden("no-auto-discover")
 
 }
