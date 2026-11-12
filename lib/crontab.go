@@ -286,8 +286,16 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			}
 			// Opt-in only (--no-auto-discover=false). The default removes this
 			// line and does not add one. The monitor key ignores command text.
+			// Write() emits FullLine when the command is not monitorable
+			// (meta-cron fragments, cronitor.link), so the rewrite has to land there.
 			if !strings.Contains(line.CommandToRun, "jobs discover --auto") {
 				line.CommandToRun = autoDiscoverCommand(c)
+				parts := []string{line.CronExpression}
+				if !c.IsUserCrontab && line.RunAs != "" {
+					parts = append(parts, line.RunAs)
+				}
+				parts = append(parts, line.CommandToRun)
+				line.FullLine = strings.Join(parts, " ")
 			}
 		}
 
@@ -920,13 +928,19 @@ func (l Line) GetEnvVarValue() string {
 }
 
 // autoDiscoverCommand is the hidden opt-in plumbing command. sync is written
-// as discover so IsAutoDiscoverCommand still matches. The first sync or
-// discover token after jobs is the subcommand.
+// as discover so IsAutoDiscoverCommand still matches. The subcommand is the
+// sync or discover token after jobs; a flag value in that position is not it.
 func autoDiscoverCommand(crontab *Crontab) string {
 	args := make([]string, 0, len(os.Args)+1)
 	seenJobs := false
 	replaced := false
+	skipValue := false
 	for _, arg := range os.Args {
+		if skipValue {
+			args = append(args, arg)
+			skipValue = false
+			continue
+		}
 		if arg == "--auto" || strings.HasPrefix(arg, "--auto=") {
 			continue
 		}
@@ -939,6 +953,9 @@ func autoDiscoverCommand(crontab *Crontab) string {
 			seenJobs = true
 		}
 		args = append(args, arg)
+		if seenJobs && !replaced && flagTakesValue(arg) {
+			skipValue = true
+		}
 	}
 
 	commandToRun := strings.Join(args, " ")
@@ -951,6 +968,30 @@ func autoDiscoverCommand(crontab *Crontab) string {
 		commandToRun = strings.Replace(commandToRun, crontab.Filename, crontab.CanonicalName(), -1)
 	}
 	return commandToRun
+}
+
+// flagTakesValue reports whether this argv token is a flag whose next token is
+// its value. Bool flags and --flag=value do not consume the next token.
+func flagTakesValue(arg string) bool {
+	if len(arg) < 2 || arg[0] != '-' || strings.Contains(arg, "=") {
+		return false
+	}
+	name := arg
+	if strings.HasPrefix(arg, "--") {
+		name = arg[2:]
+	} else if len(arg) == 2 {
+		name = arg[1:]
+	} else {
+		return false
+	}
+	switch name {
+	case "config", "c", "env", "api-key", "k", "ping-api-key", "p", "ping-api-host",
+		"hostname", "n", "log", "l", "users", "u", "api-version",
+		"exclude-from-name", "e", "notification-list", "format", "file":
+		return true
+	default:
+		return false
+	}
 }
 
 func createAutoDiscoverLine(crontab *Crontab) *Line {

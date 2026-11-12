@@ -2,6 +2,7 @@ package lib
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -261,5 +262,29 @@ func TestCreateAutoDiscoverLineTargetsJobsSubcommand(t *testing.T) {
 	line := createAutoDiscoverLine(&Crontab{})
 	if !strings.Contains(line.CommandToRun, "jobs discover --auto") || strings.Contains(line.CommandToRun, " sync") {
 		t.Fatalf("sync invocation = %q", line.CommandToRun)
+	}
+
+	// The rewritten command is not monitorable (cron.daily and cronitor.link),
+	// and the hostname value sync sits where a naive scan would see the subcommand.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cron.daily")
+	body := "15 * * * * cronitor discover --auto /etc/crontab\n0 * * * * echo hello\n"
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	os.Args = []string{
+		"cronitor", "jobs", "--hostname", "sync", "sync", "--auto",
+		"--no-auto-discover=false", "--ping-api-host", "eu.cronitor.link", path,
+	}
+	ct := CrontabFactory("rewrite", path)
+	if err, code := ct.Parse(false); err != nil {
+		t.Fatalf("parse: %v (%d)", err, code)
+	}
+	written := ct.Write()
+	if strings.Contains(written, "cronitor discover --auto") || !strings.Contains(written, "jobs --hostname sync discover --auto") || !strings.Contains(written, "echo hello") {
+		t.Fatalf("rewrite = %q", written)
+	}
+	if strings.Contains(written, "--hostname discover") || strings.Contains(written, "discover --auto sync") {
+		t.Fatalf("flag value consumed as the subcommand: %q", written)
 	}
 }
