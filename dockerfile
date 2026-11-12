@@ -22,4 +22,4 @@ RUN case "${TARGETARCH}" in amd64|arm64|arm) ;; \
 
 EXPOSE 9000
 
-CMD ["cronitor", "dash", "--port", "9000"]
+CMD ["cronitor", "jobs", "dash", "--port", "9000"]

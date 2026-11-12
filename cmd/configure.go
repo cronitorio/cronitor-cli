@@ -78,7 +78,7 @@ Example setting your API key (preferred):
   $ export CRONITOR_API_KEY
   $ cronitor configure
 
-Example setting common exclude text for use with 'cronitor discover':
+Example setting common exclude text for use with 'cronitor jobs sync':
   $ cronitor configure -e "/var/app/code/path/" -e "/var/app/bin/" -e "> /dev/null"`,
 	Run: func(cmd *cobra.Command, args []string) {
 		clearManagedAuthMetadataIfReplacingKey(cmd)

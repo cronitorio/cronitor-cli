@@ -65,12 +65,12 @@ You can add per-server instructions in your MCP configuration file. This is usef
   "mcpServers": {
     "cronitor": {
       "command": "cronitor",
-      "args": ["dash", "--mcp-instance", "default"],
+      "args": ["jobs", "dash", "--mcp-instance", "default"],
       "description": "Local Cronitor dashboard - Use for development cron jobs"
     },
     "cronitor-production": {
       "command": "cronitor",
-      "args": ["dash", "--mcp-instance", "production"],
+      "args": ["jobs", "dash", "--mcp-instance", "production"],
       "description": "Production Cronitor - CAUTION: Changes affect live system!"
     }
   }
@@ -84,11 +84,11 @@ Some tools also support an `instructions` field for more detailed guidance:
   "mcpServers": {
     "cronitor": {
       "command": "cronitor",
-      "args": ["dash", "--mcp-instance", "default"]
+      "args": ["jobs", "dash", "--mcp-instance", "default"]
     },
     "cronitor-production": {
       "command": "cronitor",
-      "args": ["dash", "--mcp-instance", "production"]
+      "args": ["jobs", "dash", "--mcp-instance", "production"]
     }
   },
   "instructions": {

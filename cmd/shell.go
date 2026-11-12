@@ -12,10 +12,10 @@ var shellCmd = &cobra.Command{
 	Use:   "shell",
 	Short: "Run commands from a cron-like shell",
 	Long: `
-Cronitor shell allows you to run commands like cron does. Commands run from the prompt start from your home directory, with reduced shell functionality and no shared environment variables.
+cronitor jobs shell runs commands like cron does. Commands run from the prompt start from your home directory, with reduced shell functionality and no shared environment variables.
 
 Example:
-  $ cronitor shell
+  $ cronitor jobs shell
   ~ $ <enter any command here>
 	`,
 
@@ -72,5 +72,5 @@ Example:
 }
 
 func init() {
-	RootCmd.AddCommand(shellCmd)
+	jobsCmd.AddCommand(shellCmd)
 }

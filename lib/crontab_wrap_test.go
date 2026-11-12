@@ -47,7 +47,10 @@ func TestWrapDetection(t *testing.T) {
 		{"suffix is not the binary", `0 * * * * notcronitor exec abc /bin/true`, "", "notcronitor exec abc /bin/true", false},
 		{"cronitor-helper", `0 * * * * cronitor-helper exec abc /bin/true`, "", "cronitor-helper exec abc /bin/true", false},
 		{"unknown flag takes no value", `0 * * * * cronitor --bogus v exec k1 /bin/true`, "", "cronitor --bogus v exec k1 /bin/true", false},
-		{"discover subcommand", `30 * * * * cronitor discover /etc/crontab`, "", "cronitor discover /etc/crontab", false},
+		{"historical discover line", `30 * * * * cronitor discover /etc/crontab`, "", "cronitor discover /etc/crontab", false},
+		{"jobs discover", `30 * * * * cronitor jobs discover /etc/crontab`, "", "cronitor jobs discover /etc/crontab", false},
+		{"jobs sync", `30 * * * * cronitor jobs sync /etc/crontab`, "", "cronitor jobs sync /etc/crontab", false},
+		{"jobs dash", `30 * * * * cronitor jobs dash`, "", "cronitor jobs dash", false},
 		{"simple quotes kept", `0 * * * * cronitor exec abc echo "hi there"`, "abc", `echo "hi there"`, true},
 		{"quoted simple word kept", `0 * * * * cronitor exec k1 'my script.sh'`, "k1", `'my script.sh'`, true},
 		{"escaped word kept", `0 * * * * cronitor exec k1 \%`, "k1", `\%`, true},
@@ -377,6 +380,60 @@ func commandFieldOf(crontabLine string) string {
 		fields = 1
 	}
 	return skipWSFields(line, fields)
+}
+
+func TestLegacyAutoDiscoverLine(t *testing.T) {
+	kept := []string{
+		"0 * * * * echo discover --auto",
+		"0 * * * * rediscover --auto",
+		"0 * * * * discover --auto-prune",
+		"0 * * * * /opt/acme/bin/discover --auto-scale",
+		"0 * * * * ./rediscover --automatic --x",
+		"0 * * * * echo 'run discover --auto later' >> /tmp/log",
+	}
+	removed := []string{
+		"15 * * * * cronitor discover --auto /etc/crontab",
+		"15 * * * * /usr/local/bin/cronitor discover --auto /etc/crontab",
+		"15 * * * * root cronitor discover --auto /etc/crontab",
+		"15 * * * * cronitor jobs discover --auto /etc/crontab",
+		"15 * * * * cronitor exec abc123 cronitor discover --auto /etc/crontab",
+		"15 * * * * cronitor --hostname db1 discover --auto /etc/crontab",
+		"0 1 * * * root echo hello",
+	}
+	tests := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{
+			name: "legacy lines removed",
+			in:   removed,
+			want: "0 1 * * * root echo hello\n",
+		},
+		{
+			name: "similar user jobs kept",
+			in:   kept,
+			want: strings.Join(kept, "\n") + "\n",
+		},
+		{
+			name: "name and ignore do not carry to the next job",
+			in: []string{
+				"# Name: Auto discover",
+				"# cronitor: ignore",
+				"15 * * * * cronitor discover --auto /etc/crontab",
+				"0 1 * * * echo next",
+			},
+			want: "0 1 * * * echo next\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseContent(t, strings.Join(tc.in, "\n")).Write()
+			if got != tc.want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+		})
+	}
 }
 
 func requireShSyntax(t *testing.T, commandField string) {
