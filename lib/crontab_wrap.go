@@ -84,6 +84,85 @@ var cronitorBoolFlags = map[string]bool{
 	"help":      true, "h": true,
 }
 
+// isLegacyAutoDiscoverCommand reports the plumbing line the old CLI wrote.
+// Tokens, not a substring: [cronitor exec <key>] <cronitor-binary>
+// [global flags] [jobs] discover --auto. --auto-scale is not --auto.
+func isLegacyAutoDiscoverCommand(command string) bool {
+	return legacyAutoDiscoverAt(strings.Fields(command), 0)
+}
+
+func legacyAutoDiscoverAt(words []string, i int) bool {
+	if i >= len(words) || !cronitorBasename(words[i]) {
+		return false
+	}
+	j := skipCronitorFlags(words, i+1)
+	if j < len(words) && words[j] == "exec" {
+		j++
+		j = skipCronitorFlags(words, j)
+		if j >= len(words) || strings.HasPrefix(words[j], "-") {
+			return false
+		}
+		return legacyDiscoverCommand(words, j+1)
+	}
+	return legacyDiscoverCommand(words, i)
+}
+
+func legacyDiscoverCommand(words []string, i int) bool {
+	if i >= len(words) || !cronitorBasename(words[i]) {
+		return false
+	}
+	i = skipCronitorFlags(words, i+1)
+	if i < len(words) && words[i] == "jobs" {
+		i = skipCronitorFlags(words, i+1)
+	}
+	if i >= len(words) || words[i] != "discover" {
+		return false
+	}
+	return i+1 < len(words) && words[i+1] == "--auto"
+}
+
+func cronitorBasename(token string) bool {
+	return path.Base(token) == "cronitor"
+}
+
+func knownCronitorGlobalFlag(tok string) bool {
+	if !strings.HasPrefix(tok, "-") || tok == "-" || tok == "--" {
+		return false
+	}
+	name, _, _ := strings.Cut(tok, "=")
+	if strings.HasPrefix(name, "--") {
+		name = strings.TrimPrefix(name, "--")
+		return cronitorValueFlags[name] || cronitorBoolFlags[name]
+	}
+	name = strings.TrimPrefix(name, "-")
+	if name == "" {
+		return false
+	}
+	if cronitorValueFlags[name] || cronitorBoolFlags[name] {
+		return true
+	}
+	return len(name) > 1 && cronitorValueFlags[name[:1]]
+}
+
+// skipCronitorFlags advances past global flags. A value flag consumes the
+// next word unless the value is attached with "=" or a short cluster.
+func skipCronitorFlags(words []string, i int) int {
+	for i < len(words) && knownCronitorGlobalFlag(words[i]) {
+		tok := words[i]
+		name := tok
+		if eq := strings.IndexByte(name, '='); eq >= 0 {
+			name = name[:eq]
+		}
+		attached := strings.Contains(tok, "=") || (!strings.HasPrefix(tok, "--") && len(tok) > 2)
+		if !attached && cronitorValueFlags[strings.TrimLeft(name, "-")] && i+1 < len(words) {
+			i += 2
+			continue
+		}
+		i++
+	}
+	return i
+}
+
 // unwrapCronitorExec parses `cronitor [flags] exec [flags] <key> [command]`.
 // prefix is the original text through the key so Write can emit it unchanged.
 func unwrapCronitorExec(raw string) (code, command, prefix string, noStdout, ok bool) {

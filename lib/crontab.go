@@ -302,6 +302,7 @@ func (c *Crontab) Parse(noAutoDiscover bool) (error, int) {
 			}
 			if noAutoDiscover {
 				c.removedAutoDiscover = true
+				name, ignored = "", false
 				continue
 			}
 		}
@@ -501,9 +502,21 @@ func (l Line) IsMonitorable() bool {
 	return l.IsJob && !l.IsMetaCronJob() && !l.HasLegacyIntegration()
 }
 
+// IsAutoDiscoverCommand reports the auto-discover line the old CLI installed.
+// After an optional run-as user and an optional "cronitor exec <key>" wrapper,
+// the command is a cronitor binary, optional global flags, an optional jobs,
+// the word discover, and the word --auto.
 func (l Line) IsAutoDiscoverCommand() bool {
-	matched, _ := regexp.MatchString(".+discover[[:space:]]+--auto.*", strings.ToLower(l.CommandToRun))
-	return matched
+	cmd := l.rawCommand
+	if cmd == "" {
+		cmd = l.CommandToRun
+	}
+	if isLegacyAutoDiscoverCommand(cmd) {
+		return true
+	}
+	// A passwd account named cronitor is taken as the run-as user, which
+	// hides the binary. Put that word back and test the same shape.
+	return l.RunAs != "" && isLegacyAutoDiscoverCommand(l.RunAs+" "+cmd)
 }
 
 func (l Line) HasLegacyIntegration() bool {

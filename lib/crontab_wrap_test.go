@@ -383,15 +383,56 @@ func commandFieldOf(crontabLine string) string {
 }
 
 func TestLegacyAutoDiscoverLine(t *testing.T) {
-	commented := " #15 * * * * batchjob cronitor discover --auto /etc/crontab"
-	got := parseContent(t, strings.Join([]string{
+	kept := []string{
+		"0 * * * * echo discover --auto",
+		"0 * * * * rediscover --auto",
+		"0 * * * * discover --auto-prune",
+		"0 * * * * /opt/acme/bin/discover --auto-scale",
+		"0 * * * * ./rediscover --automatic --x",
+		"0 * * * * echo 'run discover --auto later' >> /tmp/log",
+	}
+	removed := []string{
 		"15 * * * * cronitor discover --auto /etc/crontab",
-		commented,
+		"15 * * * * /usr/local/bin/cronitor discover --auto /etc/crontab",
+		"15 * * * * root cronitor discover --auto /etc/crontab",
+		"15 * * * * cronitor jobs discover --auto /etc/crontab",
+		"15 * * * * cronitor exec abc123 cronitor discover --auto /etc/crontab",
+		"15 * * * * cronitor --hostname db1 discover --auto /etc/crontab",
 		"0 1 * * * root echo hello",
-	}, "\n")).Write()
-	want := commented + "\n0 1 * * * root echo hello\n"
-	if got != want {
-		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+	tests := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{
+			name: "legacy lines removed",
+			in:   removed,
+			want: "0 1 * * * root echo hello\n",
+		},
+		{
+			name: "similar user jobs kept",
+			in:   kept,
+			want: strings.Join(kept, "\n") + "\n",
+		},
+		{
+			name: "name and ignore do not carry to the next job",
+			in: []string{
+				"# Name: Auto discover",
+				"# cronitor: ignore",
+				"15 * * * * cronitor discover --auto /etc/crontab",
+				"0 1 * * * echo next",
+			},
+			want: "0 1 * * * echo next\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseContent(t, strings.Join(tc.in, "\n")).Write()
+			if got != tc.want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+		})
 	}
 }
 

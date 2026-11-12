@@ -139,7 +139,7 @@ func TestCreateDefaultName(t *testing.T) {
 			"/var/some/command arg1 arg2"},
 
 		{"auto discover name is created",
-			"cronitor d3x0c1 cronitor discover --auto /discover/test",
+			"cronitor exec d3x0c1 cronitor discover --auto /discover/test",
 			"",
 			11,
 			"localhost",
@@ -205,7 +205,7 @@ func TestCreateDefaultName(t *testing.T) {
 
 func TestCreateDefaultNameAutoDiscover(t *testing.T) {
 	line := &lib.Line{
-		CommandToRun: "cronitor d3x0c1 cronitor discover --auto /discover/test",
+		CommandToRun: "cronitor exec d3x0c1 cronitor discover --auto /discover/test",
 		LineNumber:   11,
 		RunAs:        "",
 	}
