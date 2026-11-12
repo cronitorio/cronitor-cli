@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/cronitorio/cronitor-cli/lib"
+	"github.com/kballard/go-shellquote"
 )
 
 func TestCreateDefaultNameHasAddCandidateSideEffect(t *testing.T) {
@@ -257,4 +260,52 @@ func TestHasMonitorByNameSkipsCurrent(t *testing.T) {
 	if !em.HasMonitorByName("Other") {
 		t.Fatal("HasMonitorByName missed a different monitor's name")
 	}
+}
+
+func TestOptInAutoDiscoverLine(t *testing.T) {
+	t.Cleanup(resetSyncFlags)
+	legacy := "15 * * * * cronitor discover --auto /etc/crontab\n"
+	for _, tc := range []struct {
+		name, file, extra, host, ping string
+		argv                          []string
+		rel                           bool
+	}{
+		{"meta-link", "cron.daily", "0 * * * * echo hello\n", "", "eu.cronitor.link", []string{"jobs", "sync", "--no-auto-discover=false", "--ping-api-host", "eu.cronitor.link"}, false},
+		{"hostname-sync", "crontab", "", "sync", "", []string{"jobs", "--hostname", "sync", "sync", "--no-auto-discover=false"}, false},
+		{"vn-sync", "crontab", "", "sync", "", []string{"jobs", "-vn", "sync", "sync", "--no-auto-discover=false"}, false},
+		{"relative-jobs", "jobs", "", "", "", []string{"jobs", "sync", "--no-auto-discover=false"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, tc.file), []byte(legacy+tc.extra), 0644); err != nil {
+				t.Fatal(err)
+			}
+			filename := filepath.Join(dir, tc.file)
+			if tc.rel {
+				t.Chdir(dir)
+				filename = tc.file
+			}
+			resetSyncFlags()
+			cmd, rest, err := RootCmd.Find(append(append([]string{}, tc.argv...), filename))
+			if err != nil || cmd != discoverCmd || cmd.ParseFlags(rest) != nil {
+				t.Fatal(err)
+			}
+			ct := lib.CrontabFactory("rewrite", filename)
+			if err, code := ct.Parse(false, autoDiscoverFlagArgs()...); err != nil {
+				t.Fatalf("%v %d", err, code)
+			}
+			got := ct.Write()
+			words, err := shellquote.Split(strings.TrimPrefix(strings.Split(got, "\n")[0], "15 * * * * "))
+			abs, _ := filepath.Abs(filename)
+			if err != nil || len(words) < 4 || words[1] != "jobs" || words[2] != "discover" || words[3] != "--auto" || words[len(words)-1] != abs || strings.Contains(got, "/etc/crontab") || strings.Count(got, "discover --auto") != 1 || tc.host != "" && !strings.Contains(got, "--hostname "+tc.host) || tc.ping != "" && !strings.Contains(got, tc.ping) || tc.extra != "" && !strings.Contains(got, "echo hello") {
+				t.Fatal(got)
+			}
+		})
+	}
+}
+
+func resetSyncFlags() {
+	hostname, pingApiHostFlag, environment, users, apiKey, pingApiKey, debugLog, cfgFile = "", "", "", "", "", "", "", ""
+	notificationList, syncFormat, excludeFromName = "", "", nil
+	verbose, noStdoutPassthru, noAutoDiscover, dev, isSilent = false, false, true, false, false
 }

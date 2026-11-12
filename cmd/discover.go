@@ -955,6 +955,38 @@ var askAboutJob = func(line *lib.Line, name string, monitored bool) promptResult
 	return promptResult{choice: choiceMonitor, name: finalModel.textInput.Value()}
 }
 
+func autoDiscoverFlagArgs() []string {
+	args := []string{"--no-auto-discover=false"}
+	for _, pair := range [][2]string{
+		{"config", cfgFile}, {"env", environment}, {"api-key", apiKey}, {"ping-api-key", pingApiKey},
+		{"ping-api-host", pingApiHostFlag}, {"hostname", hostname}, {"log", debugLog}, {"users", users},
+		{"notification-list", notificationList}, {"format", syncFormat},
+	} {
+		if pair[1] != "" {
+			args = append(args, "--"+pair[0], pair[1])
+		}
+	}
+	if f := RootCmd.PersistentFlags().Lookup("api-version"); f != nil && f.Changed && f.Value.String() != "" {
+		args = append(args, "--api-version", f.Value.String())
+	}
+	if verbose {
+		args = append(args, "--verbose")
+	}
+	if noStdoutPassthru {
+		args = append(args, "--no-stdout")
+	}
+	if dev {
+		args = append(args, "--use-dev")
+	}
+	if isSilent {
+		args = append(args, "--silent")
+	}
+	for _, text := range excludeFromName {
+		args = append(args, "--exclude-from-name", text)
+	}
+	return args
+}
+
 // planCrontab reads a crontab and decides what to do with each job. It
 // returns nil when a crontab is skipped. One named file that does not exist
 // or is not writable is an unusable plan: sync prints the original crontab
@@ -972,7 +1004,7 @@ func planCrontab(crontab *lib.Crontab) *crontabPlan {
 	}
 
 	// This will mostly happen when the crontab is empty
-	if err, _ := crontab.Parse(noAutoDiscover); err != nil {
+	if err, _ := crontab.Parse(noAutoDiscover, autoDiscoverFlagArgs()...); err != nil {
 		// A named file that cannot be read is a failure. There is nothing
 		// to print. An empty crontab is still a skip: installing it changes
 		// nothing. Scanning many crontabs keeps the old skip.
