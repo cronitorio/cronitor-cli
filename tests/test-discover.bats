@@ -82,12 +82,17 @@ teardown() {
   run -1 bash -c '../cronitor $CRONITOR_ARGS discover --auto -v $FIXTURES_DIR/crontab.txt -k "$API_KEY" --no-stdout | grep "cronitor exec" | grep -q "no-stdout"'
 }
 
+# discover --auto on one file prints the crontab on stdout and --verbose
+# request logs on stderr. Windows does not reserve stdout, so those logs
+# stay there. Read both streams: the needles are not in the crontab.
+# bash -c does not see this test's variables unless they are passed in.
 @test "Discover omits 'notifications' if notification-list not specificed" {
-  run -1 bash -c '../cronitor $CRONITOR_ARGS discover --auto -v $FIXTURES_DIR/crontab.txt -k "$API_KEY" | grep -q "notifications"'
+  run -1 env API_KEY="$API_KEY" FIXTURES_DIR="$FIXTURES_DIR" CRONITOR_ARGS="$CRONITOR_ARGS" \
+    bash -c '../cronitor $CRONITOR_ARGS discover --auto -v $FIXTURES_DIR/crontab.txt -k "$API_KEY" 2>&1 | grep -q "notifications"'
 }
 
 @test "Discover includes custom notification-list" {
-  ../cronitor $CRONITOR_ARGS discover --auto -v $FIXTURES_DIR/crontab.txt -k "$API_KEY" --notification-list test-list-name | grep -q "test-list-name"
+  ../cronitor $CRONITOR_ARGS discover --auto -v $FIXTURES_DIR/crontab.txt -k "$API_KEY" --notification-list test-list-name 2>&1 | grep -q "test-list-name"
 }
 
 @test "Discover reads all of the crontabs in a directory" {

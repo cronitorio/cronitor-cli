@@ -491,9 +491,9 @@ func processWindowsTaskScheduler() bool {
 		}
 
 		if !isAutoDiscover {
-			fmt.Println(renderJobInfoBox(name, "", t.GetCommandToRun(), isMonitored))
+			fmt.Println(renderJobInfoBox(name, "", t.GetCommandToRun(), isMonitored, terminalWidth()))
 			for {
-				model := initialNameInputModel(name)
+				model := initialWindowsNameInputModel(name)
 				p := tea.NewProgram(model)
 
 				if result, err := p.Run(); err == nil {

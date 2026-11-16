@@ -236,3 +236,25 @@ func TestDiscoverMissingAPIKeyGuidancePointsAtAuthLogin(t *testing.T) {
 		t.Errorf("missing-key copy still implies the old website sign-up path:\n%s", msg)
 	}
 }
+
+func monitorWith(name, key, code string) lib.Monitor {
+	m := lib.Monitor{Name: name}
+	m.Attributes.Key = key
+	m.Attributes.Code = code
+	return m
+}
+
+// The monitor being renamed is not a duplicate of itself.
+func TestHasMonitorByNameSkipsCurrent(t *testing.T) {
+	em := ExistingMonitors{Monitors: []lib.Monitor{
+		monitorWith("Other", "other", "zzz999"),
+		monitorWith("Prune events", "prune-events", "abc123"),
+	}}
+	em.CurrentKey, em.CurrentCode = "hash-of-line", "prune-events"
+	if em.HasMonitorByName("Prune events") {
+		t.Fatal("HasMonitorByName counted the current monitor as a duplicate")
+	}
+	if !em.HasMonitorByName("Other") {
+		t.Fatal("HasMonitorByName missed a different monitor's name")
+	}
+}
