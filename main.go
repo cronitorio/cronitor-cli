@@ -1,14 +1,10 @@
 package main
 
 import (
-	"embed"
 	"os"
 
 	"github.com/cronitorio/cronitor-cli/cmd"
 )
-
-//go:embed web/static
-var WebAssets embed.FS
 
 func main() {
 	// Ensure that flags on `exec` commands are not parsed by Cobra
@@ -37,6 +33,12 @@ func main() {
 		os.Args[commandIndex] = "--"
 	}
 
-	cmd.SetWebAssets(WebAssets)
+	registerCommands()
 	cmd.Execute()
+}
+
+// registerCommands adds commands that only the cronitor binary has.
+// crontab-dashboard is built from cmd/crontab-dashboard.
+func registerCommands() {
+	cmd.RegisterDashLauncher()
 }

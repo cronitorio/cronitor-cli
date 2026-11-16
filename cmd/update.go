@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -42,6 +43,57 @@ const (
 	checksumExtension = ".sha256"
 )
 
+// DashboardBinaryName is the dashboard executable. Each release has
+// <os>_<arch> assets for cronitor and crontab-dashboard_<os>_<arch> assets
+// for the dashboard.
+const DashboardBinaryName = "crontab-dashboard"
+
+var releaseURL = "https://api.github.com/repos/cronitorio/cronitor-cli/releases/latest"
+
+// updateBinary is the program running: cronitor or the dashboard.
+var updateBinary = "cronitor"
+
+// SetUpdateBinary tells the updater which program is running.
+func SetUpdateBinary(name string) { updateBinary = name }
+
+// UpdateBinary returns the program the updater replaces first.
+func UpdateBinary() string { return updateBinary }
+
+var executablePath = func() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(executable)
+}
+
+// findAsset returns the release archive for a binary and platform.
+func findAsset(release *GithubRelease, binary, goos, goarch string) (string, string) {
+	prefix := goos + "_" + goarch + "."
+	if binary == DashboardBinaryName {
+		prefix = DashboardBinaryName + "_" + prefix
+	}
+	for _, asset := range release.Assets {
+		if strings.HasPrefix(asset.Name, prefix) && !strings.HasSuffix(asset.Name, checksumExtension) && !strings.HasSuffix(asset.Name, ".md5") {
+			return asset.Name, asset.BrowserDownloadURL
+		}
+	}
+	return "", ""
+}
+
+// siblingBinary returns the other program and its path next to executable.
+func siblingBinary(executable string) (string, string) {
+	other := DashboardBinaryName
+	if updateBinary == DashboardBinaryName {
+		other = "cronitor"
+	}
+	name := other
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return other, filepath.Join(filepath.Dir(executable), name)
+}
+
 var updateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Update to the latest version",
@@ -70,6 +122,11 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	}
 
 	fmt.Printf("Update complete! You are now on version %s\n", status.LatestVersion)
+	if executable, err := executablePath(); err == nil {
+		if other, sibling := siblingBinary(executable); fileExists(sibling) {
+			fmt.Printf("Also updated %s in %s\n", other, filepath.Dir(sibling))
+		}
+	}
 }
 
 // checkForUpdate checks if a new version is available
@@ -91,15 +148,7 @@ func checkForUpdate() (*UpdateStatus, error) {
 	status.HasUpdate = isNewer(latestVersion, currentVersion)
 
 	if status.HasUpdate {
-		// Find the appropriate asset for current platform
-		expectedName := fmt.Sprintf("%s_%s", runtime.GOOS, runtime.GOARCH)
-		for _, asset := range release.Assets {
-			if strings.HasPrefix(asset.Name, expectedName) && !strings.HasSuffix(asset.Name, checksumExtension) {
-				status.DownloadURL = asset.BrowserDownloadURL
-				status.AssetName = asset.Name
-				break
-			}
-		}
+		status.AssetName, status.DownloadURL = findAsset(release, updateBinary, runtime.GOOS, runtime.GOARCH)
 
 		if status.DownloadURL == "" {
 			err := fmt.Errorf("no release found for %s/%s", runtime.GOOS, runtime.GOARCH)
@@ -111,7 +160,8 @@ func checkForUpdate() (*UpdateStatus, error) {
 	return status, nil
 }
 
-// performUpdate downloads and installs the update
+// performUpdate installs the update, and updates the other program too when
+// it is installed in the same folder so both stay at the same version.
 func performUpdate(status *UpdateStatus) error {
 	if !status.HasUpdate {
 		return fmt.Errorf("no update available")
@@ -123,21 +173,38 @@ func performUpdate(status *UpdateStatus) error {
 		return err
 	}
 
-	// Get checksum
-	checksum, err := downloadChecksum(release, status.AssetName+checksumExtension)
+	executable, err := executablePath()
+	if err != nil {
+		return fmt.Errorf("error getting executable path: %v", err)
+	}
+	if err := updateExecutable(release, executable, status.AssetName, status.DownloadURL); err != nil {
+		return err
+	}
+
+	other, sibling := siblingBinary(executable)
+	if !fileExists(sibling) {
+		return nil
+	}
+	name, url := findAsset(release, other, runtime.GOOS, runtime.GOARCH)
+	if name == "" {
+		return fmt.Errorf("updated %s, but the release has no %s for %s/%s", filepath.Base(executable), other, runtime.GOOS, runtime.GOARCH)
+	}
+	if err := updateExecutable(release, sibling, name, url); err != nil {
+		return fmt.Errorf("updated %s, but not %s: %v", filepath.Base(executable), other, err)
+	}
+	return nil
+}
+
+// updateExecutable replaces executable with the binary in a release asset.
+func updateExecutable(release *GithubRelease, executable, assetName, downloadURL string) error {
+	checksum, err := downloadChecksum(release, assetName+checksumExtension)
 	if err != nil {
 		return fmt.Errorf("error downloading checksum: %v", err)
 	}
 
-	// Get current executable path
-	executable, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("error getting executable path: %v", err)
-	}
-
 	// Download and verify binary
 	tmpFile := executable + ".new"
-	if err := downloadAndVerifyFile(status.DownloadURL, tmpFile, strings.TrimSpace(string(checksum))); err != nil {
+	if err := downloadAndVerifyFile(downloadURL, tmpFile, strings.TrimSpace(string(checksum))); err != nil {
 		os.Remove(tmpFile)
 		return fmt.Errorf("error downloading update: %v", err)
 	}
@@ -148,7 +215,7 @@ func performUpdate(status *UpdateStatus) error {
 		return fmt.Errorf("error setting permissions: %v", err)
 	}
 
-	// Test that the new binary is executable by running it with --version
+	// Test that the new binary is executable by running it with --help
 	execCmd := exec.Command(tmpFile, "--help")
 	if err := execCmd.Run(); err != nil {
 		os.Remove(tmpFile) // Clean up
@@ -185,7 +252,7 @@ func replaceExecutable(currentPath, newPath string) error {
 }
 
 func getLatestRelease() (*GithubRelease, error) {
-	resp, err := http.Get("https://api.github.com/repos/cronitorio/cronitor-cli/releases/latest")
+	resp, err := http.Get(releaseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -296,4 +363,9 @@ func isNewer(latest, current string) bool {
 
 	// If major versions are equal, compare minor versions
 	return latestMinor > currentMinor
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }

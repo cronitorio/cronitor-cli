@@ -44,7 +44,16 @@ console.log('Starting build process...');
 const staticDir = path.join(__dirname, '..', 'static');
 if (fs.existsSync(staticDir)) {
   console.log('Cleaning static directory...');
-  removeDir(staticDir);
+  // Keep the committed placeholder; see web/assets.go.
+  fs.readdirSync(staticDir).forEach((file) => {
+    if (file === 'README.md') return;
+    const curPath = path.join(staticDir, file);
+    if (fs.lstatSync(curPath).isDirectory()) {
+      removeDir(curPath);
+    } else {
+      fs.unlinkSync(curPath);
+    }
+  });
 }
 
 // Create static directory

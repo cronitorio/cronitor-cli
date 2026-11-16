@@ -1,4 +1,4 @@
-package cmd
+package dashboard
 
 import (
 	"encoding/json"

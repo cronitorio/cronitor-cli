@@ -1,4 +1,4 @@
-package lib
+package dashboard
 
 import (
 	"bytes"
