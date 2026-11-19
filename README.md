@@ -141,6 +141,25 @@ cronitor monitor pause <key> --hours 24                  # Pause for 24 hours
 cronitor monitor unpause <key>
 ```
 
+#### MCP server checks
+
+`cronitor monitor mcp` creates a check that connects to a remote MCP server, lists its tools and alerts
+when they change. With `--key` it updates that check if it exists.
+
+```bash
+# Authenticate with a header; values are stored write-only and never printed
+cronitor monitor mcp https://mcp.example.com/mcp --key docs-mcp --header "Authorization: Bearer $MCP_TOKEN"
+
+# Sign in with OAuth: prints a URL, opens your browser, and waits until you finish signing in
+cronitor monitor mcp https://mcp.example.com/mcp --key docs-mcp --oauth
+
+cronitor monitor mcp --key docs-mcp --tools search,fetch --include-descriptions
+cronitor monitor mcp --key docs-mcp --accept-baseline     # Save the current tools as the baseline
+```
+
+Use `--header` or `--oauth`, not both. Values passed with `--header` are visible in shell history; use an environment
+variable as above. With `--oauth`, Cronitor keeps the tokens; the CLI only sees the sign-in URL.
+
 #### Status Pages
 
 ```bash
