@@ -42,6 +42,9 @@ type APIClient struct {
 	UserAgent string
 	IsDev     bool
 	Logger    func(string)
+	// APIVersion, when set, is sent as Cronitor-Version in place of the
+	// configured CRONITOR_API_VERSION.
+	APIVersion string
 }
 
 // APIResponse wraps the raw response with metadata
@@ -109,7 +112,11 @@ func (c *APIClient) Request(method, endpoint string, body []byte, queryParams ma
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", c.UserAgent)
-	if apiVersion := viper.GetString("CRONITOR_API_VERSION"); apiVersion != "" {
+	apiVersion := c.APIVersion
+	if apiVersion == "" {
+		apiVersion = viper.GetString("CRONITOR_API_VERSION")
+	}
+	if apiVersion != "" {
 		req.Header.Set("Cronitor-Version", apiVersion)
 	}
 
